@@ -4,7 +4,7 @@ import numpy as np
 
 
 class HandTracker:
-    def __init__(self, strategizer, action, model_path='.\\backend\\models\\hand_landmarker.task',
+    def __init__(self, strategizer, action, smoother, model_path='.\\backend\\models\\hand_landmarker.task',
                  display_video=True, num_hands=2):
         """
         Initialize the Hand Landmark Detector
