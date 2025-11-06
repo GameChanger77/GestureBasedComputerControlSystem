@@ -1,14 +1,11 @@
 import cv2
 import mediapipe as mp
 import numpy as np
-from typing import List, Tuple
-from backend.LandmarkSmoother import LandmarkSmoother  # Import the smoother
 
 
 class HandTracker:
     def __init__(self, strategizer, action, model_path='.\\backend\\models\\hand_landmarker.task',
-                 display_video=True, num_hands=2, enable_smoothing=True,
-                 window_size=15, debug_smoothing=False):
+                 display_video=True, num_hands=2):
         """
         Initialize the Hand Landmark Detector
 
@@ -16,9 +13,6 @@ class HandTracker:
             model_path (str): Path to the hand landmarker model file
             display_video (bool): Flag to show/hide video feed
             num_hands (int): Maximum number of hands to detect
-            enable_smoothing (bool): Enable moving average smoothing
-            window_size (int): Number of frames to average (3-5 light, 5-10 medium, 10+ heavy)
-            debug_smoothing (bool): Enable debug output from smoother
         """
         self.strategizer = strategizer
         self.action = action
@@ -35,10 +29,6 @@ class HandTracker:
         self.landmarker = None
         self.cap = None
         self.is_running = False
-
-        # Smoothing
-        self.enable_smoothing = enable_smoothing
-        self.smoother = LandmarkSmoother(window_size, debug=debug_smoothing) if enable_smoothing else None
 
         # Hand landmark connections (based on MediaPipe hand model)
         self.HAND_CONNECTIONS = [
@@ -101,41 +91,6 @@ class HandTracker:
             print(f"Error initializing camera: {e}")
             raise
 
-    def _smooth_raw_landmarks(self, hand_label: str, landmarks: List[Tuple[float, float, float]]) -> List[
-        Tuple[float, float, float]]:
-        """
-        Smooth raw (non-normalized) landmarks using the smoother.
-        This is done before normalization so the wrist is stabilized first.
-
-        Args:
-            hand_label: 'Left' or 'Right'
-            landmarks: List of 21 (x, y, z) tuples
-
-        Returns:
-            Smoothed landmarks
-        """
-        # Convert to hand data format expected by smoother
-        # Organize all 21 landmarks into 5 finger groups for consistent state tracking
-        fake_hand_data = {hand_label: [
-            landmarks[0:5],  # Thumb (0-4)
-            landmarks[5:9] + [landmarks[0]],  # Index (5-8, plus wrist)
-            landmarks[9:13] + [landmarks[0]],  # Middle (9-12, plus wrist)
-            landmarks[13:17] + [landmarks[0]],  # Ring (13-16, plus wrist)
-            landmarks[17:21] + [landmarks[0]]  # Pinky (17-20, plus wrist)
-        ]}
-        smoothed_data = self.smoother.smooth_hands_data(fake_hand_data)
-        smoothed_fingers = smoothed_data[hand_label]
-
-        # Convert back to flat list of 21 landmarks
-        result = []
-        result.extend(smoothed_fingers[0][0:5])  # Thumb
-        result.extend(smoothed_fingers[1][0:4])  # Index (excluding wrist)
-        result.extend(smoothed_fingers[2][0:4])  # Middle (excluding wrist)
-        result.extend(smoothed_fingers[3][0:4])  # Ring (excluding wrist)
-        result.extend(smoothed_fingers[4][0:4])  # Pinky (excluding wrist)
-
-        return result
-
     def get_hands_data(self, detection_result, normalize=True):
         """
         Convert detection result to easily accessible hand data organized by finger
@@ -173,11 +128,6 @@ class HandTracker:
                 all_landmarks = []
                 for landmark in hand_landmarks:
                     all_landmarks.append((landmark.x, landmark.y, landmark.z))
-
-                # SMOOTH BEFORE NORMALIZING
-                # Smooth raw coordinates first so the wrist is stabilized
-                if self.enable_smoothing:
-                    all_landmarks = self._smooth_raw_landmarks(hand_label, all_landmarks)
 
                 if normalize:
                     # Normalize coordinates relative to wrist and hand size
@@ -277,14 +227,6 @@ class HandTracker:
         cv2.putText(image, f"Hands detected: {hand_count}", (10, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-        # Add smoothing status
-        if self.enable_smoothing:
-            cv2.putText(image, f"Smoothing: ON (window={self.smoother.window_size})", (10, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        else:
-            cv2.putText(image, "Smoothing: OFF", (10, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-
         return image
 
     def process_frame(self, frame):
@@ -310,12 +252,9 @@ class HandTracker:
         timestamp_ms = int(cv2.getTickCount() / cv2.getTickFrequency() * 1000)
         detection_result = self.landmarker.detect_for_video(mp_image, timestamp_ms)
 
-        # Get hand data (smoothing happens inside get_hands_data)
-        hands_data = self.get_hands_data(detection_result)
-
         # Call strategize method if landmarks are detected
-        if hands_data:
-            action, data = self.strategizer.strategize(hands_data)
+        if detection_result.hand_landmarks:
+            action, data = self.strategizer.strategize(self.get_hands_data(detection_result))
             self.action.takeAction(action, data)
 
         # Draw landmarks on the frame (for display or debugging)
@@ -338,8 +277,6 @@ class HandTracker:
 
             self.is_running = True
             print(f"Starting hand landmark detection. Display video: {self.display_video}")
-            if self.enable_smoothing:
-                print(f"Smoothing enabled (window_size={self.smoother.window_size})")
             if self.display_video:
                 print("Press 'q' to quit.")
             else:
@@ -388,9 +325,6 @@ class HandTracker:
             cv2.destroyAllWindows()
             print("OpenCV windows closed")
 
-        if self.enable_smoothing:
-            self.smoother.reset()
-
         print("Hand landmark detector stopped")
 
     def set_display_video(self, display):
@@ -403,18 +337,3 @@ class HandTracker:
         self.display_video = display
         if not display:
             cv2.destroyAllWindows()
-
-    def set_smoothing_parameters(self, window_size: int = None):
-        """
-        Dynamically adjust smoothing parameters during runtime.
-
-        Args:
-            window_size (int): New window size. Higher = more smoothing.
-        """
-        if not self.enable_smoothing:
-            print("Smoothing is disabled. Enable it during initialization.")
-            return
-
-        if window_size is not None:
-            self.smoother.set_window_size(window_size)
-            print(f"Window size updated to {window_size}")

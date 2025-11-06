@@ -15,10 +15,7 @@ def main():
         action=action,
         model_path='.\\backend\\models\\hand_landmarker.task',
         display_video=True,
-        num_hands=2,
-        enable_smoothing=True,
-        window_size=5,  # Adjust: 3-5 light, 5-10 medium, 10+ heavy smoothing
-        debug_smoothing=True,
+        num_hands=2
     )
 
     # Start detection
