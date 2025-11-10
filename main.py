@@ -2,6 +2,7 @@ from backend.Action import Action
 from backend.HandTracker import HandTracker
 from backend.LandmarkSmoother import LandmarkSmoother
 from backend.Strategizer import Strategizer
+import os
 
 
 def main():
@@ -16,7 +17,7 @@ def main():
         strategizer=strategizer,
         action=action,
         smoother=smoother,
-        model_path='.\\backend\\models\\hand_landmarker.task',
+        model_path=os.path.join('.', 'backend', 'models', 'hand_landmarker.task'),
         display_video=True,
         num_hands=2
     )
