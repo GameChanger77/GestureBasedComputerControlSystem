@@ -1,10 +1,11 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import os
 
 
 class HandTracker:
-    def __init__(self, strategizer, action, smoother, model_path='.\\backend\\models\\hand_landmarker.task',
+    def __init__(self, strategizer, action, smoother, model_path=os.path.join('.', 'backend', 'models', 'hand_landmarker.task'),
                  display_video=True, num_hands=2):
         """
         Initialize the Hand Landmark Detector
