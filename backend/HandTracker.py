@@ -16,6 +16,7 @@ class HandTracker:
         """
         self.strategizer = strategizer
         self.action = action
+        self.smoother = smoother
         self.model_path = model_path
         self.display_video = display_video
         self.num_hands = num_hands
@@ -167,6 +168,8 @@ class HandTracker:
                 ]
 
                 hands_data[hand_label] = fingers
+
+                hands_data = self.smoother.smooth_hands_data(hands_data)
 
         return hands_data
 
