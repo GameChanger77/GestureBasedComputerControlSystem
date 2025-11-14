@@ -3,9 +3,12 @@ import mediapipe as mp
 import numpy as np
 import os
 
+from backend.HandsData import HandsData
+from backend.LandmarkSmoother import LandmarkSmoother
+
 
 class HandTracker:
-    def __init__(self, strategizer, action, smoother, model_path=os.path.join('.', 'backend', 'models', 'hand_landmarker.task'),
+    def __init__(self, strategizer, action, model_path=os.path.join('.', 'backend', 'models', 'hand_landmarker.task'),
                  display_video=True, num_hands=2):
         """
         Initialize the Hand Landmark Detector
@@ -17,7 +20,8 @@ class HandTracker:
         """
         self.strategizer = strategizer
         self.action = action
-        self.smoother = smoother
+        self.wrist_smoother = LandmarkSmoother()
+        self.camera_smoother = LandmarkSmoother()
         self.model_path = model_path
         self.display_video = display_video
         self.num_hands = num_hands
@@ -102,22 +106,13 @@ class HandTracker:
             normalize (bool): If True, normalize coordinates relative to wrist and hand size
 
         Returns:
-            dict: {'Left': [thumb, index, middle, ring, pinky],
-                   'Right': [thumb, index, middle, ring, pinky]}
-
-            Each finger is a list of landmarks (x,y,z) tuples:
-            - thumb: landmarks 0-4 (wrist shared, then 4 thumb joints)
-            - index: landmarks 0, 5-8 (wrist shared, then 4 finger joints)
-            - middle: landmarks 0, 9-12
-            - ring: landmarks 0, 13-16
-            - pinky: landmarks 0, 17-20
-
-            If normalize=True:
-            - All coordinates are relative to the wrist (wrist becomes origin 0,0,0)
-            - Scaled by hand size (distance from wrist to middle finger MCP)
-            - Makes hand pose consistent regardless of distance from camera
+            HandsData: Object with dot notation access like:
+                       data.wrist.left.wrist  # wrist position
+                       data.wrist.left.thumb[3]  # thumb tip
+                       data.wrist.left.tip['index']  # index fingertip shortcut
         """
-        hands_data = {}
+        wrist_data = {}
+        camera_data = {}
 
         if detection_result.hand_landmarks and detection_result.handedness:
             for i, (hand_landmarks, handedness) in enumerate(
@@ -130,6 +125,21 @@ class HandTracker:
                 all_landmarks = []
                 for landmark in hand_landmarks:
                     all_landmarks.append((landmark.x, landmark.y, landmark.z))
+
+                # Store camera-relative data (wrist + 4 joints per finger)
+                camera_fingers = [
+                    [all_landmarks[0], all_landmarks[1], all_landmarks[2],
+                     all_landmarks[3], all_landmarks[4]],  # Wrist + Thumb
+                    [all_landmarks[0], all_landmarks[5], all_landmarks[6],
+                     all_landmarks[7], all_landmarks[8]],  # Wrist + Index
+                    [all_landmarks[0], all_landmarks[9], all_landmarks[10],
+                     all_landmarks[11], all_landmarks[12]],  # Wrist + Middle
+                    [all_landmarks[0], all_landmarks[13], all_landmarks[14],
+                     all_landmarks[15], all_landmarks[16]],  # Wrist + Ring
+                    [all_landmarks[0], all_landmarks[17], all_landmarks[18],
+                     all_landmarks[19], all_landmarks[20]]  # Wrist + Pinky
+                ]
+                camera_data[hand_label] = camera_fingers
 
                 if normalize:
                     # Normalize coordinates relative to wrist and hand size
@@ -153,24 +163,25 @@ class HandTracker:
 
                     all_landmarks = normalized_landmarks
 
-                # Organize landmarks by finger
-                # Each finger includes the wrist (landmark 0) as the base
-                fingers = [
+                # Organize normalized landmarks by finger (wrist + 4 joints per finger)
+                wrist_fingers = [
                     [all_landmarks[0], all_landmarks[1], all_landmarks[2],
-                     all_landmarks[3], all_landmarks[4]],  # Thumb
+                     all_landmarks[3], all_landmarks[4]],  # Wrist + Thumb
                     [all_landmarks[0], all_landmarks[5], all_landmarks[6],
-                     all_landmarks[7], all_landmarks[8]],  # Index
+                     all_landmarks[7], all_landmarks[8]],  # Wrist + Index
                     [all_landmarks[0], all_landmarks[9], all_landmarks[10],
-                     all_landmarks[11], all_landmarks[12]],  # Middle
+                     all_landmarks[11], all_landmarks[12]],  # Wrist + Middle
                     [all_landmarks[0], all_landmarks[13], all_landmarks[14],
-                     all_landmarks[15], all_landmarks[16]],  # Ring
+                     all_landmarks[15], all_landmarks[16]],  # Wrist + Ring
                     [all_landmarks[0], all_landmarks[17], all_landmarks[18],
-                     all_landmarks[19], all_landmarks[20]]  # Pinky
+                     all_landmarks[19], all_landmarks[20]]  # Wrist + Pinky
                 ]
+                wrist_data[hand_label] = wrist_fingers
 
-                hands_data[hand_label] = fingers
-
-                hands_data = self.smoother.smooth_hands_data(hands_data)
+        # Create HandsData object and smooth it
+        hands_data = HandsData(wrist_data, camera_data)
+        hands_data = self.wrist_smoother.smooth_hands_data(hands_data)
+        hands_data = self.camera_smoother.smooth_hands_data(hands_data)
 
         return hands_data
 
@@ -244,7 +255,7 @@ class HandTracker:
             tuple: (annotated_frame, detection_result)
         """
         # Flip frame horizontally for mirror effect
-        frame = cv2.flip(frame, 1)
+        # frame = cv2.flip(frame, 1)
 
         # Convert BGR to RGB for MediaPipe
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -258,8 +269,11 @@ class HandTracker:
 
         # Call strategize method if landmarks are detected
         if detection_result.hand_landmarks:
-            action, data = self.strategizer.strategize(self.get_hands_data(detection_result))
-            self.action.takeAction(action, data)
+            try:
+                action, data = self.strategizer.strategize(self.get_hands_data(detection_result))
+                self.action.takeAction(action, data)
+            except Exception as e:
+                print("ERROR:", e)
 
         # Draw landmarks on the frame (for display or debugging)
         annotated_frame = self.draw_landmarks(frame, detection_result)

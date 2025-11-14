@@ -10,13 +10,11 @@ def main():
 
     action = Action("windows")
     strategizer = Strategizer()
-    smoother = LandmarkSmoother()
 
     # Create detector instance with video display and smoothing enabled
     detector = HandTracker(
         strategizer=strategizer,
         action=action,
-        smoother=smoother,
         model_path=os.path.join('.', 'backend', 'models', 'hand_landmarker.task'),
         display_video=True,
         num_hands=2

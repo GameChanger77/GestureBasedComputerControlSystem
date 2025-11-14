@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Tuple
 from collections import deque
 
 
@@ -25,58 +25,88 @@ class LandmarkSmoother:
         self.debug = debug
 
         # Storage for historical positions
-        # Structure: {(hand_label, finger_idx, landmark_idx): deque of positions}
-        self.history: Dict[Tuple, deque] = {}
+        # Structure: {(coord_space, hand_label, finger_name, landmark_idx): deque of positions}
+        # coord_space: 'wrist' or 'camera'
+        # hand_label: 'left' or 'right'
+        # finger_name: 'wrist', 'thumb', 'index', 'middle', 'ring', 'pinky'
+        self.history = {}
 
         self.frame_count = 0
 
-    def smooth_hands_data(
-            self,
-            hands_data: Dict[str, List[List[Tuple[float, float, float]]]]
-    ) -> Dict[str, List[List[Tuple[float, float, float]]]]:
+    def _smooth_landmark(self, landmark_key: Tuple, position: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """
+        Smooth a single landmark position.
+
+        Args:
+            landmark_key: Unique identifier for this landmark
+            position: Current (x, y, z) position
+
+        Returns:
+            Smoothed (x, y, z) position
+        """
+        # Get or create history for this landmark
+        if landmark_key not in self.history:
+            self.history[landmark_key] = deque(maxlen=self.window_size)
+
+        # Add current position to history
+        self.history[landmark_key].append(np.array(position))
+
+        # Calculate average of all positions in history
+        positions = np.array(list(self.history[landmark_key]))
+        smoothed_pos = np.mean(positions, axis=0)
+        return tuple(smoothed_pos)
+
+    def _smooth_hand(self, coord_space: str, hand_label: str, hand) -> None:
+        """
+        Smooth all landmarks for a single hand in-place.
+
+        Args:
+            coord_space: 'wrist' or 'camera'
+            hand_label: 'left' or 'right'
+            hand: Hand object to smooth (modified in-place)
+        """
+        if not hand.exists:
+            return
+
+        # Import here to avoid circular dependency
+        from backend.HandsData import HandsData
+
+        # Smooth wrist
+        wrist_key = (coord_space, hand_label, 'wrist', 0)
+        hand._wrist = self._smooth_landmark(wrist_key, hand._wrist)
+
+        # Smooth each finger
+        for finger_name in ['thumb', 'index', 'middle', 'ring', 'pinky']:
+            finger = getattr(hand, finger_name)
+            if not finger or len(finger) == 0:
+                continue
+
+            smoothed_joints = []
+            for landmark_idx, position in enumerate(finger.joints):
+                landmark_key = (coord_space, hand_label, finger_name, landmark_idx)
+                smoothed_pos = self._smooth_landmark(landmark_key, position)
+                smoothed_joints.append(smoothed_pos)
+
+            # Update finger with smoothed data, wrapping in Finger object
+            setattr(hand, finger_name, HandsData.Finger(smoothed_joints))
+
+    def smooth_hands_data(self, hands_data):
         """
         Smooth hand landmarks data using moving average.
 
         Args:
-            hands_data (dict): Hand data in the format:
-                              {'Left': [finger1, finger2, ...], 'Right': [...]}
-                              Each finger is a list of (x, y, z) landmark tuples.
+            hands_data: HandsData object with wrist and camera coordinate spaces
 
         Returns:
-            dict: Smoothed hand data in the same format.
+            HandsData: The same HandsData object with smoothed coordinates (modified in-place)
         """
-        smoothed_hands_data = {}
+        # Smooth wrist-relative coordinates
+        self._smooth_hand('wrist', 'left', hands_data.wrist.left)
+        self._smooth_hand('wrist', 'right', hands_data.wrist.right)
 
-        for hand_label, fingers in hands_data.items():
-            smoothed_fingers = []
-
-            for finger_idx, finger in enumerate(fingers):
-                smoothed_finger = []
-
-                for landmark_idx, (x, y, z) in enumerate(finger):
-                    # Create a unique key for this landmark
-                    landmark_key = (hand_label, finger_idx, landmark_idx)
-
-                    # Get or create history for this landmark
-                    if landmark_key not in self.history:
-                        self.history[landmark_key] = deque(maxlen=self.window_size)
-
-                    # Add current position to history
-                    self.history[landmark_key].append(np.array([x, y, z]))
-
-                    # Calculate average of all positions in history
-                    if len(self.history[landmark_key]) > 0:
-                        positions = np.array(list(self.history[landmark_key]))
-                        smoothed_pos = np.mean(positions, axis=0)
-                        smoothed_pos = tuple(smoothed_pos)
-                    else:
-                        smoothed_pos = (x, y, z)
-
-                    smoothed_finger.append(smoothed_pos)
-
-                smoothed_fingers.append(smoothed_finger)
-
-            smoothed_hands_data[hand_label] = smoothed_fingers
+        # Smooth camera-relative coordinates
+        self._smooth_hand('camera', 'left', hands_data.camera.left)
+        self._smooth_hand('camera', 'right', hands_data.camera.right)
 
         # Debug output
         if self.debug:
@@ -84,7 +114,7 @@ class LandmarkSmoother:
             if self.frame_count % 30 == 0:
                 print(f"Frame {self.frame_count}: Moving average smoother (window_size={self.window_size})")
 
-        return smoothed_hands_data
+        return hands_data
 
     def reset(self) -> None:
         """
