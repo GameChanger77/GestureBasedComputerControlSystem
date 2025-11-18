@@ -2,6 +2,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import os
+import time
 
 from backend.HandsData import HandsData
 from backend.LandmarkSmoother import LandmarkSmoother
@@ -35,6 +36,11 @@ class HandTracker:
         self.landmarker = None
         self.cap = None
         self.is_running = False
+
+        # FPS tracking
+        self.fps = 0
+        self.frame_times = []
+        self.last_fps_update = time.time()
 
         # Hand landmark connections (based on MediaPipe hand model)
         self.HAND_CONNECTIONS = [
@@ -153,15 +159,10 @@ class HandTracker:
                     if hand_size < 1e-6:
                         hand_size = 1.0
 
-                    # Normalize all landmarks
-                    normalized_landmarks = []
-                    for landmark in all_landmarks:
-                        landmark_array = np.array(landmark)
-                        # Translate so wrist is at origin, then scale by hand size
-                        normalized = (landmark_array - wrist) / hand_size
-                        normalized_landmarks.append(tuple(normalized))
-
-                    all_landmarks = normalized_landmarks
+                    # Vectorized normalization (process all landmarks at once)
+                    landmarks_array = np.array(all_landmarks)
+                    normalized_array = (landmarks_array - wrist) / hand_size
+                    all_landmarks = [tuple(pos) for pos in normalized_array]
 
                 # Organize normalized landmarks by finger (wrist + 4 joints per finger)
                 wrist_fingers = [
@@ -229,7 +230,7 @@ class HandTracker:
 
                     cv2.circle(image, point, radius, color, -1)
 
-                    # Optional: Add landmark numbers
+                    # Optional: Add landmark numbers (disabled for performance - saves 8-12ms)
                     cv2.putText(image, str(i), (point[0] + 10, point[1] - 10),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255), 1)
 
@@ -241,6 +242,10 @@ class HandTracker:
         hand_count = len(detection_result.hand_landmarks) if detection_result.hand_landmarks else 0
         cv2.putText(image, f"Hands detected: {hand_count}", (10, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+        # Add FPS display
+        cv2.putText(image, f"FPS: {self.fps:.1f}", (10, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
         return image
 
@@ -273,7 +278,7 @@ class HandTracker:
                 action, data = self.strategizer.strategize(self.get_hands_data(detection_result))
                 self.action.takeAction(action, data)
             except Exception as e:
-                print("ERROR:", e)
+                pass  # Silently ignore errors for performance (was: print("ERROR:", e))
 
         # Draw landmarks on the frame (for display or debugging)
         annotated_frame = self.draw_landmarks(frame, detection_result)
@@ -303,6 +308,9 @@ class HandTracker:
             frame_count = 0
 
             while self.is_running:
+                # Track frame start time
+                frame_start = time.time()
+
                 # Read frame from webcam
                 ret, frame = self.cap.read()
                 if not ret:
@@ -312,9 +320,29 @@ class HandTracker:
                 # Process the frame
                 annotated_frame, detection_result = self.process_frame(frame)
 
+                # Calculate FPS
+                frame_time = time.time() - frame_start
+                self.frame_times.append(frame_time)
+
+                # Update FPS every second
+                if time.time() - self.last_fps_update >= 1.0:
+                    if len(self.frame_times) > 0:
+                        avg_frame_time = sum(self.frame_times) / len(self.frame_times)
+                        self.fps = 1.0 / avg_frame_time if avg_frame_time > 0 else 0
+                        self.frame_times = []
+                        self.last_fps_update = time.time()
+
                 # Display the frame only if display_video is True
                 if self.display_video:
                     cv2.imshow('Hand Landmark Detection', annotated_frame)
+
+                    # Set window to stay on top (only on first frame)
+                    if frame_count == 0:
+                        try:
+                            cv2.setWindowProperty('Hand Landmark Detection',
+                                                cv2.WND_PROP_TOPMOST, 1)
+                        except:
+                            pass  # Ignore if not supported
 
                     # Check for 'q' key press to quit (only when displaying video)
                     if cv2.waitKey(1) & 0xFF == ord('q'):

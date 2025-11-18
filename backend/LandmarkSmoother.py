@@ -48,12 +48,18 @@ class LandmarkSmoother:
         if landmark_key not in self.history:
             self.history[landmark_key] = deque(maxlen=self.window_size)
 
-        # Add current position to history
-        self.history[landmark_key].append(np.array(position))
+        # Convert position to numpy array once
+        pos_array = np.array(position, dtype=np.float32)
+        self.history[landmark_key].append(pos_array)
 
-        # Calculate average of all positions in history
-        positions = np.array(list(self.history[landmark_key]))
-        smoothed_pos = np.mean(positions, axis=0)
+        # Calculate average directly from deque (avoid list conversion)
+        if len(self.history[landmark_key]) == 1:
+            # Fast path: only one position in history
+            smoothed_pos = pos_array
+        else:
+            # Stack arrays from deque and compute mean - avoids list() conversion
+            smoothed_pos = np.mean(np.stack(self.history[landmark_key]), axis=0)
+
         return tuple(smoothed_pos)
 
     def _smooth_hand(self, coord_space: str, hand_label: str, hand) -> None:
@@ -81,14 +87,11 @@ class LandmarkSmoother:
             if not finger or len(finger) == 0:
                 continue
 
-            smoothed_joints = []
-            for landmark_idx, position in enumerate(finger.joints):
-                landmark_key = (coord_space, hand_label, finger_name, landmark_idx)
-                smoothed_pos = self._smooth_landmark(landmark_key, position)
-                smoothed_joints.append(smoothed_pos)
-
-            # Update finger with smoothed data, wrapping in Finger object
-            setattr(hand, finger_name, HandsData.Finger(smoothed_joints))
+            # Smooth joints in-place using list comprehension (faster than append loop)
+            finger.joints = [
+                self._smooth_landmark((coord_space, hand_label, finger_name, idx), pos)
+                for idx, pos in enumerate(finger.joints)
+            ]
 
     def smooth_hands_data(self, hands_data):
         """

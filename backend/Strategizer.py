@@ -1,5 +1,3 @@
-import numpy as np
-
 from backend.HandsData import HandsData
 
 
@@ -11,6 +9,7 @@ class Strategizer:
 
         # Thresholds for pinch detection (distance between thumb and index tips)
         self.pinch_threshold = 0.2  # In normalized wrist-relative coordinates
+        self.pinch_threshold_squared = 0.04  # Squared threshold (0.2^2) for performance
         self.is_pinching = False
 
     def strategize(self, hands_data: HandsData):
@@ -46,9 +45,9 @@ class Strategizer:
                 return "mouse_move", (mouse_x, mouse_y)
 
         # Get left hand thumb tip (keeping your dummy code)
-        if hands_data.wrist.has_left:
-            thumb_tip = hands_data.wrist.left.thumb.tip
-            print(f"Left thumb tip: {thumb_tip}")
+        # if hands_data.wrist.has_left:
+        #     thumb_tip = hands_data.wrist.left.thumb.tip
+        #     print(f"Left thumb tip: {thumb_tip}")
 
         return None, None
 
@@ -67,13 +66,16 @@ class Strategizer:
         # Flip x coordinate for mirror effect (camera is mirrored)
         x = 1.0 - x
 
+        # Safe margin to prevent triggering macOS hot corners
+        SAFE_MARGIN = 50  # Pixels from screen edges
+
         # Convert from 0-1 range to screen pixel coordinates
         screen_x = int(x * self.screen_width)
         screen_y = int(y * self.screen_height)
 
-        # Clamp to screen bounds
-        screen_x = max(0, min(self.screen_width - 1, screen_x))
-        screen_y = max(0, min(self.screen_height - 1, screen_y))
+        # Clamp to screen bounds with safe margin to avoid hot corners
+        screen_x = max(SAFE_MARGIN, min(self.screen_width - SAFE_MARGIN - 1, screen_x))
+        screen_y = max(SAFE_MARGIN, min(self.screen_height - SAFE_MARGIN - 1, screen_y))
 
         return screen_x, screen_y
 
@@ -96,10 +98,11 @@ class Strategizer:
         if thumb_tip is None or index_tip is None:
             return False
 
-        # Calculate distance between thumb and index fingertips
-        thumb_array = np.array(thumb_tip)
-        index_array = np.array(index_tip)
-        distance = np.linalg.norm(thumb_array - index_array)
+        # Calculate squared distance (avoids expensive sqrt and numpy array creation)
+        dx = thumb_tip[0] - index_tip[0]
+        dy = thumb_tip[1] - index_tip[1]
+        dz = thumb_tip[2] - index_tip[2]
+        distance_squared = dx * dx + dy * dy + dz * dz
 
-        # Return True if distance is below threshold
-        return distance < self.pinch_threshold
+        # Return True if squared distance is below squared threshold
+        return distance_squared < self.pinch_threshold_squared
