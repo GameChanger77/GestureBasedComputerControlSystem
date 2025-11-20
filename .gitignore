@@ -1,1 +1,13 @@
 /.idea
+venv/
+.venv/
+__pycache__/
+# Byte-compiled / optimized / DLL files
+*.py[cod]
+*.pyo
+*.pyd
+.vscode/
+
+gesture_config.json
+
+**/gesture-test/

@@ -1,24 +1,43 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import os
+import time
+
+from PySide6.QtCore import QThread, Signal
+
+from backend.HandsData import HandsData
+from backend.LandmarkSmoother import LandmarkSmoother
 
 
-class HandTracker:
-    def __init__(self, strategizer, action, smoother, model_path='.\\backend\\models\\hand_landmarker.task',
-                 display_video=True, num_hands=2):
+class HandTracker(QThread):
+    # Qt signals for thread-safe communication
+    landmarks_detected = Signal(dict, object)  # landmarks_data, frame
+    tracking_started = Signal()
+    tracking_stopped = Signal()
+    error_occurred = Signal(str)
+
+    def __init__(self, strategizer, action, model_path=os.path.join('.', 'backend', 'models', 'hand_landmarker.task'),
+                 num_hands=2):
         """
         Initialize the Hand Landmark Detector
 
         Args:
             model_path (str): Path to the hand landmarker model file
-            display_video (bool): Flag to show/hide video feed
             num_hands (int): Maximum number of hands to detect
         """
+        super().__init__()  # Initialize QThread
         self.strategizer = strategizer
         self.action = action
+        self.wrist_smoother = LandmarkSmoother()
+        self.camera_smoother = LandmarkSmoother()
         self.model_path = model_path
-        self.display_video = display_video
         self.num_hands = num_hands
+
+        # Camera configuration (set when tracking starts)
+        self.camera_index = 0
+        self.camera_width = 640
+        self.camera_height = 480
 
         # Detection parameters
         self.min_detection_confidence = 0.5
@@ -29,6 +48,11 @@ class HandTracker:
         self.landmarker = None
         self.cap = None
         self.is_running = False
+
+        # FPS tracking
+        self.fps = 0
+        self.frame_times = []
+        self.last_fps_update = time.time()
 
         # Hand landmark connections (based on MediaPipe hand model)
         self.HAND_CONNECTIONS = [
@@ -100,22 +124,13 @@ class HandTracker:
             normalize (bool): If True, normalize coordinates relative to wrist and hand size
 
         Returns:
-            dict: {'Left': [thumb, index, middle, ring, pinky],
-                   'Right': [thumb, index, middle, ring, pinky]}
-
-            Each finger is a list of landmarks (x,y,z) tuples:
-            - thumb: landmarks 0-4 (wrist shared, then 4 thumb joints)
-            - index: landmarks 0, 5-8 (wrist shared, then 4 finger joints)
-            - middle: landmarks 0, 9-12
-            - ring: landmarks 0, 13-16
-            - pinky: landmarks 0, 17-20
-
-            If normalize=True:
-            - All coordinates are relative to the wrist (wrist becomes origin 0,0,0)
-            - Scaled by hand size (distance from wrist to middle finger MCP)
-            - Makes hand pose consistent regardless of distance from camera
+            HandsData: Object with dot notation access like:
+                       data.wrist.left.wrist  # wrist position
+                       data.wrist.left.thumb[3]  # thumb tip
+                       data.wrist.left.tip['index']  # index fingertip shortcut
         """
-        hands_data = {}
+        wrist_data = {}
+        camera_data = {}
 
         if detection_result.hand_landmarks and detection_result.handedness:
             for i, (hand_landmarks, handedness) in enumerate(
@@ -129,6 +144,21 @@ class HandTracker:
                 for landmark in hand_landmarks:
                     all_landmarks.append((landmark.x, landmark.y, landmark.z))
 
+                # Store camera-relative data (wrist + 4 joints per finger)
+                camera_fingers = [
+                    [all_landmarks[0], all_landmarks[1], all_landmarks[2],
+                     all_landmarks[3], all_landmarks[4]],  # Wrist + Thumb
+                    [all_landmarks[0], all_landmarks[5], all_landmarks[6],
+                     all_landmarks[7], all_landmarks[8]],  # Wrist + Index
+                    [all_landmarks[0], all_landmarks[9], all_landmarks[10],
+                     all_landmarks[11], all_landmarks[12]],  # Wrist + Middle
+                    [all_landmarks[0], all_landmarks[13], all_landmarks[14],
+                     all_landmarks[15], all_landmarks[16]],  # Wrist + Ring
+                    [all_landmarks[0], all_landmarks[17], all_landmarks[18],
+                     all_landmarks[19], all_landmarks[20]]  # Wrist + Pinky
+                ]
+                camera_data[hand_label] = camera_fingers
+
                 if normalize:
                     # Normalize coordinates relative to wrist and hand size
                     wrist = np.array(all_landmarks[0])
@@ -141,32 +171,30 @@ class HandTracker:
                     if hand_size < 1e-6:
                         hand_size = 1.0
 
-                    # Normalize all landmarks
-                    normalized_landmarks = []
-                    for landmark in all_landmarks:
-                        landmark_array = np.array(landmark)
-                        # Translate so wrist is at origin, then scale by hand size
-                        normalized = (landmark_array - wrist) / hand_size
-                        normalized_landmarks.append(tuple(normalized))
+                    # Vectorized normalization (process all landmarks at once)
+                    landmarks_array = np.array(all_landmarks)
+                    normalized_array = (landmarks_array - wrist) / hand_size
+                    all_landmarks = [tuple(pos) for pos in normalized_array]
 
-                    all_landmarks = normalized_landmarks
-
-                # Organize landmarks by finger
-                # Each finger includes the wrist (landmark 0) as the base
-                fingers = [
+                # Organize normalized landmarks by finger (wrist + 4 joints per finger)
+                wrist_fingers = [
                     [all_landmarks[0], all_landmarks[1], all_landmarks[2],
-                     all_landmarks[3], all_landmarks[4]],  # Thumb
+                     all_landmarks[3], all_landmarks[4]],  # Wrist + Thumb
                     [all_landmarks[0], all_landmarks[5], all_landmarks[6],
-                     all_landmarks[7], all_landmarks[8]],  # Index
+                     all_landmarks[7], all_landmarks[8]],  # Wrist + Index
                     [all_landmarks[0], all_landmarks[9], all_landmarks[10],
-                     all_landmarks[11], all_landmarks[12]],  # Middle
+                     all_landmarks[11], all_landmarks[12]],  # Wrist + Middle
                     [all_landmarks[0], all_landmarks[13], all_landmarks[14],
-                     all_landmarks[15], all_landmarks[16]],  # Ring
+                     all_landmarks[15], all_landmarks[16]],  # Wrist + Ring
                     [all_landmarks[0], all_landmarks[17], all_landmarks[18],
-                     all_landmarks[19], all_landmarks[20]]  # Pinky
+                     all_landmarks[19], all_landmarks[20]]  # Wrist + Pinky
                 ]
+                wrist_data[hand_label] = wrist_fingers
 
-                hands_data[hand_label] = fingers
+        # Create HandsData object and smooth it
+        hands_data = HandsData(wrist_data, camera_data)
+        hands_data = self.wrist_smoother.smooth_hands_data(hands_data)
+        hands_data = self.camera_smoother.smooth_hands_data(hands_data)
 
         return hands_data
 
@@ -214,7 +242,7 @@ class HandTracker:
 
                     cv2.circle(image, point, radius, color, -1)
 
-                    # Optional: Add landmark numbers
+                    # Optional: Add landmark numbers (disabled for performance - saves 8-12ms)
                     cv2.putText(image, str(i), (point[0] + 10, point[1] - 10),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255), 1)
 
@@ -226,6 +254,10 @@ class HandTracker:
         hand_count = len(detection_result.hand_landmarks) if detection_result.hand_landmarks else 0
         cv2.putText(image, f"Hands detected: {hand_count}", (10, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+        # Add FPS display
+        cv2.putText(image, f"FPS: {self.fps:.1f}", (10, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
         return image
 
@@ -240,7 +272,7 @@ class HandTracker:
             tuple: (annotated_frame, detection_result)
         """
         # Flip frame horizontally for mirror effect
-        frame = cv2.flip(frame, 1)
+        # frame = cv2.flip(frame, 1)
 
         # Convert BGR to RGB for MediaPipe
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -254,37 +286,54 @@ class HandTracker:
 
         # Call strategize method if landmarks are detected
         if detection_result.hand_landmarks:
-            action, data = self.strategizer.strategize(self.get_hands_data(detection_result))
-            self.action.takeAction(action, data)
+            self.strategizer.strategize(self.get_hands_data(detection_result))
 
-        # Draw landmarks on the frame (for display or debugging)
-        annotated_frame = self.draw_landmarks(frame, detection_result)
+        return detection_result
 
-        return annotated_frame, detection_result
-
-    def run(self, camera_index=0, width=640, height=480):
+    def start_tracking(self, camera_index=0, width=640, height=480):
         """
-        Start the hand landmark detection
+        Start hand tracking in background thread.
 
         Args:
             camera_index (int): Camera index (0 for default camera)
             width (int): Camera width resolution
             height (int): Camera height resolution
+
+        Returns:
+            bool: True if tracking started successfully, False otherwise
+        """
+        if self.isRunning():
+            print("Tracking is already running")
+            return False
+
+        # Store camera configuration
+        self.camera_index = camera_index
+        self.camera_width = width
+        self.camera_height = height
+
+        # Start the thread (calls run() in background)
+        self.start()
+        return True
+
+    def run(self):
+        """
+        Main tracking loop (runs in background thread).
+        Called automatically by QThread.start().
         """
         try:
             # Initialize camera
-            self._initialize_camera(camera_index, width, height)
+            self._initialize_camera(self.camera_index, self.camera_width, self.camera_height)
 
             self.is_running = True
-            print(f"Starting hand landmark detection. Display video: {self.display_video}")
-            if self.display_video:
-                print("Press 'q' to quit.")
-            else:
-                print("Press Ctrl+C to quit.")
+            print("Hand tracking started in background thread")
+            self.tracking_started.emit()
 
             frame_count = 0
 
             while self.is_running:
+                # Track frame start time
+                frame_start = time.time()
+
                 # Read frame from webcam
                 ret, frame = self.cap.read()
                 if not ret:
@@ -292,15 +341,26 @@ class HandTracker:
                     break
 
                 # Process the frame
-                annotated_frame, detection_result = self.process_frame(frame)
+                detection_result = self.process_frame(frame)
 
-                # Display the frame only if display_video is True
-                if self.display_video:
-                    cv2.imshow('Hand Landmark Detection', annotated_frame)
+                # Calculate FPS
+                frame_time = time.time() - frame_start
+                self.frame_times.append(frame_time)
 
-                    # Check for 'q' key press to quit (only when displaying video)
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        break
+                # Update FPS every second
+                if time.time() - self.last_fps_update >= 1.0:
+                    if len(self.frame_times) > 0:
+                        avg_frame_time = sum(self.frame_times) / len(self.frame_times)
+                        self.fps = 1.0 / avg_frame_time if avg_frame_time > 0 else 0
+                        self.frame_times = []
+                        self.last_fps_update = time.time()
+
+                # Emit signal with landmarks and frame data (thread-safe)
+                landmarks_data = {
+                    'detection_result': detection_result,
+                    'fps': self.fps
+                }
+                self.landmarks_detected.emit(landmarks_data, frame.copy())
 
                 frame_count += 1
 
@@ -308,32 +368,30 @@ class HandTracker:
 
         except KeyboardInterrupt:
             print("\nInterrupted by user")
+            self.error_occurred.emit("Interrupted by user")
         except Exception as e:
-            print(f"Error occurred: {e}")
+            error_msg = f"Error occurred: {e}"
+            print(error_msg)
+            self.error_occurred.emit(error_msg)
         finally:
-            self.stop()
+            self._cleanup()
 
-    def stop(self):
-        """Stop the detection and clean up resources"""
+    def stop_tracking(self):
+        """Stop hand tracking and cleanup resources"""
+        print("Stopping hand tracking...")
         self.is_running = False
 
+        # Wait for thread to finish (up to 2 seconds)
+        if self.isRunning():
+            self.wait(2000)
+
+        self._cleanup()
+
+    def _cleanup(self):
+        """Internal cleanup method"""
         if self.cap:
             self.cap.release()
             print("Camera released")
 
-        if self.display_video:
-            cv2.destroyAllWindows()
-            print("OpenCV windows closed")
-
-        print("Hand landmark detector stopped")
-
-    def set_display_video(self, display):
-        """
-        Set whether to display video feed
-
-        Args:
-            display (bool): True to show video, False to hide
-        """
-        self.display_video = display
-        if not display:
-            cv2.destroyAllWindows()
+        print("Hand tracking stopped")
+        self.tracking_stopped.emit()
