@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QApplication
 from backend.Action import Action
 from backend.HandTracker import HandTracker
 from backend.Strategizer import Strategizer
+from backend.GestureConfig import GestureConfig
 from frontend.main_window import MainWindow
 
 
@@ -22,6 +23,8 @@ def main():
 
     # Create backend components
     action = Action("windows")
+    # Load gesture configuration (uses defaults if no config file exists)
+    config = GestureConfig()
     strategizer = Strategizer(
         action=action,
         config=config,
