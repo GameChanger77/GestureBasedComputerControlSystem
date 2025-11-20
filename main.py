@@ -23,6 +23,8 @@ def main():
     # Create backend components
     action = Action("windows")
     strategizer = Strategizer(
+        action=action,
+        config=config,
         screen_width=screen_width,
         screen_height=screen_height
     )
