@@ -1,7 +1,7 @@
 from backend.Action import Action
 from backend.HandTracker import HandTracker
-from backend.LandmarkSmoother import LandmarkSmoother
 from backend.Strategizer import Strategizer
+from backend.GestureConfig import GestureConfig
 import os
 import pyautogui
 
@@ -9,12 +9,18 @@ import pyautogui
 def main():
     """Main method for the application"""
 
+    # Load gesture configuration
+    config = GestureConfig("gesture_config.json")
+    config.print_config()
+
     # Dynamically get screen resolution (works on Windows and macOS)
     screen_width, screen_height = pyautogui.size()
     print(f"Detected screen resolution: {screen_width}x{screen_height}")
 
     action = Action("windows")
     strategizer = Strategizer(
+        action=action,
+        config=config,
         screen_width=screen_width,
         screen_height=screen_height
     )

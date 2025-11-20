@@ -8,4 +8,6 @@ __pycache__/
 *.pyd
 .vscode/
 
+gesture_config.json
+
 **/gesture-test/

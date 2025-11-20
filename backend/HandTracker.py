@@ -274,11 +274,7 @@ class HandTracker:
 
         # Call strategize method if landmarks are detected
         if detection_result.hand_landmarks:
-            try:
-                action, data = self.strategizer.strategize(self.get_hands_data(detection_result))
-                self.action.takeAction(action, data)
-            except Exception as e:
-                pass  # Silently ignore errors for performance (was: print("ERROR:", e))
+            self.strategizer.strategize(self.get_hands_data(detection_result))
 
         # Draw landmarks on the frame (for display or debugging)
         annotated_frame = self.draw_landmarks(frame, detection_result)
