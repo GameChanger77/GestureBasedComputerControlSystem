@@ -56,24 +56,24 @@ class GestureConfig:
 
                 # Merge user config with defaults (user values override defaults)
                 self.config.update(user_config)
-                print(f"✓ Loaded gesture config from {self.config_path}")
+                print(f"Loaded gesture config from {self.config_path}")
 
             except Exception as e:
-                print(f"⚠ Error loading config file: {e}")
-                print(f"  Using default configuration")
+                print(f"Error loading config file: {e}")
+                print(f"Using default configuration")
         else:
-            print(f"ℹ Config file not found at {self.config_path}")
-            print(f"  Using default configuration")
-            print(f"  Run with defaults or create {self.config_path} to customize")
+            print(f"Config file not found at {self.config_path}")
+            print(f"Using default configuration")
+            print(f"Run with defaults or create {self.config_path} to customize")
 
     def save(self):
         """Save current configuration to JSON file."""
         try:
             with open(self.config_path, 'w') as f:
                 json.dump(self.config, f, indent=4)
-            print(f"✓ Saved configuration to {self.config_path}")
+            print(f"Saved configuration to {self.config_path}")
         except Exception as e:
-            print(f"⚠ Error saving config file: {e}")
+            print(f"Error saving config file: {e}")
 
     def get(self, key, default=None):
         """
