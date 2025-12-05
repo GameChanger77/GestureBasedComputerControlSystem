@@ -297,6 +297,24 @@ class Action:
             # For simplicity, we'll require coordinates for now
             print("Warning: left_click requires x, y coordinates")
 
+    def double_click(self, x: int = None, y: int = None):
+        """
+        Public method to perform double click.
+        Called directly by gesture recognizers.
+
+        Args:
+            x: Screen x coordinate in pixels
+            y: Screen y coordinate in pixels
+        """
+        if x is not None and y is not None:
+            # Perform two clicks in quick succession
+            self._click(x, y)
+            import time
+            time.sleep(0.05)  # 50ms delay between clicks
+            self._click(x, y)
+        else:
+            print("Warning: double_click requires x, y coordinates")
+
     def right_click(self, x: int = None, y: int = None):
         """
         Public method to perform right click.

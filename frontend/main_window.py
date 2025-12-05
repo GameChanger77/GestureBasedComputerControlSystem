@@ -208,66 +208,88 @@ class MainWindow(QMainWindow):
         # Update stats (always, even if display is off)
         self.stats_widget.record_frame()
 
-        # Update hands count
+        # Update hands count from smoothed data
         hands_count = 0
-        if landmarks_data and 'detection_result' in landmarks_data:
-            detection_result = landmarks_data['detection_result']
-            if detection_result and detection_result.hand_landmarks:
-                hands_count = len(detection_result.hand_landmarks)
+        if landmarks_data and 'smoothed_hands_data' in landmarks_data:
+            smoothed_hands_data = landmarks_data['smoothed_hands_data']
+            if smoothed_hands_data:
+                if smoothed_hands_data.camera.has_left:
+                    hands_count += 1
+                if smoothed_hands_data.camera.has_right:
+                    hands_count += 1
         self.stats_widget.update_hands_count(hands_count)
 
         # Only update display if enabled
         if self.display_enabled:
-            # Draw landmarks on frame
-            if landmarks_data and 'detection_result' in landmarks_data:
-                frame = self.draw_landmarks(frame, landmarks_data['detection_result'])
+            # Draw smoothed landmarks on frame (modifies in-place)
+            if landmarks_data and 'smoothed_hands_data' in landmarks_data:
+                frame = self.draw_landmarks(frame, landmarks_data['smoothed_hands_data'])
 
-            # Emit to video widget (thread-safe)
-            self.frame_ready.emit(frame.copy())
+            # Emit to video widget (frame already copied by HandTracker)
+            self.frame_ready.emit(frame)
 
-    def draw_landmarks(self, image, detection_result):
+    def draw_landmarks(self, image, hands_data):
         """
-        Draw hand landmarks and connections on the image.
+        Draw hand landmarks and connections from smoothed HandsData.
 
         Args:
             image: OpenCV image array
-            detection_result: MediaPipe detection result
+            hands_data: HandsData object with smoothed landmarks
 
         Returns:
             Annotated image with landmarks drawn
         """
-        if detection_result.hand_landmarks:
-            for hand_landmarks in detection_result.hand_landmarks:
-                # Convert normalized coordinates to pixel coordinates
-                height, width, _ = image.shape
-                landmark_points = []
+        if hands_data is None:
+            return image
 
-                for landmark in hand_landmarks:
-                    x = int(landmark.x * width)
-                    y = int(landmark.y * height)
+        height, width, _ = image.shape
+
+        # Process both left and right hands
+        for hand in [hands_data.camera.left, hands_data.camera.right]:
+            if not hand.exists:
+                continue
+
+            # Build flat list of landmarks for connections
+            # Order: wrist(0), thumb(1-4), index(5-8), middle(9-12), ring(13-16), pinky(17-20)
+            landmark_points = []
+
+            # Add wrist
+            wrist = hand.wrist
+            if wrist:
+                x = int(wrist[0] * width)
+                y = int(wrist[1] * height)
+                landmark_points.append((x, y))
+            else:
+                continue
+
+            # Add all finger joints
+            for finger in [hand.thumb, hand.index, hand.middle, hand.ring, hand.pinky]:
+                for joint in finger.joints:
+                    x = int(joint[0] * width)
+                    y = int(joint[1] * height)
                     landmark_points.append((x, y))
 
-                # Draw connections
-                for connection in self.HAND_CONNECTIONS:
-                    start_idx, end_idx = connection
-                    if start_idx < len(landmark_points) and end_idx < len(landmark_points):
-                        cv2.line(image, landmark_points[start_idx], landmark_points[end_idx],
-                                 (0, 255, 0), 2)
+            # Draw connections
+            for connection in self.HAND_CONNECTIONS:
+                start_idx, end_idx = connection
+                if start_idx < len(landmark_points) and end_idx < len(landmark_points):
+                    cv2.line(image, landmark_points[start_idx], landmark_points[end_idx],
+                             (0, 255, 0), 2)
 
-                # Draw landmark points
-                for i, point in enumerate(landmark_points):
-                    # Different colors for different finger parts
-                    if i == 0:  # Wrist
-                        color = (255, 0, 0)  # Red
-                        radius = 8
-                    elif i in [4, 8, 12, 16, 20]:  # Fingertips
-                        color = (0, 0, 255)  # Blue
-                        radius = 6
-                    else:  # Other joints
-                        color = (255, 255, 0)  # Cyan
-                        radius = 4
+            # Draw landmark points
+            for i, point in enumerate(landmark_points):
+                # Different colors for different finger parts
+                if i == 0:  # Wrist
+                    color = (255, 0, 0)  # Red
+                    radius = 8
+                elif i in [4, 8, 12, 16, 20]:  # Fingertips
+                    color = (0, 0, 255)  # Blue
+                    radius = 6
+                else:  # Other joints
+                    color = (255, 255, 0)  # Cyan
+                    radius = 4
 
-                    cv2.circle(image, point, radius, color, -1)
+                cv2.circle(image, point, radius, color, -1)
 
         return image
 

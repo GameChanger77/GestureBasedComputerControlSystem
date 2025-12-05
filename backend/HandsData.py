@@ -1,5 +1,46 @@
+import numpy as np
+from backend.LandmarkSmoother import LandmarkSmoother
+
+
 class HandsData:
-    """Container for hand landmark data with easy dot notation access"""
+    """
+    Container for hand landmark data with easy dot notation access.
+
+    Handles smoothing and normalization of hand landmarks internally.
+    Use the from_detection_result() factory method to create instances from MediaPipe data.
+    """
+
+    # Class-level smoother shared across all HandsData instances
+    _smoother = None
+
+    @classmethod
+    def _get_smoother(cls):
+        """Get or create the class-level smoother instance"""
+        if cls._smoother is None:
+            cls._smoother = LandmarkSmoother()
+        return cls._smoother
+
+    @staticmethod
+    def _array_to_finger_structure(landmarks_array):
+        """
+        Convert flat landmark array (21x3) to finger structure dict.
+
+        Args:
+            landmarks_array: numpy array of shape (21, 3) with landmarks in MediaPipe order
+
+        Returns:
+            list: Finger structure [wrist+thumb, wrist+index, wrist+middle, wrist+ring, wrist+pinky]
+        """
+        # Convert to list of tuples for compatibility with existing structure
+        landmarks = [tuple(lm) for lm in landmarks_array]
+
+        return [
+            [landmarks[0], landmarks[1], landmarks[2], landmarks[3], landmarks[4]],      # Wrist + Thumb
+            [landmarks[0], landmarks[5], landmarks[6], landmarks[7], landmarks[8]],      # Wrist + Index
+            [landmarks[0], landmarks[9], landmarks[10], landmarks[11], landmarks[12]],   # Wrist + Middle
+            [landmarks[0], landmarks[13], landmarks[14], landmarks[15], landmarks[16]],  # Wrist + Ring
+            [landmarks[0], landmarks[17], landmarks[18], landmarks[19], landmarks[20]]   # Wrist + Pinky
+        ]
 
     class FingerTips:
         """Container for fingertip positions with dot notation access"""
@@ -119,3 +160,53 @@ class HandsData:
         """
         self.wrist = self.CoordinateSpace(wrist_dict)
         self.camera = self.CoordinateSpace(camera_dict)
+
+    @classmethod
+    def from_detection_result(cls, detection_result):
+        """
+        Factory method to create HandsData from MediaPipe detection result.
+
+        Single-pass conversion:
+        1. Extract landmarks as numpy arrays
+        2. Smooth arrays (vectorized)
+        3. Normalize arrays (vectorized)
+        4. Convert to finger structure ONCE
+
+        Args:
+            detection_result: MediaPipe hand detection result
+
+        Returns:
+            HandsData: Fully processed hand data with smoothed coordinates
+        """
+        smoother = cls._get_smoother()
+        camera_data = {}
+        wrist_data = {}
+
+        # Process each detected hand
+        if detection_result.hand_landmarks and detection_result.handedness:
+            for hand_landmarks, handedness in zip(detection_result.hand_landmarks, detection_result.handedness):
+                hand_label = handedness[0].category_name
+
+                # Extract to numpy array (21x3) - single extraction from MediaPipe
+                raw_array = np.array(
+                    [(lm.x, lm.y, lm.z) for lm in hand_landmarks],
+                    dtype=np.float32
+                )
+
+                # Smooth the array (vectorized operation)
+                smoothed_array = smoother.smooth_hand(hand_label, raw_array)
+
+                # Normalize for wrist-relative coordinates (vectorized operation)
+                wrist_pos = smoothed_array[0]
+                middle_mcp = smoothed_array[9]  # Middle finger MCP joint
+                hand_size = np.linalg.norm(middle_mcp - wrist_pos)
+                hand_size = max(hand_size, 1e-6)  # Avoid division by zero
+
+                normalized_array = (smoothed_array - wrist_pos) / hand_size
+
+                # Convert to finger structure once for each coordinate space
+                camera_data[hand_label] = cls._array_to_finger_structure(smoothed_array)
+                wrist_data[hand_label] = cls._array_to_finger_structure(normalized_array)
+
+        # Return final HandsData
+        return cls(wrist_data, camera_data)

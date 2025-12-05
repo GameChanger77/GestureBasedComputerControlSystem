@@ -1,6 +1,8 @@
 from backend.gestures.GestureRecognizer import SnapshotGestureRecognizer
 from backend.gestures.GestureUtils import are_fingers_pinched, camera_to_screen
 from backend.HandsData import HandsData
+from backend.gestures.GestureStateMachine import GestureState
+import time
 
 
 class LeftClickGesture(SnapshotGestureRecognizer):
@@ -9,13 +11,14 @@ class LeftClickGesture(SnapshotGestureRecognizer):
 
     Activated when:
     - Thumb tip and middle finger tip are pinched together
-    - Triggers once per pinch (debounced)
+    - Quick pinch = single click
+    - Hold pinch for 1 second = double-click
 
     Priority: High (overrides mouse tracking)
     """
 
     def __init__(self, action, screen_width, screen_height, priority, pinch_threshold,
-                 extension_threshold, pending_frames, ending_frames):
+                 extension_threshold, pending_frames, ending_frames, double_click_hold_time=1.0):
         """
         Args:
             action: Action object for executing clicks
@@ -26,12 +29,19 @@ class LeftClickGesture(SnapshotGestureRecognizer):
             extension_threshold: Angle threshold for finger extension
             pending_frames: Frames to confirm gesture
             ending_frames: Frames in ending state
+            double_click_hold_time: Time to hold pinch for double-click (seconds)
         """
         super().__init__(action, priority, pending_frames, ending_frames)
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.pinch_threshold = pinch_threshold
         self.extension_threshold = extension_threshold
+        self.double_click_hold_time = double_click_hold_time
+
+        # Track when gesture became active for hold detection
+        self.gesture_start_time = None
+        self.double_click_triggered = False
+        self.click_position = None
 
     def detect_gesture(self, hands_data: HandsData):
         """
@@ -66,13 +76,60 @@ class LeftClickGesture(SnapshotGestureRecognizer):
 
         return True, (screen_x, screen_y)
 
-    def execute_action(self, data):
+    def update(self, hands_data: HandsData):
         """
-        Perform left click at the cursor position.
+        Override update to handle hold-for-double-click logic.
+        """
+        detected, gesture_data = self.detect_gesture(hands_data)
+        state, should_trigger, data = self.state_machine.update(detected, gesture_data)
 
-        Args:
-            data: Tuple (screen_x, screen_y)
-        """
+        # Track when gesture becomes active
+        if state == GestureState.ACTIVE and self.gesture_start_time is None:
+            self.gesture_start_time = time.time()
+            self.double_click_triggered = False
+            self.click_position = data
+            # Trigger single click immediately (will be overridden if held)
+            if not self._already_triggered:
+                self._already_triggered = True
+                return False  # Don't trigger yet, wait to see if it's held
+
+        # Check if gesture is being held for double-click
+        if state == GestureState.ACTIVE and self.gesture_start_time is not None:
+            hold_duration = time.time() - self.gesture_start_time
+
+            # If held for required duration, trigger double-click
+            if hold_duration >= self.double_click_hold_time and not self.double_click_triggered:
+                self.double_click_triggered = True
+                self.execute_double_click(self.click_position)
+                return True
+
+        # When gesture ends, trigger single click if double-click wasn't triggered
+        if state == GestureState.IDLE and self.gesture_start_time is not None:
+            if not self.double_click_triggered:
+                # Quick release - single click
+                self.execute_single_click(self.click_position)
+            # Reset for next gesture
+            self.gesture_start_time = None
+            self.double_click_triggered = False
+            self.click_position = None
+            self._already_triggered = False
+
+        return False
+
+    def execute_single_click(self, data):
+        """Perform single click."""
         if data is not None:
             screen_x, screen_y = data
             self.action.left_click(screen_x, screen_y)
+
+    def execute_double_click(self, data):
+        """Perform double-click."""
+        if data is not None:
+            screen_x, screen_y = data
+            self.action.double_click(screen_x, screen_y)
+
+    def execute_action(self, data):
+        """
+        This method is overridden by update() to handle hold timing.
+        """
+        pass

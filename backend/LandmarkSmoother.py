@@ -1,123 +1,62 @@
 import numpy as np
-from typing import Tuple
 from collections import deque
 
 
 class LandmarkSmoother:
     """
     Smooths hand landmarks using a simple moving average filter.
-    Keeps the last N frames and averages landmark positions.
+    Operates on entire hand arrays (21x3) for efficiency.
     """
 
-    def __init__(self, window_size: int = 5, debug: bool = False):
+    def __init__(self, debug: bool = False):
         """
         Initialize the landmark smoother.
 
         Args:
-            window_size (int): Number of frames to average over.
-                             - 3-5: Light smoothing, responsive
-                             - 5-10: Medium smoothing
-                             - 10+: Heavy smoothing, more lag
-                             - Recommended: 5
             debug (bool): Enable debug output
         """
-        self.window_size = window_size
+        self.window_size = 3  # number of frames in moving average (more = smoother, less = more responsive)
         self.debug = debug
 
-        # Storage for historical positions
-        # Structure: {(coord_space, hand_label, finger_name, landmark_idx): deque of positions}
-        # coord_space: 'wrist' or 'camera'
-        # hand_label: 'left' or 'right'
-        # finger_name: 'wrist', 'thumb', 'index', 'middle', 'ring', 'pinky'
+        # Storage for historical hand positions
+        # Structure: {hand_label: deque of (21, 3) numpy arrays}
         self.history = {}
-
         self.frame_count = 0
 
-    def _smooth_landmark(self, landmark_key: Tuple, position: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    def smooth_hand(self, hand_label: str, landmarks_array: np.ndarray) -> np.ndarray:
         """
-        Smooth a single landmark position.
+        Smooth all landmarks for a hand at once (vectorized operation).
 
         Args:
-            landmark_key: Unique identifier for this landmark
-            position: Current (x, y, z) position
+            hand_label: Hand identifier ('Left' or 'Right')
+            landmarks_array: numpy array of shape (21, 3) with hand landmarks
 
         Returns:
-            Smoothed (x, y, z) position
+            Smoothed numpy array of shape (21, 3)
         """
-        # Get or create history for this landmark
-        if landmark_key not in self.history:
-            self.history[landmark_key] = deque(maxlen=self.window_size)
+        # Get or create history for this hand
+        if hand_label not in self.history:
+            self.history[hand_label] = deque(maxlen=self.window_size)
+            if self.debug:
+                print(f"Created new history for {hand_label}")
 
-        # Convert position to numpy array once
-        pos_array = np.array(position, dtype=np.float32)
-        self.history[landmark_key].append(pos_array)
+        # Ensure array is float32 for consistency
+        landmarks_array = landmarks_array.astype(np.float32)
+        self.history[hand_label].append(landmarks_array)
 
-        # Calculate average directly from deque (avoid list conversion)
-        if len(self.history[landmark_key]) == 1:
-            # Fast path: only one position in history
-            smoothed_pos = pos_array
-        else:
-            # Stack arrays from deque and compute mean - avoids list() conversion
-            smoothed_pos = np.mean(np.stack(self.history[landmark_key]), axis=0)
+        history_len = len(self.history[hand_label])
+        if self.debug and self.frame_count % 30 == 0:
+            print(f"Hand {hand_label}: history_len={history_len}, window_size={self.window_size}")
 
-        return tuple(smoothed_pos)
+        self.frame_count += 1
 
-    def _smooth_hand(self, coord_space: str, hand_label: str, hand) -> None:
-        """
-        Smooth all landmarks for a single hand in-place.
+        # Fast path: only one frame in history
+        if history_len == 1:
+            return landmarks_array
 
-        Args:
-            coord_space: 'wrist' or 'camera'
-            hand_label: 'left' or 'right'
-            hand: Hand object to smooth (modified in-place)
-        """
-        if not hand.exists:
-            return
-
-        # Import here to avoid circular dependency
-        from backend.HandsData import HandsData
-
-        # Smooth wrist
-        wrist_key = (coord_space, hand_label, 'wrist', 0)
-        hand._wrist = self._smooth_landmark(wrist_key, hand._wrist)
-
-        # Smooth each finger
-        for finger_name in ['thumb', 'index', 'middle', 'ring', 'pinky']:
-            finger = getattr(hand, finger_name)
-            if not finger or len(finger) == 0:
-                continue
-
-            # Smooth joints in-place using list comprehension (faster than append loop)
-            finger.joints = [
-                self._smooth_landmark((coord_space, hand_label, finger_name, idx), pos)
-                for idx, pos in enumerate(finger.joints)
-            ]
-
-    def smooth_hands_data(self, hands_data):
-        """
-        Smooth hand landmarks data using moving average.
-
-        Args:
-            hands_data: HandsData object with wrist and camera coordinate spaces
-
-        Returns:
-            HandsData: The same HandsData object with smoothed coordinates (modified in-place)
-        """
-        # Smooth wrist-relative coordinates
-        self._smooth_hand('wrist', 'left', hands_data.wrist.left)
-        self._smooth_hand('wrist', 'right', hands_data.wrist.right)
-
-        # Smooth camera-relative coordinates
-        self._smooth_hand('camera', 'left', hands_data.camera.left)
-        self._smooth_hand('camera', 'right', hands_data.camera.right)
-
-        # Debug output
-        if self.debug:
-            self.frame_count += 1
-            if self.frame_count % 30 == 0:
-                print(f"Frame {self.frame_count}: Moving average smoother (window_size={self.window_size})")
-
-        return hands_data
+        # Vectorized average across all frames in history
+        # Stack creates (N, 21, 3) array, mean over axis 0 gives (21, 3)
+        return np.mean(np.stack(self.history[hand_label]), axis=0)
 
     def reset(self) -> None:
         """
@@ -126,16 +65,3 @@ class LandmarkSmoother:
         """
         self.history = {}
         self.frame_count = 0
-
-    def set_window_size(self, size: int) -> None:
-        """
-        Dynamically adjust the window size.
-
-        Args:
-            size (int): New window size (should be > 0)
-        """
-        if size <= 0:
-            raise ValueError("Window size must be positive")
-        self.window_size = size
-        # Reset history when window size changes to avoid mixing different window sizes
-        self.history = {}
