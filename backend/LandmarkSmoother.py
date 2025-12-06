@@ -15,7 +15,7 @@ class LandmarkSmoother:
         Args:
             debug (bool): Enable debug output
         """
-        self.window_size = 3  # number of frames in moving average (more = smoother, less = more responsive)
+        self.window_size = 2  # number of frames in moving average (more = smoother, less = more responsive)
         self.debug = debug
 
         # Storage for historical hand positions
