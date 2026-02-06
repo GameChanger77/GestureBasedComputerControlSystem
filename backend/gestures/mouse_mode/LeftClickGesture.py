@@ -70,7 +70,7 @@ class LeftClickGesture(SnapshotGestureRecognizer):
             return False, None
 
         # Convert to screen coordinates
-        screen_x, screen_y = camera_to_screen(
+        screen_x, screen_y = camera_to_screen(  # TODO make this use the screen_safe_margin from the settings
             index_tip, self.screen_width, self.screen_height
         )
 
