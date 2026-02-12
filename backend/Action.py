@@ -1,5 +1,6 @@
 import platform
 import sys
+from pynput.mouse import Controller, Button
 
 # Detect OS and import appropriate libraries
 OS_TYPE = platform.system()
@@ -34,6 +35,7 @@ class Action:
         print(f"Action class initialized for {OS_TYPE}")
         self.osType = osType
         self.detected_os = OS_TYPE
+        self.mouse = Controller()  # Initialize pynput mouse controller
 
     def takeAction(self, action, data):
         """
@@ -53,12 +55,14 @@ class Action:
         try:
             if action == "mouse_move":
                 x, y = data
-                self._move_cursor(x, y)
+                # self._move_cursor(x, y)
+                self.mouse.position = (x, y)  # Use pynput for mouse movement
                 return True
 
             elif action == "left_click":
                 x, y = data
-                self._click(x, y)
+                # self._click(x, y)
+                self.mouse.click(Button.left, 1)  # Use pynput for left click
                 return True
 
             else:
@@ -69,7 +73,7 @@ class Action:
             print(f"Error executing action {action}: {e}")
             return False
 
-    def _move_cursor(self, x: int, y: int):
+    def _move_cursor(self, x: int, y: int):   
         """
         Move cursor using native OS API (auto-detects OS).
         """
@@ -279,7 +283,7 @@ class Action:
             x: Screen x coordinate in pixels
             y: Screen y coordinate in pixels
         """
-        self._move_cursor(x, y)
+        self.mouse.position = (x, y)
 
     def left_click(self, x: int = None, y: int = None):
         """
@@ -291,7 +295,8 @@ class Action:
             y: Screen y coordinate in pixels (optional, uses current position if not provided)
         """
         if x is not None and y is not None:
-            self._click(x, y)
+            self.mouse.position = (x, y)
+            self.mouse.click(Button.left, 1)
         else:
             # Click at current cursor position
             # For simplicity, we'll require coordinates for now
@@ -308,10 +313,8 @@ class Action:
         """
         if x is not None and y is not None:
             # Perform two clicks in quick succession
-            self._click(x, y)
-            import time
-            time.sleep(0.05)  # 50ms delay between clicks
-            self._click(x, y)
+            self.mouse.position = (x, y)
+            self.mouse.click(Button.left, 2)
         else:
             print("Warning: double_click requires x, y coordinates")
 
@@ -325,7 +328,8 @@ class Action:
             y: Screen y coordinate in pixels (optional, uses current position if not provided)
         """
         if x is not None and y is not None:
-            self._right_click(x, y)
+            self.mouse.position = (x, y)
+            self.mouse.click(Button.right, 1)
         else:
             # Right click at current cursor position
             # For simplicity, we'll require coordinates for now
@@ -340,4 +344,5 @@ class Action:
             delta_x: Horizontal scroll amount (positive = right, negative = left)
             delta_y: Vertical scroll amount (positive = up, negative = down)
         """
-        self._scroll(delta_x, delta_y)
+        # self._scroll(delta_x, delta_y)
+        self.mouse.scroll(delta_x, delta_y) 
