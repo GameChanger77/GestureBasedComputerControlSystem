@@ -22,7 +22,7 @@ def main():
     print(f"Detected screen resolution: {screen_width}x{screen_height}")
 
     # Create backend components
-    action = Action("windows")
+    action = Action()
     # Load gesture configuration (uses defaults if no config file exists)
     config = GestureConfig()
     strategizer = Strategizer(

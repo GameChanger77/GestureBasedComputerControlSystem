@@ -2,7 +2,7 @@ from pynput.mouse import Controller as Mouse, Button
 from pynput.keyboard import Controller as Keyboard, Key
 
 class Action:
-    def __init__(self, osType): #TODO remove osType argument since we can auto-detect
+    def __init__(self): #TODO remove osType argument since we can auto-detect
         self.mouse = Mouse()
         self.keyboard = Keyboard()
         
