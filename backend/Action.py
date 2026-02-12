@@ -67,6 +67,34 @@ class Action:
             delta_y: Vertical scroll amount (positive = up, negative = down)
         """
         self.mouse.scroll(delta_x, delta_y) 
+        
+    def hold_left_click(self):
+        """
+        Public method to hold left click (press without release).
+        Called directly by gesture recognizers.
+        """
+        self.mouse.press(Button.left)
+        
+    def release_left_click(self):
+        """
+        Public method to release left click (release after hold).
+        Called directly by gesture recognizers.
+        """
+        self.mouse.release(Button.left)
+        
+    def hold_right_click(self):
+        """
+        Public method to hold right click (press without release).
+        Called directly by gesture recognizers.
+        """
+        self.mouse.press(Button.right)
+        
+    def release_right_click(self):
+        """
+        Public method to release right click (release after hold).
+        Called directly by gesture recognizers.
+        """
+        self.mouse.release(Button.right)
 
     def press_key(self, key):
         """
