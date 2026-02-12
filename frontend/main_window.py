@@ -183,15 +183,20 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def toggle_display(self):
-        """Toggle video display on/off (tracking continues)"""
+        """Toggle video preview on/off while preserving layout space."""
         self.display_enabled = not self.display_enabled
 
         if self.display_enabled:
             self.toggle_display_button.setText("Hide Preview")
-            self.video_widget.show()
+            self.video_widget.set_preview_enabled(True)
+            # Keep widget visible so layout spacing is preserved.
+            if not self.hand_tracker or not self.hand_tracker.isRunning():
+                self.video_widget.clear_frame()
         else:
             self.toggle_display_button.setText("Show Preview")
-            self.video_widget.hide()
+            self.video_widget.set_preview_enabled(False)
+            # Keep widget visible and show placeholder when preview is disabled.
+            self.video_widget.show_preview_hidden()
 
     @Slot(dict, object)
     def on_landmarks_detected(self, landmarks_data, frame):
@@ -303,6 +308,7 @@ class MainWindow(QMainWindow):
         """Handle tracking stopped signal"""
         self.status_label.setText("Status: Stopped")
         self.start_button.setText("Start Tracking")
+        self.video_widget.clear_frame()
 
     @Slot(str)
     def on_tracking_error(self, error_message):

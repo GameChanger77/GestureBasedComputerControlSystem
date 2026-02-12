@@ -13,6 +13,7 @@ class VideoWidget(QWidget):
 
     def __init__(self):
         super().__init__()
+        self.preview_enabled = True
         self._init_ui()
 
     def _init_ui(self):
@@ -25,8 +26,10 @@ class VideoWidget(QWidget):
         self.video_label.setAlignment(Qt.AlignCenter)
         self.video_label.setMinimumSize(640, 480)
         self.video_label.setScaledContents(False)
-        self.video_label.setStyleSheet("background-color: black;")
-        self.video_label.setText("Waiting for camera...")
+        self.video_label.setStyleSheet(
+            "background-color: black; color: white; font-size: 20px; font-weight: 600;"
+        )
+        self._show_status_message("Waiting on start")
 
         layout.addWidget(self.video_label)
         self.setLayout(layout)
@@ -39,6 +42,9 @@ class VideoWidget(QWidget):
         Args:
             frame: numpy array in BGR format from OpenCV
         """
+        if not self.preview_enabled:
+            return
+
         if frame is None or frame.size == 0:
             return
 
@@ -78,6 +84,18 @@ class VideoWidget(QWidget):
             print(f"Error updating frame: {e}")
 
     def clear_frame(self):
-        """Clear the displayed frame"""
+        """Clear the displayed frame and show a placeholder message."""
+        self._show_status_message("Waiting on start")
+
+    def show_preview_hidden(self):
+        """Show placeholder state while preview is disabled."""
+        self._show_status_message("Preview hidden")
+
+    def set_preview_enabled(self, enabled: bool):
+        """Enable or disable frame updates to the preview area."""
+        self.preview_enabled = enabled
+
+    def _show_status_message(self, message: str):
+        """Show a centered status message in the preview area."""
         self.video_label.clear()
-        self.video_label.setText("Camera stopped")
+        self.video_label.setText(message)
