@@ -76,11 +76,15 @@ class LeftClickGesture(SnapshotGestureRecognizer):
 
         return True, (screen_x, screen_y)
 
-    def update(self, hands_data: HandsData):
+    def update(self, hands_data: HandsData, frame_capture_ts_ns=None):
         """
         Override update to handle hold-for-double-click logic.
         """
         detected, gesture_data = self.detect_gesture(hands_data)
+
+        if detected and self.state_machine.is_idle and frame_capture_ts_ns is not None:
+            self.action.set_pending_latency_origin_ts_ns(frame_capture_ts_ns)
+
         state, should_trigger, data = self.state_machine.update(detected, gesture_data)
 
         # Track when gesture becomes active

@@ -20,28 +20,6 @@ class HandsData:
             cls._smoother = LandmarkSmoother()
         return cls._smoother
 
-    @staticmethod
-    def _array_to_finger_structure(landmarks_array):
-        """
-        Convert flat landmark array (21x3) to finger structure dict.
-
-        Args:
-            landmarks_array: numpy array of shape (21, 3) with landmarks in MediaPipe order
-
-        Returns:
-            list: Finger structure [wrist+thumb, wrist+index, wrist+middle, wrist+ring, wrist+pinky]
-        """
-        # Convert to list of tuples for compatibility with existing structure
-        landmarks = [tuple(lm) for lm in landmarks_array]
-
-        return [
-            [landmarks[0], landmarks[1], landmarks[2], landmarks[3], landmarks[4]],      # Wrist + Thumb
-            [landmarks[0], landmarks[5], landmarks[6], landmarks[7], landmarks[8]],      # Wrist + Index
-            [landmarks[0], landmarks[9], landmarks[10], landmarks[11], landmarks[12]],   # Wrist + Middle
-            [landmarks[0], landmarks[13], landmarks[14], landmarks[15], landmarks[16]],  # Wrist + Ring
-            [landmarks[0], landmarks[17], landmarks[18], landmarks[19], landmarks[20]]   # Wrist + Pinky
-        ]
-
     class FingerTips:
         """Container for fingertip positions with dot notation access"""
 
@@ -85,21 +63,21 @@ class HandsData:
             return self.joints[0] if len(self.joints) > 0 else None
 
     class Hand:
-        def __init__(self, fingers):
+        def __init__(self, landmarks_array):
             """
             Args:
-                fingers: List of 5 finger landmark lists [thumb, index, middle, ring, pinky]
-                         Each finger has wrist at index 0, which we'll extract
+                landmarks_array: Numpy array of shape (21, 3) in MediaPipe landmark order
             """
-            if fingers and len(fingers) > 0 and len(fingers[0]) > 0:
-                self._wrist = fingers[0][0]  # Extract wrist from first finger
-                # Store fingers without the wrist (indices 1-4 for each finger)
-                self.thumb = HandsData.Finger(fingers[0][1:]) if len(fingers) > 0 else HandsData.Finger([])
-                self.index = HandsData.Finger(fingers[1][1:]) if len(fingers) > 1 else HandsData.Finger([])
-                self.middle = HandsData.Finger(fingers[2][1:]) if len(fingers) > 2 else HandsData.Finger([])
-                self.ring = HandsData.Finger(fingers[3][1:]) if len(fingers) > 3 else HandsData.Finger([])
-                self.pinky = HandsData.Finger(fingers[4][1:]) if len(fingers) > 4 else HandsData.Finger([])
+            if landmarks_array is not None and len(landmarks_array) >= 21:
+                self._landmarks = landmarks_array
+                self._wrist = landmarks_array[0]
+                self.thumb = HandsData.Finger(landmarks_array[1:5])
+                self.index = HandsData.Finger(landmarks_array[5:9])
+                self.middle = HandsData.Finger(landmarks_array[9:13])
+                self.ring = HandsData.Finger(landmarks_array[13:17])
+                self.pinky = HandsData.Finger(landmarks_array[17:21])
             else:
+                self._landmarks = None
                 self._wrist = None
                 self.thumb = HandsData.Finger([])
                 self.index = HandsData.Finger([])
@@ -137,10 +115,10 @@ class HandsData:
         def __init__(self, hands_dict):
             """
             Args:
-                hands_dict: Dict like {'Left': [...], 'Right': [...]}
+                hands_dict: Dict like {'Left': np.ndarray(21,3), 'Right': np.ndarray(21,3)}
             """
-            self.left = HandsData.Hand(hands_dict.get('Left', []))
-            self.right = HandsData.Hand(hands_dict.get('Right', []))
+            self.left = HandsData.Hand(hands_dict.get('Left'))
+            self.right = HandsData.Hand(hands_dict.get('Right'))
 
         @property
         def has_left(self):
@@ -170,7 +148,7 @@ class HandsData:
         1. Extract landmarks as numpy arrays
         2. Smooth arrays (vectorized)
         3. Normalize arrays (vectorized)
-        4. Convert to finger structure ONCE
+        4. Store arrays directly for lightweight hand/finger views
 
         Args:
             detection_result: MediaPipe hand detection result
@@ -187,11 +165,12 @@ class HandsData:
             for hand_landmarks, handedness in zip(detection_result.hand_landmarks, detection_result.handedness):
                 hand_label = handedness[0].category_name
 
-                # Extract to numpy array (21x3) - single extraction from MediaPipe
-                raw_array = np.array(
-                    [(lm.x, lm.y, lm.z) for lm in hand_landmarks],
-                    dtype=np.float32
-                )
+                # Extract to a contiguous (21, 3) array with minimal intermediate allocations.
+                raw_array = np.fromiter(
+                    (coord for lm in hand_landmarks for coord in (lm.x, lm.y, lm.z)),
+                    dtype=np.float32,
+                    count=63,
+                ).reshape(21, 3)
 
                 # Smooth the array (vectorized operation)
                 smoothed_array = smoother.smooth_hand(hand_label, raw_array)
@@ -204,9 +183,9 @@ class HandsData:
 
                 normalized_array = (smoothed_array - wrist_pos) / hand_size
 
-                # Convert to finger structure once for each coordinate space
-                camera_data[hand_label] = cls._array_to_finger_structure(smoothed_array)
-                wrist_data[hand_label] = cls._array_to_finger_structure(normalized_array)
+                # Store arrays directly; Hand/Finger accessors expose the same high-level shape.
+                camera_data[hand_label] = smoothed_array
+                wrist_data[hand_label] = normalized_array
 
         # Return final HandsData
         return cls(wrist_data, camera_data)

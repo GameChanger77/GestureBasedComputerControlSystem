@@ -56,7 +56,7 @@ class LandmarkSmoother:
 
         # Vectorized average across all frames in history
         # Stack creates (N, 21, 3) array, mean over axis 0 gives (21, 3)
-        return np.mean(np.stack(self.history[hand_label]), axis=0)
+        return np.mean(np.stack(self.history[hand_label]), axis=0, dtype=np.float32)
 
     def reset(self) -> None:
         """

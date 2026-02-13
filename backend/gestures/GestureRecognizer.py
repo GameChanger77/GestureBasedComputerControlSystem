@@ -53,7 +53,7 @@ class GestureRecognizer(ABC):
         pass
 
     @abstractmethod
-    def update(self, hands_data: HandsData):
+    def update(self, hands_data: HandsData, frame_capture_ts_ns=None):
         """
         Update the gesture recognizer with new hand data.
         This method is implemented in the Gesture recognition classes that inherit from GestureRecognizer.
@@ -61,6 +61,7 @@ class GestureRecognizer(ABC):
 
         Args:
             hands_data: Current hand landmark data
+            frame_capture_ts_ns: Frame capture timestamp (ns) for latency tracking
 
         Returns:
             bool: True if action was executed this frame
@@ -107,11 +108,16 @@ class SnapshotGestureRecognizer(GestureRecognizer):
         self.state_machine = GestureStateMachine(pending_frames, ending_frames)
         self._already_triggered = False
 
-    def update(self, hands_data: HandsData):
+    def update(self, hands_data: HandsData, frame_capture_ts_ns=None):
         """
         Update for snapshot gestures - only trigger once per activation.
         """
         detected, gesture_data = self.detect_gesture(hands_data)
+
+        # Snapshot latency starts at first detection frame.
+        if detected and self.state_machine.is_idle and frame_capture_ts_ns is not None:
+            self.action.set_pending_latency_origin_ts_ns(frame_capture_ts_ns)
+
         state, should_trigger, data = self.state_machine.update(detected, gesture_data)
 
         # Only trigger on first frame of ACTIVE state
@@ -159,11 +165,16 @@ class ContinuousGestureRecognizer(GestureRecognizer):
         super().__init__(action, priority)
         self.state_machine = GestureStateMachine(pending_frames, ending_frames)
 
-    def update(self, hands_data: HandsData):
+    def update(self, hands_data: HandsData, frame_capture_ts_ns=None):
         """
         Update for continuous gestures - trigger every frame while active.
         """
         detected, gesture_data = self.detect_gesture(hands_data)
+
+        # Continuous latency starts from current triggering frame.
+        if detected and frame_capture_ts_ns is not None:
+            self.action.set_pending_latency_origin_ts_ns(frame_capture_ts_ns)
+
         state, should_trigger, data = self.state_machine.update(detected, gesture_data)
 
         if should_trigger:
@@ -251,7 +262,7 @@ class MotionGestureRecognizer(GestureRecognizer):
         """
         raise NotImplementedError("Motion gestures use three-phase detection")
 
-    def update(self, hands_data: HandsData):
+    def update(self, hands_data: HandsData, frame_capture_ts_ns=None):
         """
         Update for motion gestures - track trajectory and validate pattern.
         """
@@ -259,6 +270,9 @@ class MotionGestureRecognizer(GestureRecognizer):
         start_detected, start_data = self.detect_start_pose(hands_data)
         in_progress, tracking_pos = self.detect_motion_in_progress(hands_data)
         motion_complete, motion_data = self.validate_motion_pattern()
+
+        if start_detected and self.state_machine.is_idle and frame_capture_ts_ns is not None:
+            self.action.set_pending_latency_origin_ts_ns(frame_capture_ts_ns)
 
         # Add position to tracker if motion is in progress
         if in_progress:

@@ -1,5 +1,8 @@
 import platform
 import sys
+import time
+import threading
+from collections import deque
 
 # Detect OS and import appropriate libraries
 OS_TYPE = platform.system()
@@ -35,6 +38,13 @@ class Action:
         self.osType = osType
         self.detected_os = OS_TYPE
 
+        # Latency tracking (capture -> action completion)
+        self._latency_lock = threading.Lock()
+        self._latency_samples_ms = deque(maxlen=120)
+        self._latest_latency_ms = None
+        self._frame_capture_ts_ns = None
+        self._pending_latency_origin_ts_ns = None
+
     def takeAction(self, action, data):
         """
         Takes in a string which is an action to execute on the operating system.
@@ -54,11 +64,13 @@ class Action:
             if action == "mouse_move":
                 x, y = data
                 self._move_cursor(x, y)
+                self._record_action_latency()
                 return True
 
             elif action == "left_click":
                 x, y = data
                 self._click(x, y)
+                self._record_action_latency()
                 return True
 
             else:
@@ -68,6 +80,68 @@ class Action:
         except Exception as e:
             print(f"Error executing action {action}: {e}")
             return False
+
+    def set_frame_capture_ts_ns(self, ts_ns):
+        """Set current frame capture timestamp (ns)."""
+        with self._latency_lock:
+            self._frame_capture_ts_ns = ts_ns
+
+    def set_pending_latency_origin_ts_ns(self, ts_ns):
+        """Set action latency origin for a pending/active gesture (ns)."""
+        if ts_ns is None:
+            return
+
+        with self._latency_lock:
+            self._pending_latency_origin_ts_ns = ts_ns
+
+    def _record_action_latency(self):
+        """Record end-to-end action latency sample in ms."""
+        now_ns = time.perf_counter_ns()
+
+        with self._latency_lock:
+            origin_ns = self._pending_latency_origin_ts_ns or self._frame_capture_ts_ns
+            self._pending_latency_origin_ts_ns = None
+
+            if origin_ns is None:
+                return
+
+            latency_ms = (now_ns - origin_ns) / 1_000_000.0
+            if latency_ms < 0:
+                return
+
+            self._latency_samples_ms.append(latency_ms)
+            self._latest_latency_ms = latency_ms
+
+    def get_latency_stats(self):
+        """
+        Get rolling action latency statistics.
+
+        Returns:
+            dict with avg_ms, latest_ms, p95_ms, count
+        """
+        with self._latency_lock:
+            samples = list(self._latency_samples_ms)
+            latest = self._latest_latency_ms
+
+        if not samples:
+            return {
+                "avg_ms": None,
+                "latest_ms": None,
+                "p95_ms": None,
+                "count": 0
+            }
+
+        avg_ms = sum(samples) / len(samples)
+        sorted_samples = sorted(samples)
+        p95_index = max(0, int(0.95 * len(sorted_samples)) - 1)
+        p95_ms = sorted_samples[p95_index]
+
+        return {
+            "avg_ms": avg_ms,
+            "latest_ms": latest,
+            "p95_ms": p95_ms,
+            "count": len(samples)
+        }
 
     def _move_cursor(self, x: int, y: int):
         """
@@ -280,6 +354,7 @@ class Action:
             y: Screen y coordinate in pixels
         """
         self._move_cursor(x, y)
+        self._record_action_latency()
 
     def left_click(self, x: int = None, y: int = None):
         """
@@ -292,6 +367,7 @@ class Action:
         """
         if x is not None and y is not None:
             self._click(x, y)
+            self._record_action_latency()
         else:
             # Click at current cursor position
             # For simplicity, we'll require coordinates for now
@@ -309,9 +385,9 @@ class Action:
         if x is not None and y is not None:
             # Perform two clicks in quick succession
             self._click(x, y)
-            import time
             time.sleep(0.05)  # 50ms delay between clicks
             self._click(x, y)
+            self._record_action_latency()
         else:
             print("Warning: double_click requires x, y coordinates")
 
@@ -326,6 +402,7 @@ class Action:
         """
         if x is not None and y is not None:
             self._right_click(x, y)
+            self._record_action_latency()
         else:
             # Right click at current cursor position
             # For simplicity, we'll require coordinates for now
@@ -341,3 +418,5 @@ class Action:
             delta_y: Vertical scroll amount (positive = up, negative = down)
         """
         self._scroll(delta_x, delta_y)
+        if delta_x != 0 or delta_y != 0:
+            self._record_action_latency()

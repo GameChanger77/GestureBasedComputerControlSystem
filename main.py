@@ -37,12 +37,13 @@ def main():
         strategizer=strategizer,
         action=action,
         model_path=os.path.join('.', 'backend', 'models', 'hand_landmarker.task'),
-        num_hands=2
+        num_hands=2,
+        config=config
     )
 
     # Create and setup main window
     main_window = MainWindow()
-    main_window.set_components(hand_tracker, strategizer, action)
+    main_window.set_components(hand_tracker, strategizer, action, config=config)
     main_window.show()
 
     print("Qt Application started. Close window to exit.")

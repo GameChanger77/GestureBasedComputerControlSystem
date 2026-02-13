@@ -27,8 +27,24 @@ class GestureConfig:
         "scroll_pending_frames": 2,  # Frames to confirm scroll gesture
         "ending_frames": 2,  # Frames in ending state before reset
 
+        # Mouse move action throttling (reduces system-call churn)
+        "mouse_move_min_delta_px": 2,  # Minimum pixel delta before sending cursor update
+        "mouse_move_cadence_ms": 75,  # Force update cadence even for tiny motion
+
         # Screen margins
         "screen_safe_margin": 50,  # Pixels from screen edge to prevent hot corners
+
+        # Performance tuning
+        "target_max_fps": 60,  # Cap capture/inference submission loop at this FPS
+        "show_landmarks_default": False,  # Draw landmarks in preview by default
+        "preview_max_fps": 30,  # Cap UI preview refresh rate (tracking still runs at full speed)
+        "camera_buffer_size": 1,  # Camera capture buffer for lower-latency reads
+        "pipeline_metrics_window": 120,  # Rolling window size for FPS/latency metrics
+
+        # Hand tracker confidence thresholds (tracking vs re-detection tuning)
+        "hand_min_detection_confidence": 0.5,
+        "hand_min_presence_confidence": 0.5,
+        "hand_min_tracking_confidence": 0.5,
 
         # Debug mode
         "debug_mode": True  # Enable debug logging
