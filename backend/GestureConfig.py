@@ -45,10 +45,18 @@ class GestureConfig:
         # Camera runtime tuning (best-effort; backend/camera dependent)
         "camera_target_fps": 30,
         "camera_auto_exposure": True,
+        "camera_dynamic_exposure": True,  # Manual fallback adaptation when auto exposure is disabled
+        "camera_dynamic_exposure_target_luma": 112.0,  # Target average brightness (0-255)
+        "camera_dynamic_exposure_tolerance_luma": 14.0,  # Deadband around target to avoid oscillation
+        "camera_dynamic_exposure_step": 1.0,  # Exposure property delta per adjustment
+        "camera_dynamic_exposure_every_n_frames": 12,  # Run adaptation periodically to keep CPU low
+        "camera_dynamic_exposure_min": None,  # Optional clamp for exposure property
+        "camera_dynamic_exposure_max": None,  # Optional clamp for exposure property
         "camera_exposure_value": None,  # Manual exposure when auto_exposure is False
         "camera_gain_value": None,  # Manual gain override when supported
         "camera_warmup_frames": 8,  # Drop first N frames after camera open
         "camera_readback_log": True,
+        "capture_latest_frame_only": True,  # Decouple capture/inference and always process newest frame
         "right_hand_only_processing": True,  # Skip left hand conversion for lower CPU when controls are right-hand only
 
         # Hand tracker confidence thresholds (tracking vs re-detection tuning)

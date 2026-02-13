@@ -4,6 +4,7 @@ import os
 import platform
 import time
 from collections import deque
+from threading import Condition, Thread
 import numpy as np
 
 from PySide6.QtCore import QThread, Signal
@@ -59,10 +60,30 @@ class HandTracker(QThread):
         self.metrics_window = int(config.get('pipeline_metrics_window', 120)) if config else 120
         self.camera_target_fps = float(config.get('camera_target_fps', 30)) if config else 30.0
         self.camera_auto_exposure = bool(config.get('camera_auto_exposure', True)) if config else True
+        self.camera_dynamic_exposure = bool(config.get('camera_dynamic_exposure', True)) if config else True
+        self.camera_dynamic_exposure_target_luma = (
+            float(config.get('camera_dynamic_exposure_target_luma', 112.0)) if config else 112.0
+        )
+        self.camera_dynamic_exposure_tolerance_luma = (
+            float(config.get('camera_dynamic_exposure_tolerance_luma', 14.0)) if config else 14.0
+        )
+        self.camera_dynamic_exposure_step = (
+            float(config.get('camera_dynamic_exposure_step', 1.0)) if config else 1.0
+        )
+        self.camera_dynamic_exposure_every_n_frames = (
+            int(config.get('camera_dynamic_exposure_every_n_frames', 12)) if config else 12
+        )
+        self.camera_dynamic_exposure_min = (
+            config.get('camera_dynamic_exposure_min', None) if config else None
+        )
+        self.camera_dynamic_exposure_max = (
+            config.get('camera_dynamic_exposure_max', None) if config else None
+        )
         self.camera_exposure_value = config.get('camera_exposure_value', None) if config else None
         self.camera_gain_value = config.get('camera_gain_value', None) if config else None
         self.camera_warmup_frames = int(config.get('camera_warmup_frames', 8)) if config else 8
         self.camera_readback_log = bool(config.get('camera_readback_log', True)) if config else True
+        self.capture_latest_frame_only = bool(config.get('capture_latest_frame_only', True)) if config else True
         self.right_hand_only_processing = bool(config.get('right_hand_only_processing', True)) if config else True
 
         # Runtime state
@@ -72,6 +93,14 @@ class HandTracker(QThread):
         self.preview_enabled = True
         self._stopped_emitted = False
         self._camera_readback = {}
+        self._capture_thread = None
+        self._frame_condition = Condition()
+        self._latest_frame = None
+        self._latest_capture_ts_ns = 0
+        self._latest_frame_seq = 0
+        self._processed_frame_seq = 0
+        self._capture_error_count = 0
+        self._dynamic_exposure_frame_counter = 0
 
         # Timestamp monotonicity for detect_for_video
         self._last_video_timestamp_ms = 0
@@ -81,11 +110,13 @@ class HandTracker(QThread):
         self._callback_intervals_ns = deque(maxlen=self.metrics_window)
         self._last_loop_end_ns = None
         self._capture_times_ms = deque(maxlen=self.metrics_window)
+        self._capture_lag_times_ms = deque(maxlen=self.metrics_window)
         self._preprocess_times_ms = deque(maxlen=self.metrics_window)
         self._inference_times_ms = deque(maxlen=self.metrics_window)
         self._hands_data_times_ms = deque(maxlen=self.metrics_window)
         self._strategize_times_ms = deque(maxlen=self.metrics_window)
         self._emit_times_ms = deque(maxlen=self.metrics_window)
+        self._dropped_capture_frames = deque(maxlen=self.metrics_window)
 
         # Reusable RGB ring buffers to reduce per-frame allocation churn.
         self._rgb_buffers = []
@@ -149,7 +180,7 @@ class HandTracker(QThread):
                 self._set_camera_prop(cv2.CAP_PROP_FPS, self.camera_target_fps)
 
             # Best-effort exposure controls (driver/backend dependent).
-            if is_windows and hasattr(cv2, 'CAP_PROP_AUTO_EXPOSURE'):
+            if hasattr(cv2, 'CAP_PROP_AUTO_EXPOSURE'):
                 self._set_auto_exposure(self.camera_auto_exposure)
 
             if (not self.camera_auto_exposure) and (self.camera_exposure_value is not None) and hasattr(cv2, 'CAP_PROP_EXPOSURE'):
@@ -326,6 +357,141 @@ class HandTracker(QThread):
         self._rgb_buffer_index = (self._rgb_buffer_index + 1) % self._rgb_buffer_count
         return buf
 
+    def _reset_frame_slot(self):
+        """Reset latest-frame slot used by decoupled capture/inference mode."""
+        with self._frame_condition:
+            self._latest_frame = None
+            self._latest_capture_ts_ns = 0
+            self._latest_frame_seq = 0
+            self._processed_frame_seq = 0
+
+    def _start_capture_thread(self):
+        """Start dedicated camera capture thread for latest-frame-only processing."""
+        self._stop_capture_thread()
+        self._capture_thread = Thread(target=self._capture_worker, name="camera-capture", daemon=True)
+        self._capture_thread.start()
+
+    def _stop_capture_thread(self):
+        """Stop capture thread if running."""
+        thread = self._capture_thread
+        self._capture_thread = None
+        if thread and thread.is_alive():
+            thread.join(timeout=0.5)
+
+    def _capture_worker(self):
+        """Read camera frames continuously and keep only the newest frame."""
+        while self.is_running and self.cap is not None:
+            ret, frame = self.cap.read()
+            capture_ts_ns = time.perf_counter_ns()
+
+            if not self.is_running:
+                break
+
+            if not ret:
+                self._capture_error_count += 1
+                time.sleep(0.002)
+                continue
+
+            self._maybe_adjust_dynamic_exposure(frame)
+
+            with self._frame_condition:
+                self._latest_frame = frame
+                self._latest_capture_ts_ns = capture_ts_ns
+                self._latest_frame_seq += 1
+                self._frame_condition.notify()
+
+    def _wait_for_next_frame(self, timeout_sec=0.25):
+        """
+        Wait for a fresh frame from capture thread.
+
+        Returns:
+            tuple: (frame, capture_ts_ns, dropped_frames, wait_ms)
+        """
+        wait_start_ns = time.perf_counter_ns()
+        frame = None
+        capture_ts_ns = 0
+        dropped_frames = 0
+
+        with self._frame_condition:
+            prev_seq = self._processed_frame_seq
+            while self.is_running and self._latest_frame_seq <= prev_seq:
+                self._frame_condition.wait(timeout=timeout_sec)
+                if self._latest_frame_seq <= prev_seq:
+                    break
+
+            if self.is_running and self._latest_frame_seq > prev_seq:
+                frame = self._latest_frame
+                capture_ts_ns = self._latest_capture_ts_ns
+                current_seq = self._latest_frame_seq
+                dropped_frames = max(0, current_seq - prev_seq - 1)
+                self._processed_frame_seq = current_seq
+
+        wait_ms = (time.perf_counter_ns() - wait_start_ns) / 1_000_000.0
+        return frame, capture_ts_ns, dropped_frames, wait_ms
+
+    @staticmethod
+    def _sample_frame_luma(frame):
+        """
+        Estimate frame brightness quickly using subsampled green channel.
+
+        Green carries most luma contribution and avoids an extra color conversion.
+        """
+        if frame is None or frame.size == 0 or frame.ndim != 3:
+            return None
+        sample = frame[::8, ::8, 1]
+        if sample.size == 0:
+            return None
+        return float(sample.mean())
+
+    def _maybe_adjust_dynamic_exposure(self, frame):
+        """Adjust manual exposure periodically to keep brightness near target."""
+        if self.camera_auto_exposure:
+            return
+        if not self.camera_dynamic_exposure:
+            return
+        if not hasattr(cv2, 'CAP_PROP_EXPOSURE'):
+            return
+
+        self._dynamic_exposure_frame_counter += 1
+        every_n = max(1, self.camera_dynamic_exposure_every_n_frames)
+        if (self._dynamic_exposure_frame_counter % every_n) != 0:
+            return
+
+        luma = self._sample_frame_luma(frame)
+        if luma is None:
+            return
+
+        target = self.camera_dynamic_exposure_target_luma
+        tolerance = max(0.0, self.camera_dynamic_exposure_tolerance_luma)
+        low = target - tolerance
+        high = target + tolerance
+        if low <= luma <= high:
+            return
+
+        current = self._read_camera_prop(cv2.CAP_PROP_EXPOSURE)
+        if current is None:
+            return
+
+        step = abs(self.camera_dynamic_exposure_step)
+        if step <= 0:
+            return
+
+        if luma < low:
+            candidate = current + step
+        else:
+            candidate = current - step
+
+        if self.camera_dynamic_exposure_min is not None:
+            candidate = max(float(self.camera_dynamic_exposure_min), candidate)
+        if self.camera_dynamic_exposure_max is not None:
+            candidate = min(float(self.camera_dynamic_exposure_max), candidate)
+
+        if abs(candidate - current) < 1e-6:
+            return
+
+        self._set_camera_prop(cv2.CAP_PROP_EXPOSURE, candidate)
+        self._camera_readback['exposure'] = candidate
+
     def start_tracking(self, camera_index=0, width=640, height=480):
         """
         Start hand tracking in background thread.
@@ -349,7 +515,7 @@ class HandTracker(QThread):
         return True
 
     def run(self):
-        """Main synchronous tracking loop (runs in background thread)."""
+        """Main tracking loop (runs in background thread)."""
         try:
             self._initialize_camera(self.camera_index, self.camera_width, self.camera_height)
 
@@ -360,11 +526,16 @@ class HandTracker(QThread):
             self._rgb_buffers = []
             self._rgb_buffer_index = 0
             self._capture_times_ms.clear()
+            self._capture_lag_times_ms.clear()
             self._preprocess_times_ms.clear()
             self._inference_times_ms.clear()
             self._hands_data_times_ms.clear()
             self._strategize_times_ms.clear()
             self._emit_times_ms.clear()
+            self._dropped_capture_frames.clear()
+            self._capture_error_count = 0
+            self._dynamic_exposure_frame_counter = 0
+            self._reset_frame_slot()
 
             self.is_running = True
             self._stopped_emitted = False
@@ -377,6 +548,9 @@ class HandTracker(QThread):
                     break
                 self.cap.read()
 
+            if self.capture_latest_frame_only:
+                self._start_capture_thread()
+
             frame_budget_ns = 0
             if self.target_max_fps > 0:
                 frame_budget_ns = int(1_000_000_000 / self.target_max_fps)
@@ -385,14 +559,24 @@ class HandTracker(QThread):
                 loop_start_ns = time.perf_counter_ns()
 
                 # Capture
-                ret, frame = self.cap.read()
-                capture_done_ns = time.perf_counter_ns()
+                dropped_frames = 0
+                capture_lag_ms = 0.0
+                if self.capture_latest_frame_only:
+                    frame, capture_ts_ns, dropped_frames, capture_ms = self._wait_for_next_frame()
+                    if frame is None:
+                        continue
+                    capture_done_ns = time.perf_counter_ns()
+                    capture_lag_ms = max(0.0, (loop_start_ns - capture_ts_ns) / 1_000_000.0)
+                else:
+                    ret, frame = self.cap.read()
+                    capture_done_ns = time.perf_counter_ns()
+                    if not ret:
+                        print('Error: Could not read frame from webcam')
+                        break
+                    self._maybe_adjust_dynamic_exposure(frame)
+                    capture_ts_ns = capture_done_ns
+                    capture_ms = (capture_done_ns - loop_start_ns) / 1_000_000.0
 
-                if not ret:
-                    print('Error: Could not read frame from webcam')
-                    break
-
-                capture_ts_ns = capture_done_ns
                 self.action.set_frame_capture_ts_ns(capture_ts_ns)
 
                 # Preprocess for MediaPipe
@@ -448,14 +632,15 @@ class HandTracker(QThread):
                         self._callback_intervals_ns.append(interval_ns)
                 self._last_loop_end_ns = loop_end_ns
 
-                capture_ms = (capture_done_ns - loop_start_ns) / 1_000_000.0
                 preprocess_ms = (preprocess_done_ns - preprocess_start_ns) / 1_000_000.0
                 inference_ms = (infer_done_ns - infer_start_ns) / 1_000_000.0
                 self._capture_times_ms.append(capture_ms)
+                self._capture_lag_times_ms.append(capture_lag_ms)
                 self._preprocess_times_ms.append(preprocess_ms)
                 self._inference_times_ms.append(inference_ms)
                 self._hands_data_times_ms.append(hands_data_ms)
                 self._strategize_times_ms.append(strategize_ms)
+                self._dropped_capture_frames.append(float(dropped_frames))
 
                 pipeline_fps = self._compute_pipeline_fps()
                 frame_pipeline_ms_avg = self._compute_avg_pipeline_ms()
@@ -471,17 +656,19 @@ class HandTracker(QThread):
                         'action_latency_p95_ms': action_latency['p95_ms'],
                         'frame_pipeline_ms_avg': frame_pipeline_ms_avg,
                         'capture_ms': self._avg(self._capture_times_ms),
+                        'capture_queue_lag_ms': self._avg(self._capture_lag_times_ms),
                         'preprocess_ms': self._avg(self._preprocess_times_ms),
                         'inference_wait_ms': self._avg(self._inference_times_ms),
                         'hands_data_ms': self._avg(self._hands_data_times_ms),
                         'strategize_ms': self._avg(self._strategize_times_ms),
                         'emit_ms': self._avg(self._emit_times_ms),
-                        'dropped_pending_frames': 0,
+                        'dropped_pending_frames': self._avg(self._dropped_capture_frames),
                         'camera_backend': self._camera_readback.get('backend'),
                         'camera_fourcc': self._camera_readback.get('fourcc'),
                         'camera_fps_readback': self._camera_readback.get('fps'),
                         'camera_exposure_readback': self._camera_readback.get('exposure'),
                         'camera_gain_readback': self._camera_readback.get('gain'),
+                        'capture_read_errors': self._capture_error_count,
                     },
                 }
 
@@ -512,6 +699,8 @@ class HandTracker(QThread):
         """Stop hand tracking and wait for thread exit."""
         print('Stopping hand tracking...')
         self.is_running = False
+        with self._frame_condition:
+            self._frame_condition.notify_all()
 
         if self.isRunning():
             self.wait(2000)
@@ -520,6 +709,11 @@ class HandTracker(QThread):
 
     def _cleanup(self):
         """Internal cleanup method."""
+        self.is_running = False
+        with self._frame_condition:
+            self._frame_condition.notify_all()
+        self._stop_capture_thread()
+
         if self.cap:
             self.cap.release()
             self.cap = None
@@ -528,8 +722,7 @@ class HandTracker(QThread):
         self._rgb_buffers = []
         self._rgb_buffer_index = 0
         self._camera_readback = {}
-
-        self.is_running = False
+        self._reset_frame_slot()
 
         if not self._stopped_emitted:
             self._stopped_emitted = True
