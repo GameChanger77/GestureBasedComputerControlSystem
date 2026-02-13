@@ -40,6 +40,7 @@ class GestureConfig:
         "preview_max_fps": 30,  # Cap UI preview refresh rate (tracking still runs at full speed)
         "camera_buffer_size": 1,  # Camera capture buffer for lower-latency reads
         "pipeline_metrics_window": 120,  # Rolling window size for FPS/latency metrics
+        "max_tracked_hands": 1,  # Use one hand for lower inference cost (right-hand control path)
 
         # Camera runtime tuning (best-effort; backend/camera dependent)
         "camera_target_fps": 30,
@@ -48,11 +49,12 @@ class GestureConfig:
         "camera_gain_value": None,  # Manual gain override when supported
         "camera_warmup_frames": 8,  # Drop first N frames after camera open
         "camera_readback_log": True,
+        "right_hand_only_processing": True,  # Skip left hand conversion for lower CPU when controls are right-hand only
 
         # Hand tracker confidence thresholds (tracking vs re-detection tuning)
-        "hand_min_detection_confidence": 0.5,
-        "hand_min_presence_confidence": 0.5,
-        "hand_min_tracking_confidence": 0.5,
+        "hand_min_detection_confidence": 0.55,
+        "hand_min_presence_confidence": 0.45,
+        "hand_min_tracking_confidence": 0.4,
 
         # Debug mode
         "debug_mode": True  # Enable debug logging

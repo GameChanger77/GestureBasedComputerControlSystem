@@ -40,8 +40,8 @@ class LandmarkSmoother:
             if self.debug:
                 print(f"Created new history for {hand_label}")
 
-        # Ensure array is float32 for consistency
-        landmarks_array = landmarks_array.astype(np.float32)
+        # Ensure float32 without unnecessary copies.
+        landmarks_array = np.asarray(landmarks_array, dtype=np.float32)
         self.history[hand_label].append(landmarks_array)
 
         history_len = len(self.history[hand_label])
@@ -54,9 +54,17 @@ class LandmarkSmoother:
         if history_len == 1:
             return landmarks_array
 
-        # Vectorized average across all frames in history
-        # Stack creates (N, 21, 3) array, mean over axis 0 gives (21, 3)
-        return np.mean(np.stack(self.history[hand_label]), axis=0, dtype=np.float32)
+        # Fast path for default 2-frame window: avoid stack/mean allocations.
+        if history_len == 2:
+            prev_frame, curr_frame = self.history[hand_label]
+            return (prev_frame + curr_frame) * 0.5
+
+        # Generic path for larger windows.
+        accum = np.zeros_like(landmarks_array, dtype=np.float32)
+        for frame in self.history[hand_label]:
+            accum += frame
+        accum /= float(history_len)
+        return accum
 
     def reset(self) -> None:
         """

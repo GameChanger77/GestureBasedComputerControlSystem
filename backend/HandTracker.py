@@ -63,6 +63,7 @@ class HandTracker(QThread):
         self.camera_gain_value = config.get('camera_gain_value', None) if config else None
         self.camera_warmup_frames = int(config.get('camera_warmup_frames', 8)) if config else 8
         self.camera_readback_log = bool(config.get('camera_readback_log', True)) if config else True
+        self.right_hand_only_processing = bool(config.get('right_hand_only_processing', True)) if config else True
 
         # Runtime state
         self.landmarker = None
@@ -79,6 +80,12 @@ class HandTracker(QThread):
         self._pipeline_frame_times_ms = deque(maxlen=self.metrics_window)
         self._callback_intervals_ns = deque(maxlen=self.metrics_window)
         self._last_loop_end_ns = None
+        self._capture_times_ms = deque(maxlen=self.metrics_window)
+        self._preprocess_times_ms = deque(maxlen=self.metrics_window)
+        self._inference_times_ms = deque(maxlen=self.metrics_window)
+        self._hands_data_times_ms = deque(maxlen=self.metrics_window)
+        self._strategize_times_ms = deque(maxlen=self.metrics_window)
+        self._emit_times_ms = deque(maxlen=self.metrics_window)
 
         # Reusable RGB ring buffers to reduce per-frame allocation churn.
         self._rgb_buffers = []
@@ -279,6 +286,13 @@ class HandTracker(QThread):
 
         return sum(self._pipeline_frame_times_ms) / len(self._pipeline_frame_times_ms)
 
+    @staticmethod
+    def _avg(values):
+        """Compute average of a deque/list, falling back to 0.0 when empty."""
+        if not values:
+            return 0.0
+        return sum(values) / len(values)
+
     def _ensure_rgb_buffers(self, frame_shape):
         """Allocate/reallocate reusable RGB buffers when camera shape changes."""
         if len(frame_shape) != 3:
@@ -345,6 +359,12 @@ class HandTracker(QThread):
             self._last_video_timestamp_ms = 0
             self._rgb_buffers = []
             self._rgb_buffer_index = 0
+            self._capture_times_ms.clear()
+            self._preprocess_times_ms.clear()
+            self._inference_times_ms.clear()
+            self._hands_data_times_ms.clear()
+            self._strategize_times_ms.clear()
+            self._emit_times_ms.clear()
 
             self.is_running = True
             self._stopped_emitted = False
@@ -399,14 +419,22 @@ class HandTracker(QThread):
 
                 if detection_result and detection_result.hand_landmarks:
                     hands_data_start_ns = time.perf_counter_ns()
-                    hands_data = HandsData.from_detection_result(detection_result)
+                    hands_data = HandsData.from_detection_result(
+                        detection_result,
+                        right_hand_only=self.right_hand_only_processing,
+                    )
                     hands_data_end_ns = time.perf_counter_ns()
                     hands_data_ms = (hands_data_end_ns - hands_data_start_ns) / 1_000_000.0
 
-                    strategize_start_ns = time.perf_counter_ns()
-                    self.strategizer.strategize(hands_data, frame_capture_ts_ns=capture_ts_ns)
-                    strategize_end_ns = time.perf_counter_ns()
-                    strategize_ms = (strategize_end_ns - strategize_start_ns) / 1_000_000.0
+                    should_strategize = True
+                    if self.right_hand_only_processing and not hands_data.wrist.has_right:
+                        should_strategize = False
+
+                    if should_strategize:
+                        strategize_start_ns = time.perf_counter_ns()
+                        self.strategizer.strategize(hands_data, frame_capture_ts_ns=capture_ts_ns)
+                        strategize_end_ns = time.perf_counter_ns()
+                        strategize_ms = (strategize_end_ns - strategize_start_ns) / 1_000_000.0
 
                 loop_end_ns = time.perf_counter_ns()
 
@@ -419,6 +447,15 @@ class HandTracker(QThread):
                     if interval_ns > 0:
                         self._callback_intervals_ns.append(interval_ns)
                 self._last_loop_end_ns = loop_end_ns
+
+                capture_ms = (capture_done_ns - loop_start_ns) / 1_000_000.0
+                preprocess_ms = (preprocess_done_ns - preprocess_start_ns) / 1_000_000.0
+                inference_ms = (infer_done_ns - infer_start_ns) / 1_000_000.0
+                self._capture_times_ms.append(capture_ms)
+                self._preprocess_times_ms.append(preprocess_ms)
+                self._inference_times_ms.append(inference_ms)
+                self._hands_data_times_ms.append(hands_data_ms)
+                self._strategize_times_ms.append(strategize_ms)
 
                 pipeline_fps = self._compute_pipeline_fps()
                 frame_pipeline_ms_avg = self._compute_avg_pipeline_ms()
@@ -433,12 +470,12 @@ class HandTracker(QThread):
                         'action_latency_latest_ms': action_latency['latest_ms'],
                         'action_latency_p95_ms': action_latency['p95_ms'],
                         'frame_pipeline_ms_avg': frame_pipeline_ms_avg,
-                        'capture_ms': (capture_done_ns - loop_start_ns) / 1_000_000.0,
-                        'preprocess_ms': (preprocess_done_ns - preprocess_start_ns) / 1_000_000.0,
-                        'inference_wait_ms': (infer_done_ns - infer_start_ns) / 1_000_000.0,
-                        'hands_data_ms': hands_data_ms,
-                        'strategize_ms': strategize_ms,
-                        'emit_ms': 0.0,
+                        'capture_ms': self._avg(self._capture_times_ms),
+                        'preprocess_ms': self._avg(self._preprocess_times_ms),
+                        'inference_wait_ms': self._avg(self._inference_times_ms),
+                        'hands_data_ms': self._avg(self._hands_data_times_ms),
+                        'strategize_ms': self._avg(self._strategize_times_ms),
+                        'emit_ms': self._avg(self._emit_times_ms),
                         'dropped_pending_frames': 0,
                         'camera_backend': self._camera_readback.get('backend'),
                         'camera_fourcc': self._camera_readback.get('fourcc'),
@@ -449,8 +486,11 @@ class HandTracker(QThread):
                 }
 
                 # Reuse converted RGB frame; ring buffers avoid extra copy while preventing overwrite races.
+                emit_start_ns = time.perf_counter_ns()
                 emit_frame = rgb_frame if self.preview_enabled else None
                 self.landmarks_detected.emit(landmarks_data, emit_frame)
+                emit_end_ns = time.perf_counter_ns()
+                self._emit_times_ms.append((emit_end_ns - emit_start_ns) / 1_000_000.0)
 
                 # FPS cap behavior (no delay if already below cap)
                 if frame_budget_ns > 0:

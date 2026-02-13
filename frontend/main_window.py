@@ -393,4 +393,9 @@ class MainWindow(QMainWindow):
         # Stop tracking when window closes
         if self.hand_tracker and self.hand_tracker.isRunning():
             self.hand_tracker.stop_tracking()
+        if self.action and hasattr(self.action, 'close'):
+            try:
+                self.action.close()
+            except Exception:
+                pass
         event.accept()

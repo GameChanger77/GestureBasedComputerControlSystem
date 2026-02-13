@@ -140,7 +140,7 @@ class HandsData:
         self.camera = self.CoordinateSpace(camera_dict)
 
     @classmethod
-    def from_detection_result(cls, detection_result):
+    def from_detection_result(cls, detection_result, right_hand_only=False):
         """
         Factory method to create HandsData from MediaPipe detection result.
 
@@ -165,6 +165,13 @@ class HandsData:
             for hand_landmarks, handedness in zip(detection_result.hand_landmarks, detection_result.handedness):
                 hand_label = handedness[0].category_name
 
+                if right_hand_only:
+                    if hand_label != 'Right':
+                        continue
+                    # One right hand is enough for control path.
+                    if 'Right' in camera_data:
+                        continue
+
                 # Extract to a contiguous (21, 3) array with minimal intermediate allocations.
                 raw_array = np.fromiter(
                     (coord for lm in hand_landmarks for coord in (lm.x, lm.y, lm.z)),
@@ -175,17 +182,24 @@ class HandsData:
                 # Smooth the array (vectorized operation)
                 smoothed_array = smoother.smooth_hand(hand_label, raw_array)
 
-                # Normalize for wrist-relative coordinates (vectorized operation)
+                # Normalize for wrist-relative coordinates.
                 wrist_pos = smoothed_array[0]
                 middle_mcp = smoothed_array[9]  # Middle finger MCP joint
-                hand_size = np.linalg.norm(middle_mcp - wrist_pos)
-                hand_size = max(hand_size, 1e-6)  # Avoid division by zero
+                dx = float(middle_mcp[0] - wrist_pos[0])
+                dy = float(middle_mcp[1] - wrist_pos[1])
+                dz = float(middle_mcp[2] - wrist_pos[2])
+                hand_size = (dx * dx + dy * dy + dz * dz) ** 0.5
+                if hand_size < 1e-6:
+                    hand_size = 1e-6
 
                 normalized_array = (smoothed_array - wrist_pos) / hand_size
 
                 # Store arrays directly; Hand/Finger accessors expose the same high-level shape.
                 camera_data[hand_label] = smoothed_array
                 wrist_data[hand_label] = normalized_array
+
+                if right_hand_only and hand_label == 'Right':
+                    break
 
         # Return final HandsData
         return cls(wrist_data, camera_data)
