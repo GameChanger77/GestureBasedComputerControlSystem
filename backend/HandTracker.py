@@ -57,6 +57,12 @@ class HandTracker(QThread):
         self.target_max_fps = int(config.get('target_max_fps', 60)) if config else 60
         self.camera_buffer_size = int(config.get('camera_buffer_size', 1)) if config else 1
         self.metrics_window = int(config.get('pipeline_metrics_window', 120)) if config else 120
+        self.camera_target_fps = float(config.get('camera_target_fps', 30)) if config else 30.0
+        self.camera_auto_exposure = bool(config.get('camera_auto_exposure', True)) if config else True
+        self.camera_exposure_value = config.get('camera_exposure_value', None) if config else None
+        self.camera_gain_value = config.get('camera_gain_value', None) if config else None
+        self.camera_warmup_frames = int(config.get('camera_warmup_frames', 8)) if config else 8
+        self.camera_readback_log = bool(config.get('camera_readback_log', True)) if config else True
 
         # Runtime state
         self.landmarker = None
@@ -64,6 +70,7 @@ class HandTracker(QThread):
         self.is_running = False
         self.preview_enabled = True
         self._stopped_emitted = False
+        self._camera_readback = {}
 
         # Timestamp monotonicity for detect_for_video
         self._last_video_timestamp_ms = 0
@@ -128,14 +135,28 @@ class HandTracker(QThread):
 
             # Best-effort low-latency buffer size (backend dependent)
             if hasattr(cv2, 'CAP_PROP_BUFFERSIZE') and self.camera_buffer_size > 0:
-                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, self.camera_buffer_size)
+                self._set_camera_prop(cv2.CAP_PROP_BUFFERSIZE, self.camera_buffer_size)
+
+            # Best-effort target camera fps.
+            if hasattr(cv2, 'CAP_PROP_FPS') and self.camera_target_fps > 0:
+                self._set_camera_prop(cv2.CAP_PROP_FPS, self.camera_target_fps)
+
+            # Best-effort exposure controls (driver/backend dependent).
+            if is_windows and hasattr(cv2, 'CAP_PROP_AUTO_EXPOSURE'):
+                self._set_auto_exposure(self.camera_auto_exposure)
+
+            if (not self.camera_auto_exposure) and (self.camera_exposure_value is not None) and hasattr(cv2, 'CAP_PROP_EXPOSURE'):
+                self._set_camera_prop(cv2.CAP_PROP_EXPOSURE, float(self.camera_exposure_value))
+
+            if self.camera_gain_value is not None and hasattr(cv2, 'CAP_PROP_GAIN'):
+                self._set_camera_prop(cv2.CAP_PROP_GAIN, float(self.camera_gain_value))
 
             # Best-effort webcam format tuning on Windows.
             selected_format = None
             if is_windows and hasattr(cv2, 'CAP_PROP_FOURCC'):
                 for fourcc_text in ("MJPG", "YUY2"):
                     fourcc = cv2.VideoWriter_fourcc(*fourcc_text)
-                    self.cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+                    self._set_camera_prop(cv2.CAP_PROP_FOURCC, fourcc)
                     reported = self._decode_fourcc(self.cap.get(cv2.CAP_PROP_FOURCC))
                     if reported == fourcc_text:
                         selected_format = reported
@@ -143,22 +164,83 @@ class HandTracker(QThread):
 
                 if selected_format is None:
                     # Keep first preferred format even if backend doesn't report reliably.
-                    self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                    self._set_camera_prop(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
                     selected_format = self._decode_fourcc(self.cap.get(cv2.CAP_PROP_FOURCC))
 
             backend_name = self.cap.getBackendName() if hasattr(self.cap, 'getBackendName') else 'unknown'
-            print(
-                f'Camera initialized - Resolution: {width}x{height}, '
-                f'backend={backend_name}, dshow={using_dshow}, fourcc={selected_format or "default"}'
-            )
+            self._camera_readback = {
+                'backend': backend_name,
+                'dshow': using_dshow,
+                'fourcc': selected_format or self._decode_fourcc(self._read_camera_prop(cv2.CAP_PROP_FOURCC)),
+                'width': self._read_camera_prop(cv2.CAP_PROP_FRAME_WIDTH),
+                'height': self._read_camera_prop(cv2.CAP_PROP_FRAME_HEIGHT),
+                'fps': self._read_camera_prop(cv2.CAP_PROP_FPS),
+                'auto_exposure': self._read_camera_prop(cv2.CAP_PROP_AUTO_EXPOSURE),
+                'exposure': self._read_camera_prop(cv2.CAP_PROP_EXPOSURE),
+                'gain': self._read_camera_prop(cv2.CAP_PROP_GAIN),
+            }
+
+            if self.camera_readback_log:
+                width_readback = self._camera_readback.get('width')
+                height_readback = self._camera_readback.get('height')
+                fps_readback = self._camera_readback.get('fps')
+                width_text = str(int(width_readback)) if width_readback is not None else '?'
+                height_text = str(int(height_readback)) if height_readback is not None else '?'
+                fps_text = f"{fps_readback:.2f}" if fps_readback is not None else '?'
+                print(
+                    'Camera initialized - '
+                    f"res={width_text}x{height_text}, "
+                    f"backend={self._camera_readback['backend']}, dshow={self._camera_readback['dshow']}, "
+                    f"fourcc={self._camera_readback['fourcc'] or 'default'}, "
+                    f"fps={fps_text}, auto_exp={self._camera_readback['auto_exposure']}, "
+                    f"exp={self._camera_readback['exposure']}, gain={self._camera_readback['gain']}"
+                )
+            else:
+                print(
+                    f'Camera initialized - Resolution: {width}x{height}, '
+                    f'backend={backend_name}, dshow={using_dshow}, fourcc={selected_format or "default"}'
+                )
 
         except Exception as e:
             print(f'Error initializing camera: {e}')
             raise
 
+    def _set_auto_exposure(self, enabled: bool):
+        """Best-effort auto exposure toggle across drivers/backends."""
+        if not hasattr(cv2, 'CAP_PROP_AUTO_EXPOSURE'):
+            return
+
+        # Common backend conventions:
+        # - DSHOW: 0.75 auto, 0.25 manual
+        # - Other drivers: 1 auto, 0 manual
+        candidates = (0.75, 1.0) if enabled else (0.25, 0.0)
+        for value in candidates:
+            self._set_camera_prop(cv2.CAP_PROP_AUTO_EXPOSURE, value)
+
+    def _set_camera_prop(self, prop_id, value):
+        """Set a camera property best-effort."""
+        try:
+            return bool(self.cap.set(prop_id, value))
+        except Exception:
+            return False
+
+    def _read_camera_prop(self, prop_id):
+        """Read a camera property best-effort."""
+        try:
+            if self.cap is None:
+                return None
+            value = self.cap.get(prop_id)
+            if value is None:
+                return None
+            return float(value)
+        except Exception:
+            return None
+
     @staticmethod
     def _decode_fourcc(fourcc_value):
         """Decode OpenCV FOURCC numeric value into a 4-char string."""
+        if fourcc_value is None:
+            return None
         try:
             value = int(fourcc_value)
             chars = [chr((value >> (8 * i)) & 0xFF) for i in range(4)]
@@ -269,6 +351,12 @@ class HandTracker(QThread):
             print('Hand tracking started in background thread')
             self.tracking_started.emit()
 
+            # Allow camera auto-exposure to settle and drop stale startup frames.
+            for _ in range(max(0, self.camera_warmup_frames)):
+                if not self.is_running:
+                    break
+                self.cap.read()
+
             frame_budget_ns = 0
             if self.target_max_fps > 0:
                 frame_budget_ns = int(1_000_000_000 / self.target_max_fps)
@@ -352,6 +440,11 @@ class HandTracker(QThread):
                         'strategize_ms': strategize_ms,
                         'emit_ms': 0.0,
                         'dropped_pending_frames': 0,
+                        'camera_backend': self._camera_readback.get('backend'),
+                        'camera_fourcc': self._camera_readback.get('fourcc'),
+                        'camera_fps_readback': self._camera_readback.get('fps'),
+                        'camera_exposure_readback': self._camera_readback.get('exposure'),
+                        'camera_gain_readback': self._camera_readback.get('gain'),
                     },
                 }
 
@@ -394,6 +487,7 @@ class HandTracker(QThread):
 
         self._rgb_buffers = []
         self._rgb_buffer_index = 0
+        self._camera_readback = {}
 
         self.is_running = False
 

@@ -56,6 +56,8 @@ class MoveMouseGesture(ContinuousGestureRecognizer):
         """
         self._frame_count += 1
 
+        if not hands_data.wrist.has_right or not hands_data.camera.has_right:
+            return False, None
         hand_wrist = hands_data.wrist.right
         hand_camera = hands_data.camera.right
 

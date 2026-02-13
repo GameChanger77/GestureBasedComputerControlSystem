@@ -41,6 +41,14 @@ class GestureConfig:
         "camera_buffer_size": 1,  # Camera capture buffer for lower-latency reads
         "pipeline_metrics_window": 120,  # Rolling window size for FPS/latency metrics
 
+        # Camera runtime tuning (best-effort; backend/camera dependent)
+        "camera_target_fps": 30,
+        "camera_auto_exposure": True,
+        "camera_exposure_value": None,  # Manual exposure when auto_exposure is False
+        "camera_gain_value": None,  # Manual gain override when supported
+        "camera_warmup_frames": 8,  # Drop first N frames after camera open
+        "camera_readback_log": True,
+
         # Hand tracker confidence thresholds (tracking vs re-detection tuning)
         "hand_min_detection_confidence": 0.5,
         "hand_min_presence_confidence": 0.5,
