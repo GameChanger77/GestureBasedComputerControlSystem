@@ -619,6 +619,17 @@ class HandTracker(QThread):
                         self.strategizer.strategize(hands_data, frame_capture_ts_ns=capture_ts_ns)
                         strategize_end_ns = time.perf_counter_ns()
                         strategize_ms = (strategize_end_ns - strategize_start_ns) / 1_000_000.0
+                else:
+                    # Feed an explicit empty state so gesture recognizers can pause/reset on hand loss.
+                    hands_data_start_ns = time.perf_counter_ns()
+                    hands_data = HandsData({}, {})
+                    hands_data_end_ns = time.perf_counter_ns()
+                    hands_data_ms = (hands_data_end_ns - hands_data_start_ns) / 1_000_000.0
+
+                    strategize_start_ns = time.perf_counter_ns()
+                    self.strategizer.strategize(hands_data, frame_capture_ts_ns=capture_ts_ns)
+                    strategize_end_ns = time.perf_counter_ns()
+                    strategize_ms = (strategize_end_ns - strategize_start_ns) / 1_000_000.0
 
                 loop_end_ns = time.perf_counter_ns()
 
@@ -713,6 +724,9 @@ class HandTracker(QThread):
         with self._frame_condition:
             self._frame_condition.notify_all()
         self._stop_capture_thread()
+
+        if hasattr(self.action, "release_all_keys"):
+            self.action.release_all_keys()
 
         if self.cap:
             self.cap.release()

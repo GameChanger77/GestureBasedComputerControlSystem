@@ -1,11 +1,19 @@
+import platform
 import queue
 import threading
 import time
 from collections import deque
 
+from backend.keyboard.KeyCodes import get_windows_vk, normalize_key
 from pynput.mouse import Controller as Mouse, Button
 from pynput.keyboard import Controller as Keyboard, Key
 from pyparsing import ABC, abstractmethod
+
+OS_TYPE = platform.system()
+if OS_TYPE == "Windows":
+    import ctypes
+    from ctypes import wintypes
+
 
 class MouseTest(ABC):
     @abstractmethod
@@ -47,9 +55,14 @@ class KeyboardTest(ABC):
 
 class Action:
 
-    def __init__(self, mouse: MouseTest = None, keyboard_test: KeyboardTest = None):
+    def __init__(self, mouse: MouseTest = None, keyboard_test: KeyboardTest = None, osType=None):
         self.mouse = mouse if mouse is not None else Mouse()
         self.keyboard = keyboard_test if keyboard_test is not None else Keyboard()
+        self.osType = osType if osType is not None else OS_TYPE
+        self.detected_os = self.osType
+        self._held_keys = set()
+        self._keyboard_send_failures = 0
+        self._keyboard_disabled = False
 
         # Latency tracking (capture -> action completion)
         self._latency_lock = threading.Lock()
@@ -65,6 +78,65 @@ class Action:
         self._worker_stop = threading.Event()
         self._worker = threading.Thread(target=self._action_worker, daemon=True)
         self._worker.start()
+
+        if self.detected_os == "Windows":
+            self._init_windows_keyboard_structs()
+
+    def _init_windows_keyboard_structs(self):
+        """Create ctypes structures for Windows SendInput keyboard injection."""
+        self.INPUT_KEYBOARD = 1
+        self.KEYEVENTF_KEYUP = 0x0002
+        self._MAX_CONSECUTIVE_SEND_FAILS = 10
+
+        ULONG_PTR = wintypes.WPARAM
+
+        class MOUSEINPUT(ctypes.Structure):
+            _fields_ = [
+                ("dx", wintypes.LONG),
+                ("dy", wintypes.LONG),
+                ("mouseData", wintypes.DWORD),
+                ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ULONG_PTR),
+            ]
+
+        class KEYBDINPUT(ctypes.Structure):
+            _fields_ = [
+                ("wVk", wintypes.WORD),
+                ("wScan", wintypes.WORD),
+                ("dwFlags", wintypes.DWORD),
+                ("time", wintypes.DWORD),
+                ("dwExtraInfo", ULONG_PTR),
+            ]
+
+        class HARDWAREINPUT(ctypes.Structure):
+            _fields_ = [
+                ("uMsg", wintypes.DWORD),
+                ("wParamL", wintypes.WORD),
+                ("wParamH", wintypes.WORD),
+            ]
+
+        class _INPUTUNION(ctypes.Union):
+            _fields_ = [
+                ("mi", MOUSEINPUT),
+                ("ki", KEYBDINPUT),
+                ("hi", HARDWAREINPUT),
+            ]
+
+        class INPUT(ctypes.Structure):
+            _fields_ = [("type", wintypes.DWORD), ("union", _INPUTUNION)]
+
+        self._send_input = ctypes.windll.user32.SendInput
+        self._send_input.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+        self._send_input.restype = wintypes.UINT
+
+        self._get_last_error = ctypes.windll.kernel32.GetLastError
+        self._get_last_error.argtypes = ()
+        self._get_last_error.restype = wintypes.DWORD
+
+        self._INPUTUNION = _INPUTUNION
+        self._KEYBDINPUT = KEYBDINPUT
+        self._INPUT = INPUT
 
     def _action_worker(self):
         """Execute queued OS actions off the tracker thread."""
@@ -290,6 +362,138 @@ class Action:
     def release_right_click(self):
         self._enqueue_action(self.mouse.release, (Button.right,))
 
+    def _pynput_key_from_logical(self, key_code: str):
+        logical = normalize_key(key_code)
+        if not logical:
+            return None
+
+        if len(logical) == 1:
+            return logical
+
+        punct = {
+            "backtick": "`",
+            "minus": "-",
+            "equals": "=",
+            "left_bracket": "[",
+            "right_bracket": "]",
+            "backslash": "\\",
+            "semicolon": ";",
+            "quote": "'",
+            "comma": ",",
+            "period": ".",
+            "slash": "/",
+        }
+        if logical in punct:
+            return punct[logical]
+
+        key_lookup = {
+            "tab": getattr(Key, "tab", None),
+            "backspace": getattr(Key, "backspace", None),
+            "enter": getattr(Key, "enter", None),
+            "space": getattr(Key, "space", None),
+            "escape": getattr(Key, "esc", None),
+            "caps_lock": getattr(Key, "caps_lock", None),
+            "left_shift": getattr(Key, "shift_l", None),
+            "right_shift": getattr(Key, "shift_r", None),
+            "left_ctrl": getattr(Key, "ctrl_l", None),
+            "right_ctrl": getattr(Key, "ctrl_r", None),
+            "left_alt": getattr(Key, "alt_l", None),
+            "right_alt": getattr(Key, "alt_r", None),
+            "left_win": getattr(Key, "cmd_l", getattr(Key, "cmd", None)),
+            "right_win": getattr(Key, "cmd_r", getattr(Key, "cmd", None)),
+            "insert": getattr(Key, "insert", None),
+            "delete": getattr(Key, "delete", None),
+            "home": getattr(Key, "home", None),
+            "end": getattr(Key, "end", None),
+            "page_up": getattr(Key, "page_up", None),
+            "page_down": getattr(Key, "page_down", None),
+            "arrow_left": getattr(Key, "left", None),
+            "arrow_right": getattr(Key, "right", None),
+            "arrow_up": getattr(Key, "up", None),
+            "arrow_down": getattr(Key, "down", None),
+            "f1": getattr(Key, "f1", None),
+            "f2": getattr(Key, "f2", None),
+            "f3": getattr(Key, "f3", None),
+            "f4": getattr(Key, "f4", None),
+            "f5": getattr(Key, "f5", None),
+            "f6": getattr(Key, "f6", None),
+            "f7": getattr(Key, "f7", None),
+            "f8": getattr(Key, "f8", None),
+            "f9": getattr(Key, "f9", None),
+            "f10": getattr(Key, "f10", None),
+            "f11": getattr(Key, "f11", None),
+            "f12": getattr(Key, "f12", None),
+        }
+        return key_lookup.get(logical)
+
+    def _key_down_via_pynput(self, key_code: str):
+        key = self._pynput_key_from_logical(key_code)
+        if key is None:
+            print(f"Warning: unsupported key code '{key_code}'")
+            return False
+        return self._enqueue_action(self.keyboard.press, (key,))
+
+    def _key_up_via_pynput(self, key_code: str):
+        key = self._pynput_key_from_logical(key_code)
+        if key is None:
+            return False
+        return self._enqueue_action(self.keyboard.release, (key,))
+
+    def _send_key_event_windows(self, vk_code: int, key_up: bool = False):
+        """Send one key event via Windows SendInput."""
+        if self._keyboard_disabled:
+            return False
+
+        flags = self.KEYEVENTF_KEYUP if key_up else 0
+        input_obj = self._INPUT(
+            type=self.INPUT_KEYBOARD,
+            union=self._INPUTUNION(
+                ki=self._KEYBDINPUT(
+                    wVk=vk_code,
+                    wScan=0,
+                    dwFlags=flags,
+                    time=0,
+                    dwExtraInfo=0,
+                )
+            ),
+        )
+
+        sent = self._send_input(1, ctypes.byref(input_obj), ctypes.sizeof(self._INPUT))
+        if sent != 1:
+            self._keyboard_send_failures += 1
+            if self._keyboard_send_failures == 1:
+                err = self._get_last_error()
+                print(f"Keyboard SendInput failed (vk={vk_code}, key_up={key_up}, winerr={err})")
+            if self._keyboard_send_failures >= self._MAX_CONSECUTIVE_SEND_FAILS:
+                self._keyboard_disabled = True
+                print("Keyboard input disabled after repeated SendInput failures")
+            return False
+
+        self._keyboard_send_failures = 0
+        return True
+
+    def _key_down_windows(self, key_code: str):
+        vk_code = get_windows_vk(key_code)
+        if vk_code is None:
+            return self._key_down_via_pynput(key_code)
+        return self._send_key_event_windows(vk_code, key_up=False)
+
+    def _key_up_windows(self, key_code: str):
+        vk_code = get_windows_vk(key_code)
+        if vk_code is None:
+            return self._key_up_via_pynput(key_code)
+        return self._send_key_event_windows(vk_code, key_up=True)
+
+    def _key_down(self, key_code: str):
+        if self.detected_os == "Windows":
+            return self._key_down_windows(key_code)
+        return self._key_down_via_pynput(key_code)
+
+    def _key_up(self, key_code: str):
+        if self.detected_os == "Windows":
+            return self._key_up_windows(key_code)
+        return self._key_up_via_pynput(key_code)
+
     def press_key(self, key):
         self._enqueue_action(self.keyboard.press, (key,))
 
@@ -307,10 +511,56 @@ class Action:
         for key in keys:
             self.release_key(key)
 
+    def key_down(self, key_code: str):
+        """Press and hold a keyboard key."""
+        logical = normalize_key(key_code)
+        if not logical or logical in self._held_keys:
+            return
+
+        try:
+            if self._key_down(logical):
+                self._held_keys.add(logical)
+        except Exception as e:
+            print(f"Error on key_down('{logical}'): {e}")
+
+    def key_up(self, key_code: str):
+        """Release a keyboard key."""
+        logical = normalize_key(key_code)
+        if not logical:
+            return
+
+        try:
+            self._key_up(logical)
+        except Exception as e:
+            print(f"Error on key_up('{logical}'): {e}")
+        finally:
+            self._held_keys.discard(logical)
+
+    def tap_key(self, key_code: str):
+        """Press and release a key."""
+        logical = normalize_key(key_code)
+        if not logical:
+            return
+
+        self.key_down(logical)
+        # Keep tap tight but explicit to maintain event ordering.
+        time.sleep(0.005)
+        self.key_up(logical)
+
+    def release_all_keys(self):
+        """Release any currently held keys."""
+        for key in list(self._held_keys):
+            try:
+                self._key_up(key)
+            except Exception as e:
+                print(f"Error releasing key '{key}': {e}")
+        self._held_keys.clear()
+
     def close(self):
         """Stop background action worker."""
         if self._worker_stop.is_set():
             return
+        self.release_all_keys()
         self._worker_stop.set()
         try:
             self._action_queue.put_nowait((None, (), None))

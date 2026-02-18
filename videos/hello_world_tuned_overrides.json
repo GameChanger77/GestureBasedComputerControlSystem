@@ -1,0 +1,42 @@
+{
+  "success": false,
+  "score": 207.83,
+  "taps": 10,
+  "text": " lclk welc",
+  "note": "Baseline replay score from videos/2026-02-13 20-47-21.mp4 with current defaults",
+  "overrides": {
+    "keyboard_finger_anchor_row": 0.42,
+    "keyboard_finger_anchor_mix_x": 0.6,
+    "keyboard_finger_anchor_mix_y": 0.92,
+    "keyboard_hand_vertical_offset": -0.01,
+    "keyboard_hand_horizontal_offset_left": 0.0,
+    "keyboard_hand_horizontal_offset_right": -0.03,
+    "keyboard_hand_vertical_offset_left": -0.03,
+    "keyboard_hand_vertical_offset_right": -0.08,
+    "keyboard_hand_half_width_scale": 3.2,
+    "keyboard_hand_half_width_min": 0.3,
+    "keyboard_hand_half_width_max": 0.42,
+    "keyboard_hand_height_ratio": 0.96,
+    "keyboard_wrist_ema_alpha": 0.28,
+    "keyboard_hand_size_ema_alpha": 0.08,
+    "keyboard_press_bend_threshold_deg": 14.0,
+    "keyboard_press_bend_delta_deg": 4.0,
+    "keyboard_press_radius_drop": 0.012,
+    "keyboard_press_depth_threshold": 0.002,
+    "keyboard_press_depth_velocity_threshold": 0.06,
+    "keyboard_release_bend_threshold_deg": 10.0,
+    "keyboard_release_radius_drop": 0.004,
+    "keyboard_release_depth_threshold": 0.004,
+    "keyboard_press_hover_frames": 1,
+    "keyboard_min_key_refractory_ms": 70,
+    "keyboard_min_global_key_interval_ms": 0,
+    "keyboard_assign_hands_by_x": true,
+    "keyboard_flip_x_for_mapping": true,
+    "keyboard_require_both_hands": true,
+    "keyboard_use_thumb_fingers": true,
+    "keyboard_active_fingers": [
+      "index",
+      "middle"
+    ]
+  }
+}
