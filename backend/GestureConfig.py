@@ -27,8 +27,79 @@ class GestureConfig:
         "scroll_pending_frames": 2,  # Frames to confirm scroll gesture
         "ending_frames": 2,  # Frames in ending state before reset
 
+        # Mode switching
+        "keyboard_mode_entry_pending_frames": 6,
+        "keyboard_mode_exit_pending_frames": 5,
+        "keyboard_mode_exit_extension_angle": 150.0,
+        "keyboard_mode_exit_max_openness": 0.16,
+        "keyboard_mode_exit_max_extension_ratio": 0.90,
+        "keyboard_mode_exit_max_avg_finger_angle": 145.0,
+
+        # In-air keyboard typing
+        "keyboard_tap_depth_threshold": 0.010,
+        "keyboard_tap_velocity_threshold": 0.04,
+        "keyboard_release_hysteresis": 0.004,
+        "keyboard_min_key_refractory_ms": 70,
+        "keyboard_press_hover_frames": 1,
+        "keyboard_hover_baseline_alpha": 0.1,
+        "keyboard_max_tap_xy_drift": 0.08,
+        "keyboard_min_global_key_interval_ms": 0,
+        "keyboard_press_bend_threshold_deg": 14.0,
+        "keyboard_press_bend_delta_deg": 4.0,
+        "keyboard_press_radius_drop": 0.012,
+        "keyboard_press_depth_threshold": 0.002,
+        "keyboard_press_depth_velocity_threshold": 0.06,
+        "keyboard_release_bend_threshold_deg": 10.0,
+        "keyboard_release_radius_drop": 0.004,
+        "keyboard_release_depth_threshold": 0.004,
+        "keyboard_repeat_delay_ms": 450,
+        "keyboard_repeat_rate_hz": 8,
+        "keyboard_key_sticky_margin": 0.10,
+        "keyboard_nearest_key_max_distance": 0.20,
+        "keyboard_flip_x_for_mapping": True,
+        "keyboard_fixed_center_mode": False,
+        "keyboard_fixed_lock_press_plane": True,
+        "keyboard_fixed_center_x": 0.5,
+        "keyboard_fixed_center_y": 0.58,
+        "keyboard_fixed_width": 0.78,
+        "keyboard_fixed_height": 0.26,
+        "keyboard_wrist_ema_alpha": 0.28,
+        "keyboard_hand_half_width_scale": 3.2,
+        "keyboard_hand_half_width_min": 0.30,
+        "keyboard_hand_half_width_max": 0.42,
+        "keyboard_hand_height_ratio": 0.96,
+        "keyboard_hand_upward_bias": 0.70,
+        "keyboard_hand_vertical_offset": -0.010,
+        "keyboard_hand_horizontal_offset_left": 0.0,
+        "keyboard_hand_horizontal_offset_right": -0.03,
+        "keyboard_hand_vertical_offset_left": -0.03,
+        "keyboard_hand_vertical_offset_right": -0.08,
+        "keyboard_finger_anchor_row": 0.42,
+        "keyboard_finger_anchor_mix_x": 0.60,
+        "keyboard_finger_anchor_mix_y": 0.92,
+        "keyboard_hand_size_ema_alpha": 0.08,
+        "keyboard_y_offset_from_fingertips": -0.01,
+        "keyboard_y_offset_from_wrists": -0.06,
+        "keyboard_active_fingers": ["index", "middle"],
+        "keyboard_assign_hands_by_x": True,
+        "keyboard_enforce_side_zones": False,
+        "keyboard_side_zone_overlap": 0.16,
+        "keyboard_use_thumb_fingers": True,
+        "keyboard_require_both_hands": True,
+        "keyboard_pause_on_hand_loss": True,
+        "keyboard_resume_stability_frames": 4,
+        "keyboard_debug_log_interval_sec": 0.8,
+        "keyboard_mode_switch_cooldown_sec": 1.0,
+
         # Screen margins
         "screen_safe_margin": 50,  # Pixels from screen edge to prevent hot corners
+
+        # Camera capture
+        "camera_width": 1280,
+        "camera_height": 720,
+
+        # Preview
+        "preview_flip_horizontal": True,
 
         # Debug mode
         "debug_mode": True  # Enable debug logging

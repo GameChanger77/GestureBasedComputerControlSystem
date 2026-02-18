@@ -393,3 +393,52 @@ def are_only_fingers_extended(hand, extended_fingers, extension_threshold):
                 return False
 
     return True
+
+
+def get_palm_normal(hand):
+    """
+    Estimate palm normal using wrist -> index base and wrist -> pinky base vectors.
+
+    Returns:
+        np.array([nx, ny, nz]) normalized, or zeros when invalid.
+    """
+    if hand is None or not hand.exists or hand.wrist is None:
+        return np.array([0.0, 0.0, 0.0])
+
+    index_base = hand.index.base
+    pinky_base = hand.pinky.base
+    if index_base is None or pinky_base is None:
+        return np.array([0.0, 0.0, 0.0])
+
+    wrist = np.array(hand.wrist)
+    v1 = np.array(index_base) - wrist
+    v2 = np.array(pinky_base) - wrist
+    normal = np.cross(v1, v2)
+    mag = np.linalg.norm(normal)
+    if mag < 1e-6:
+        return np.array([0.0, 0.0, 0.0])
+    return normal / mag
+
+
+def is_palm_facing_camera(hand, min_normal_z=0.35):
+    """
+    Approximate whether palm is facing camera.
+
+    Uses absolute Z component of palm normal so it works for both hands without
+    relying on handedness-specific sign conventions.
+    """
+    normal = get_palm_normal(hand)
+    return abs(normal[2]) >= min_normal_z
+
+
+def is_hand_fully_open(hand, extension_threshold=155.0, min_extended_fingers=4, openness_threshold=0.08):
+    """
+    Check if hand is open enough for mode-switch entry.
+    """
+    if hand is None or not hand.exists:
+        return False
+
+    fingers = [hand.thumb, hand.index, hand.middle, hand.ring, hand.pinky]
+    extended_count = sum(1 for finger in fingers if is_finger_extended(finger, threshold=extension_threshold))
+    openness = get_hand_openness(hand)
+    return extended_count >= min_extended_fingers and openness >= openness_threshold

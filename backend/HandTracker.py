@@ -118,10 +118,13 @@ class HandTracker(QThread):
         detection_result = self.landmarker.detect_for_video(mp_image, timestamp_ms)
 
         # Get smoothed hands data
-        hands_data = None
         if detection_result.hand_landmarks:
             hands_data = HandsData.from_detection_result(detection_result)
-            self.strategizer.strategize(hands_data)
+        else:
+            # Feed empty state so recognizers can pause/reset safely on hand loss.
+            hands_data = HandsData({}, {})
+
+        self.strategizer.strategize(hands_data)
 
         return detection_result, hands_data
 
@@ -225,6 +228,9 @@ class HandTracker(QThread):
 
     def _cleanup(self):
         """Internal cleanup method"""
+        if hasattr(self.action, "release_all_keys"):
+            self.action.release_all_keys()
+
         if self.cap:
             self.cap.release()
             print("Camera released")
