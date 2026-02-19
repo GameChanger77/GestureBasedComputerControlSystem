@@ -466,3 +466,6 @@ Edit `gesture_config.json` to customize behavior:
 - Increase `*_pending_frames` to prevent accidental gesture triggers (less responsive)
 - Increase `scroll_sensitivity` for faster scrolling
 - Increase `screen_safe_margin` to prevent cursor from sticking to edges
+
+
+test push on linux
