@@ -1,10 +1,55 @@
 from pynput.mouse import Controller as Mouse, Button
 from pynput.keyboard import Controller as Keyboard, Key
+from pyparsing import ABC, abstractmethod
+
+class MouseTest(ABC):
+    @abstractmethod
+    def move_cursor(self, x: int, y: int):
+        pass
+
+    @abstractmethod
+    def left_click(self, x: int = None, y: int = None):
+        pass
+
+    @abstractmethod
+    def double_click(self, x: int = None, y: int = None):
+        pass
+
+    @abstractmethod
+    def right_click(self, x: int = None, y: int = None):
+        pass
+
+    @abstractmethod
+    def scroll(self, delta_x: int = 0, delta_y: int = 0):
+        pass
+    
+class KeyboardTest(ABC):
+    @abstractmethod
+    def press_key(self, key):
+        pass
+
+    @abstractmethod
+    def release_key(self, key):
+        pass
+
+    @abstractmethod
+    def press_and_release_key(self, key):
+        pass
+
+    @abstractmethod
+    def perform_macro(self, keys: list):
+        pass
 
 class Action:
-    def __init__(self): #TODO remove osType argument since we can auto-detect
-        self.mouse = Mouse()
-        self.keyboard = Keyboard()
+    def __init__(self, mouse: MouseTest = None, keyboard_test: KeyboardTest = None): 
+        """Creates Action class using pynput as default for keyboard and mouse input.
+
+        Args:
+            mouse (MouseTest, optional): Mock mouse for testing. Defaults to None.
+            keyboard_test (KeyboardTest, optional): Mock keyboard for testing. Defaults to None.
+        """
+        self.mouse = mouse if mouse is not None else Mouse()
+        self.keyboard = keyboard_test if keyboard_test is not None else Keyboard()
         
     def move_cursor(self, x: int, y: int):
         """
@@ -136,7 +181,10 @@ class Action:
             keys: A list of keys to press and release in sequence
         """
         for key in keys:
-            self.press_and_release_key(key)
+            self.press_key(key)
+            
+        for key in keys:
+            self.release_key(key)
         
     # def type_text(self, text: str):
     #     """
