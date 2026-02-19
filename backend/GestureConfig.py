@@ -27,8 +27,42 @@ class GestureConfig:
         "scroll_pending_frames": 2,  # Frames to confirm scroll gesture
         "ending_frames": 2,  # Frames in ending state before reset
 
+        # Mouse move action throttling (reduces system-call churn)
+        "mouse_move_min_delta_px": 2,  # Minimum pixel delta before sending cursor update
+        "mouse_move_cadence_ms": 75,  # Force update cadence even for tiny motion
+
         # Screen margins
         "screen_safe_margin": 50,  # Pixels from screen edge to prevent hot corners
+
+        # Performance tuning
+        "target_max_fps": 60,  # Cap capture/inference submission loop at this FPS
+        "show_landmarks_default": False,  # Draw landmarks in preview by default
+        "preview_max_fps": 30,  # Cap UI preview refresh rate (tracking still runs at full speed)
+        "camera_buffer_size": 1,  # Camera capture buffer for lower-latency reads
+        "pipeline_metrics_window": 120,  # Rolling window size for FPS/latency metrics
+        "max_tracked_hands": 1,  # Use one hand for lower inference cost (right-hand control path)
+
+        # Camera runtime tuning (best-effort; backend/camera dependent)
+        "camera_target_fps": 30,
+        "camera_auto_exposure": True,
+        "camera_dynamic_exposure": True,  # Manual fallback adaptation when auto exposure is disabled
+        "camera_dynamic_exposure_target_luma": 112.0,  # Target average brightness (0-255)
+        "camera_dynamic_exposure_tolerance_luma": 14.0,  # Deadband around target to avoid oscillation
+        "camera_dynamic_exposure_step": 1.0,  # Exposure property delta per adjustment
+        "camera_dynamic_exposure_every_n_frames": 12,  # Run adaptation periodically to keep CPU low
+        "camera_dynamic_exposure_min": None,  # Optional clamp for exposure property
+        "camera_dynamic_exposure_max": None,  # Optional clamp for exposure property
+        "camera_exposure_value": None,  # Manual exposure when auto_exposure is False
+        "camera_gain_value": None,  # Manual gain override when supported
+        "camera_warmup_frames": 8,  # Drop first N frames after camera open
+        "camera_readback_log": True,
+        "capture_latest_frame_only": True,  # Decouple capture/inference and always process newest frame
+        "right_hand_only_processing": True,  # Skip left hand conversion for lower CPU when controls are right-hand only
+
+        # Hand tracker confidence thresholds (tracking vs re-detection tuning)
+        "hand_min_detection_confidence": 0.55,
+        "hand_min_presence_confidence": 0.45,
+        "hand_min_tracking_confidence": 0.4,
 
         # Debug mode
         "debug_mode": True  # Enable debug logging

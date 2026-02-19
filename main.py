@@ -22,7 +22,7 @@ def main():
     print(f"Detected screen resolution: {screen_width}x{screen_height}")
 
     # Create backend components
-    action = Action("windows")
+    action = Action()
     # Load gesture configuration (uses defaults if no config file exists)
     config = GestureConfig()
     strategizer = Strategizer(
@@ -31,18 +31,22 @@ def main():
         screen_width=screen_width,
         screen_height=screen_height
     )
+    max_tracked_hands = int(config.get('max_tracked_hands', 1))
+    if max_tracked_hands < 1:
+        max_tracked_hands = 1
 
     # Create HandTracker (now a QThread)
     hand_tracker = HandTracker(
         strategizer=strategizer,
         action=action,
         model_path=os.path.join('.', 'backend', 'models', 'hand_landmarker.task'),
-        num_hands=2
+        num_hands=max_tracked_hands,
+        config=config
     )
 
     # Create and setup main window
     main_window = MainWindow()
-    main_window.set_components(hand_tracker, strategizer, action)
+    main_window.set_components(hand_tracker, strategizer, action, config=config)
     main_window.show()
 
     print("Qt Application started. Close window to exit.")
