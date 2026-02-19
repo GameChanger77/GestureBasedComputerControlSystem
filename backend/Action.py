@@ -3,16 +3,53 @@ import threading
 import time
 from collections import deque
 
-from pynput.keyboard import Controller as Keyboard
-from pynput.mouse import Button, Controller as Mouse
+from pynput.mouse import Controller as Mouse, Button
+from pynput.keyboard import Controller as Keyboard, Key
+from pyparsing import ABC, abstractmethod
 
+class MouseTest(ABC):
+    @abstractmethod
+    def move_cursor(self, x: int, y: int):
+        pass
+
+    @abstractmethod
+    def left_click(self, x: int = None, y: int = None):
+        pass
+
+    @abstractmethod
+    def double_click(self, x: int = None, y: int = None):
+        pass
+
+    @abstractmethod
+    def right_click(self, x: int = None, y: int = None):
+        pass
+
+    @abstractmethod
+    def scroll(self, delta_x: int = 0, delta_y: int = 0):
+        pass
+    
+class KeyboardTest(ABC):
+    @abstractmethod
+    def press_key(self, key):
+        pass
+
+    @abstractmethod
+    def release_key(self, key):
+        pass
+
+    @abstractmethod
+    def press_and_release_key(self, key):
+        pass
+
+    @abstractmethod
+    def perform_macro(self, keys: list):
+        pass
 
 class Action:
-    def __init__(self, osType=None):
-        # osType kept for backward compatibility with older call sites.
-        self.osType = osType
-        self.mouse = Mouse()
-        self.keyboard = Keyboard()
+
+    def __init__(self, mouse: MouseTest = None, keyboard_test: KeyboardTest = None):
+        self.mouse = mouse if mouse is not None else Mouse()
+        self.keyboard = keyboard_test if keyboard_test is not None else Keyboard()
 
         # Latency tracking (capture -> action completion)
         self._latency_lock = threading.Lock()
@@ -189,6 +226,7 @@ class Action:
     def _scroll_impl(self, delta_x, delta_y):
         self.mouse.scroll(int(delta_x), int(delta_y))
 
+
     def move_cursor(self, x: int, y: int):
         """
         Public method to move the cursor.
@@ -218,6 +256,7 @@ class Action:
         """
         origin_ns = self._capture_latency_origin_for_action()
         self._enqueue_action(self._double_click_impl, (x, y), origin_ns=origin_ns)
+
 
     def right_click(self, x: int = None, y: int = None):
         """
@@ -263,7 +302,10 @@ class Action:
 
     def perform_macro(self, keys: list):
         for key in keys:
-            self.press_and_release_key(key)
+            self.press_key(key)
+            
+        for key in keys:
+            self.release_key(key)
 
     def close(self):
         """Stop background action worker."""
