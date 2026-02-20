@@ -333,7 +333,11 @@ class MainWindow(QMainWindow):
                 # Overlay drawing mutates pixels; draw on a copy to avoid races with tracker ring buffers.
                 if not self.show_landmarks:
                     display_frame = display_frame.copy()
-                display_frame = self.draw_keyboard_overlay(display_frame, overlay_data)
+                display_frame = self.draw_keyboard_overlay(
+                    display_frame,
+                    overlay_data,
+                    draw_drag_bounds=self.show_landmarks,
+                )
                 status = overlay_data.get("status", "Keyboard active")
                 event_text = overlay_data.get("last_event", "")
                 conf = overlay_data.get("press_confidence", 0.0)
@@ -438,7 +442,7 @@ class MainWindow(QMainWindow):
 
         return image
 
-    def draw_keyboard_overlay(self, image, overlay_data):
+    def draw_keyboard_overlay(self, image, overlay_data, draw_drag_bounds=False):
         """
         Draw keyboard key rectangles and hover/press states.
         """
@@ -511,6 +515,28 @@ class MainWindow(QMainWindow):
                 text_thickness,
                 cv2.LINE_AA,
             )
+
+        if draw_drag_bounds:
+            for bound in overlay_data.get("drag_bounds", []):
+                x1 = int(max(0, min(width - 1, bound["x"] * width)))
+                y1 = int(max(0, min(height - 1, bound["y"] * height)))
+                x2 = int(max(0, min(width - 1, (bound["x"] + bound["w"]) * width)))
+                y2 = int(max(0, min(height - 1, (bound["y"] + bound["h"]) * height)))
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
+                cv2.rectangle(image, (x1, y1), (x2, y2), (255, 80, 255), 2)
+                label = f"{bound.get('side', '?')} drag"
+                cv2.putText(
+                    image,
+                    label,
+                    (x1 + 3, max(12, y1 - 5)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (255, 80, 255),
+                    1,
+                    cv2.LINE_AA,
+                )
 
         status = overlay_data.get("status", "")
         if status:

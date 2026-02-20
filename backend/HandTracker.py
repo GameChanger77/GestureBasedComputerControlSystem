@@ -153,12 +153,18 @@ class HandTracker(QThread):
         """Initialize the camera."""
         try:
             is_windows = platform.system() == "Windows"
+            is_linux = platform.system() == "Linux"
             using_dshow = False
+            using_v4l2 = False
 
             # On Windows prefer DirectShow to avoid MSMF instability/overhead where possible.
             if is_windows and hasattr(cv2, 'CAP_DSHOW'):
                 self.cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
                 using_dshow = bool(self.cap and self.cap.isOpened())
+            elif is_linux and hasattr(cv2, 'CAP_V4L2'):
+                # On Linux prefer V4L2 so UVC controls (auto-exposure, gain, etc.) are addressable.
+                self.cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
+                using_v4l2 = bool(self.cap and self.cap.isOpened())
             else:
                 self.cap = cv2.VideoCapture(camera_index)
 
@@ -206,9 +212,12 @@ class HandTracker(QThread):
                     selected_format = self._decode_fourcc(self.cap.get(cv2.CAP_PROP_FOURCC))
 
             backend_name = self.cap.getBackendName() if hasattr(self.cap, 'getBackendName') else 'unknown'
+            backend_upper = str(backend_name).upper()
+            using_v4l2 = using_v4l2 or ('V4L' in backend_upper)
             self._camera_readback = {
                 'backend': backend_name,
                 'dshow': using_dshow,
+                'v4l2': using_v4l2,
                 'fourcc': selected_format or self._decode_fourcc(self._read_camera_prop(cv2.CAP_PROP_FOURCC)),
                 'width': self._read_camera_prop(cv2.CAP_PROP_FRAME_WIDTH),
                 'height': self._read_camera_prop(cv2.CAP_PROP_FRAME_HEIGHT),
@@ -229,6 +238,7 @@ class HandTracker(QThread):
                     'Camera initialized - '
                     f"res={width_text}x{height_text}, "
                     f"backend={self._camera_readback['backend']}, dshow={self._camera_readback['dshow']}, "
+                    f"v4l2={self._camera_readback['v4l2']}, "
                     f"fourcc={self._camera_readback['fourcc'] or 'default'}, "
                     f"fps={fps_text}, auto_exp={self._camera_readback['auto_exposure']}, "
                     f"exp={self._camera_readback['exposure']}, gain={self._camera_readback['gain']}"
@@ -236,7 +246,8 @@ class HandTracker(QThread):
             else:
                 print(
                     f'Camera initialized - Resolution: {width}x{height}, '
-                    f'backend={backend_name}, dshow={using_dshow}, fourcc={selected_format or "default"}'
+                    f'backend={backend_name}, dshow={using_dshow}, v4l2={using_v4l2}, '
+                    f'fourcc={selected_format or "default"}'
                 )
 
         except Exception as e:
@@ -248,10 +259,22 @@ class HandTracker(QThread):
         if not hasattr(cv2, 'CAP_PROP_AUTO_EXPOSURE'):
             return
 
+        backend_name = ''
+        if self.cap is not None and hasattr(self.cap, 'getBackendName'):
+            try:
+                backend_name = self.cap.getBackendName()
+            except Exception:
+                backend_name = ''
+        backend_upper = str(backend_name).upper()
+
         # Common backend conventions:
-        # - DSHOW: 0.75 auto, 0.25 manual
-        # - Other drivers: 1 auto, 0 manual
-        candidates = (0.75, 1.0) if enabled else (0.25, 0.0)
+        # - V4L2 (Linux): 3 auto, 1 manual
+        # - Existing cross-platform behavior in this project: 0.75 auto, 0.25 manual
+        if ('V4L' in backend_upper) or (platform.system() == "Linux"):
+            candidates = (3.0,) if enabled else (1.0,)
+        else:
+            candidates = (0.75, 1.0) if enabled else (0.25, 0.0)
+
         for value in candidates:
             self._set_camera_prop(cv2.CAP_PROP_AUTO_EXPOSURE, value)
 

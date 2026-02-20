@@ -103,6 +103,8 @@ class AirTypingGesture(GestureRecognizer):
         self.finger_anchor_row = float(self.config.get("keyboard_finger_anchor_row", 0.20))
         self.finger_anchor_mix_x = float(self.config.get("keyboard_finger_anchor_mix_x", 0.92))
         self.finger_anchor_mix_y = float(self.config.get("keyboard_finger_anchor_mix_y", 0.90))
+        self.drag_deadzone_margin_x = float(self.config.get("keyboard_drag_deadzone_margin_x", 0.14))
+        self.drag_deadzone_margin_y = float(self.config.get("keyboard_drag_deadzone_margin_y", 0.18))
         self.size_ema_alpha = float(self.config.get("keyboard_hand_size_ema_alpha", 0.22))
 
         self.debug_enabled = bool(self.config.get("debug_mode", False))
@@ -122,6 +124,8 @@ class AirTypingGesture(GestureRecognizer):
         self._anchor_avg: Dict[str, Optional[Tuple[float, float]]] = {"left": None, "right": None}
         self._size_avg: Dict[str, Optional[Tuple[float, float]]] = {"left": None, "right": None}
         self._overlay_keys = []
+        self._active_frames: Dict[str, Optional[HandFrame]] = {"left": None, "right": None}
+        self._drag_bounds_by_side: Dict[str, HandFrame] = {}
         self._hovered_slots = set()
 
         self._rows_by_side = self._build_split_rows()
@@ -563,6 +567,100 @@ class AirTypingGesture(GestureRecognizer):
 
         return key_rects
 
+    @staticmethod
+    def _copy_frame(frame: Optional[HandFrame]) -> Optional[HandFrame]:
+        if frame is None:
+            return None
+        return HandFrame(left=frame.left, top=frame.top, width=frame.width, height=frame.height)
+
+    @staticmethod
+    def _frame_center(frame: HandFrame) -> Tuple[float, float]:
+        return (frame.left + (frame.width / 2.0), frame.top + (frame.height / 2.0))
+
+    def _compute_deadzone_frame(self, frame: HandFrame) -> HandFrame:
+        margin_x = max(0.0, frame.width * self.drag_deadzone_margin_x)
+        margin_y = max(0.0, frame.height * self.drag_deadzone_margin_y)
+        width = min(1.0, frame.width + (2.0 * margin_x))
+        height = min(1.0, frame.height + (2.0 * margin_y))
+
+        center_x, center_y = self._frame_center(frame)
+        center_x = self._clamp(center_x, width / 2.0, 1.0 - (width / 2.0))
+        center_y = self._clamp(center_y, height / 2.0, 1.0 - (height / 2.0))
+
+        return HandFrame(
+            left=center_x - (width / 2.0),
+            top=center_y - (height / 2.0),
+            width=width,
+            height=height,
+        )
+
+    def _update_drag_bounds(self, frames: Dict[str, Optional[HandFrame]]):
+        self._drag_bounds_by_side = {}
+        for side in ("left", "right"):
+            frame = frames.get(side)
+            if frame is None:
+                continue
+            self._drag_bounds_by_side[side] = self._compute_deadzone_frame(frame)
+
+    def _update_active_frames(
+        self,
+        candidate_frames: Dict[str, Optional[HandFrame]],
+        recenter: bool,
+    ):
+        for side in ("left", "right"):
+            candidate = candidate_frames.get(side)
+            active = self._active_frames.get(side)
+
+            if active is None and candidate is not None:
+                self._active_frames[side] = self._copy_frame(candidate)
+                continue
+
+            if recenter:
+                if candidate is not None:
+                    self._active_frames[side] = self._copy_frame(candidate)
+                continue
+
+            if candidate is None or active is None:
+                continue
+
+            candidate_center_x, candidate_center_y = self._frame_center(candidate)
+            deadzone = self._compute_deadzone_frame(active)
+            deadzone_right = deadzone.left + deadzone.width
+            deadzone_bottom = deadzone.top + deadzone.height
+
+            shift_x = 0.0
+            shift_y = 0.0
+            if candidate_center_x < deadzone.left:
+                shift_x = candidate_center_x - deadzone.left
+            elif candidate_center_x > deadzone_right:
+                shift_x = candidate_center_x - deadzone_right
+
+            if candidate_center_y < deadzone.top:
+                shift_y = candidate_center_y - deadzone.top
+            elif candidate_center_y > deadzone_bottom:
+                shift_y = candidate_center_y - deadzone_bottom
+
+            if abs(shift_x) <= 1e-6 and abs(shift_y) <= 1e-6:
+                continue
+
+            active_center_x, active_center_y = self._frame_center(active)
+            new_center_x = self._clamp(
+                active_center_x + shift_x,
+                active.width / 2.0,
+                1.0 - (active.width / 2.0),
+            )
+            new_center_y = self._clamp(
+                active_center_y + shift_y,
+                active.height / 2.0,
+                1.0 - (active.height / 2.0),
+            )
+            self._active_frames[side] = HandFrame(
+                left=new_center_x - (active.width / 2.0),
+                top=new_center_y - (active.height / 2.0),
+                width=active.width,
+                height=active.height,
+            )
+
     def _fallback_overlay_frames(self) -> Dict[str, Optional[HandFrame]]:
         """
         Provide a stable split-keyboard frame when hand-derived frames are unavailable.
@@ -621,8 +719,6 @@ class AirTypingGesture(GestureRecognizer):
         if left is None and right is None:
             return frames
 
-        both_hands_present = self._both_hands_present(hands_data)
-
         if left is not None and right is not None:
             left_cx = left.left + (left.width / 2.0)
             right_cx = right.left + (right.width / 2.0)
@@ -630,7 +726,7 @@ class AirTypingGesture(GestureRecognizer):
             min_separation = avg_width * 0.35
 
             # Keep naturally separated two-hand overlay untouched.
-            if both_hands_present and abs(right_cx - left_cx) >= min_separation:
+            if abs(right_cx - left_cx) >= min_separation:
                 return frames
 
             source_center_x = (left_cx + right_cx) / 2.0
@@ -672,16 +768,21 @@ class AirTypingGesture(GestureRecognizer):
         camera_hands = self._get_hands_by_side(hands_data.camera)
         wrist_hands = self._get_hands_by_side(hands_data.wrist)
 
-        frames = {
+        candidate_frames = {
             "left": self._compute_hand_frame("left", camera_hands.get("left")),
             "right": self._compute_hand_frame("right", camera_hands.get("right")),
         }
-        # Keep overlay geometry available as soon as hand frames are detected,
-        # even while typing is paused/calibrating.
-        overlay_frames = self._spread_overlay_frames(frames, hands_data)
-        self._overlay_keys = self._build_overlay_keys(overlay_frames)
-        if not self._overlay_keys:
-            self._overlay_keys = self._build_overlay_keys(self._fallback_overlay_frames())
+
+        # While calibrating we recenter keyboards around current hands; after that,
+        # keep keyboards fixed unless hands leave the surrounding deadzone bounds.
+        self._update_active_frames(candidate_frames, recenter=self._paused)
+
+        active_frames = self._spread_overlay_frames(self._active_frames, hands_data)
+        if active_frames.get("left") is None and active_frames.get("right") is None:
+            active_frames = self._fallback_overlay_frames()
+
+        self._overlay_keys = self._build_overlay_keys(active_frames)
+        self._update_drag_bounds(active_frames)
 
         if self.require_both_hands and not self._both_hands_present(hands_data):
             self._pause("Typing Paused: both hands required")
@@ -692,7 +793,9 @@ class AirTypingGesture(GestureRecognizer):
             if self._paused:
                 return False
 
-        if self.require_both_hands and (frames["left"] is None or frames["right"] is None):
+        if self.require_both_hands and (
+            candidate_frames["left"] is None or candidate_frames["right"] is None
+        ):
             self._pause("Typing Paused: both hands required")
             return False
 
@@ -702,7 +805,7 @@ class AirTypingGesture(GestureRecognizer):
         global_interval_seconds = self.min_global_key_interval_ms / 1000.0
 
         for side in ("left", "right"):
-            frame = frames.get(side)
+            frame = active_frames.get(side)
             camera_hand = camera_hands.get(side)
             wrist_hand = wrist_hands.get(side)
             if frame is None or camera_hand is None or wrist_hand is None:
@@ -865,6 +968,8 @@ class AirTypingGesture(GestureRecognizer):
         self._state_by_finger.clear()
         self._hovered_slots.clear()
         self._overlay_keys = []
+        self._active_frames = {"left": None, "right": None}
+        self._drag_bounds_by_side = {}
         self._anchor_avg = {"left": None, "right": None}
         self._size_avg = {"left": None, "right": None}
         self._paused = True
@@ -888,11 +993,27 @@ class AirTypingGesture(GestureRecognizer):
             for s in self._state_by_finger.values()
             if s.phase == FingerPhase.PRESSED and s.active_slot_id
         }
+        drag_bounds = []
+        for side in ("left", "right"):
+            bound = self._drag_bounds_by_side.get(side)
+            if bound is None:
+                continue
+            drag_bounds.append(
+                {
+                    "side": side,
+                    "x": bound.left,
+                    "y": bound.top,
+                    "w": bound.width,
+                    "h": bound.height,
+                }
+            )
+
         return {
             "enabled": True,
             "calibrated": not self._paused,
             "status": self._status,
             "keys": self._overlay_keys,
+            "drag_bounds": drag_bounds,
             "hovered_keys": list(self._hovered_slots),
             "pressed_keys": list(pressed_slots),
             "last_event": self._last_event,
