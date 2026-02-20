@@ -84,7 +84,7 @@ class HandTracker(QThread):
         self.camera_warmup_frames = int(config.get('camera_warmup_frames', 8)) if config else 8
         self.camera_readback_log = bool(config.get('camera_readback_log', True)) if config else True
         self.capture_latest_frame_only = bool(config.get('capture_latest_frame_only', True)) if config else True
-        self.right_hand_only_processing = bool(config.get('right_hand_only_processing', True)) if config else True
+        self.right_hand_only_processing = bool(config.get('right_hand_only_processing', False)) if config else False
 
         # Runtime state
         self.landmarker = None

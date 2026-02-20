@@ -563,19 +563,111 @@ class AirTypingGesture(GestureRecognizer):
 
         return key_rects
 
-    def update(self, hands_data: HandsData):
+    def _fallback_overlay_frames(self) -> Dict[str, Optional[HandFrame]]:
+        """
+        Provide a stable split-keyboard frame when hand-derived frames are unavailable.
+        """
+        full_center_x = float(self.config.get("keyboard_fixed_center_x", 0.5))
+        full_center_y = float(self.config.get("keyboard_fixed_center_y", 0.58))
+        full_width = float(self.config.get("keyboard_fixed_width", 0.78))
+        full_height = float(self.config.get("keyboard_fixed_height", 0.26))
+
+        full_width = self._clamp(full_width, 0.35, 0.95)
+        full_height = self._clamp(full_height, 0.12, 0.55)
+        half_gap = max(0.01, full_width * 0.025)
+        half_width = max(0.10, (full_width - half_gap) / 2.0)
+
+        center_y = self._clamp(full_center_y, full_height / 2.0, 1.0 - (full_height / 2.0))
+        left_center_x = self._clamp(
+            full_center_x - ((half_width + half_gap) / 2.0),
+            half_width / 2.0,
+            1.0 - (half_width / 2.0),
+        )
+        right_center_x = self._clamp(
+            full_center_x + ((half_width + half_gap) / 2.0),
+            half_width / 2.0,
+            1.0 - (half_width / 2.0),
+        )
+
+        return {
+            "left": HandFrame(
+                left=left_center_x - (half_width / 2.0),
+                top=center_y - (full_height / 2.0),
+                width=half_width,
+                height=full_height,
+            ),
+            "right": HandFrame(
+                left=right_center_x - (half_width / 2.0),
+                top=center_y - (full_height / 2.0),
+                width=half_width,
+                height=full_height,
+            ),
+        }
+
+    def _spread_overlay_frames(
+        self,
+        frames: Dict[str, Optional[HandFrame]],
+        hands_data: HandsData,
+    ) -> Dict[str, Optional[HandFrame]]:
+        """
+        Ensure overlay shows two visible keyboard halves.
+
+        When only one hand is detected (or both frames overlap heavily due hand-loss fallback),
+        synthesize separated left/right frames for UI rendering only.
+        """
+        left = frames.get("left")
+        right = frames.get("right")
+
+        if left is None and right is None:
+            return frames
+
+        both_hands_present = self._both_hands_present(hands_data)
+
+        if left is not None and right is not None:
+            left_cx = left.left + (left.width / 2.0)
+            right_cx = right.left + (right.width / 2.0)
+            avg_width = (left.width + right.width) / 2.0
+            min_separation = avg_width * 0.35
+
+            # Keep naturally separated two-hand overlay untouched.
+            if both_hands_present and abs(right_cx - left_cx) >= min_separation:
+                return frames
+
+            source_center_x = (left_cx + right_cx) / 2.0
+            source_center_y = (
+                (left.top + (left.height / 2.0)) + (right.top + (right.height / 2.0))
+            ) / 2.0
+            width = avg_width
+            height = (left.height + right.height) / 2.0
+        else:
+            source = left if left is not None else right
+            source_center_x = source.left + (source.width / 2.0)
+            source_center_y = source.top + (source.height / 2.0)
+            width = source.width
+            height = source.height
+
+        gap = max(0.02, width * 0.10)
+        left_center_x = self._clamp(source_center_x - ((width + gap) / 2.0), width / 2.0, 1.0 - (width / 2.0))
+        right_center_x = self._clamp(source_center_x + ((width + gap) / 2.0), width / 2.0, 1.0 - (width / 2.0))
+        center_y = self._clamp(source_center_y, height / 2.0, 1.0 - (height / 2.0))
+
+        return {
+            "left": HandFrame(
+                left=left_center_x - (width / 2.0),
+                top=center_y - (height / 2.0),
+                width=width,
+                height=height,
+            ),
+            "right": HandFrame(
+                left=right_center_x - (width / 2.0),
+                top=center_y - (height / 2.0),
+                width=width,
+                height=height,
+            ),
+        }
+
+    def update(self, hands_data: HandsData, frame_capture_ts_ns=None):
         action_executed = False
-
-        if self.require_both_hands and not self._both_hands_present(hands_data):
-            self._pause("Typing Paused: both hands required")
-            return False
-
-        if self._paused:
-            return self._resume_if_stable(hands_data)
-
-        if self.require_both_hands and not self._both_hands_present(hands_data):
-            self._pause("Typing Paused: both hands required")
-            return False
 
         camera_hands = self._get_hands_by_side(hands_data.camera)
         wrist_hands = self._get_hands_by_side(hands_data.wrist)
@@ -584,11 +676,25 @@ class AirTypingGesture(GestureRecognizer):
             "left": self._compute_hand_frame("left", camera_hands.get("left")),
             "right": self._compute_hand_frame("right", camera_hands.get("right")),
         }
-        if self.require_both_hands and (frames["left"] is None or frames["right"] is None):
+        # Keep overlay geometry available as soon as hand frames are detected,
+        # even while typing is paused/calibrating.
+        overlay_frames = self._spread_overlay_frames(frames, hands_data)
+        self._overlay_keys = self._build_overlay_keys(overlay_frames)
+        if not self._overlay_keys:
+            self._overlay_keys = self._build_overlay_keys(self._fallback_overlay_frames())
+
+        if self.require_both_hands and not self._both_hands_present(hands_data):
             self._pause("Typing Paused: both hands required")
             return False
 
-        self._overlay_keys = self._build_overlay_keys(frames)
+        if self._paused:
+            self._resume_if_stable(hands_data)
+            if self._paused:
+                return False
+
+        if self.require_both_hands and (frames["left"] is None or frames["right"] is None):
+            self._pause("Typing Paused: both hands required")
+            return False
 
         hovered_slots = set()
         now = time.time()

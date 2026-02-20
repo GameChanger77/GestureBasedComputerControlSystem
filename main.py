@@ -31,9 +31,17 @@ def main():
         screen_width=screen_width,
         screen_height=screen_height
     )
-    max_tracked_hands = int(config.get('max_tracked_hands', 1))
+    max_tracked_hands = int(config.get('max_tracked_hands', 2))
     if max_tracked_hands < 1:
         max_tracked_hands = 1
+
+    if max_tracked_hands < 2:
+        print("[CONFIG] max_tracked_hands < 2 blocks two-hand keyboard mode entry; forcing to 2.")
+        max_tracked_hands = 2
+
+    if bool(config.get('right_hand_only_processing', False)):
+        print("[CONFIG] right_hand_only_processing=True blocks two-hand keyboard mode entry; forcing to False.")
+        config.set('right_hand_only_processing', False)
 
     # Create HandTracker (now a QThread)
     hand_tracker = HandTracker(

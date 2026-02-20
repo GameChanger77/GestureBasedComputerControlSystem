@@ -330,12 +330,16 @@ class MainWindow(QMainWindow):
 
             overlay_data = self._get_keyboard_overlay_data()
             if overlay_data and overlay_data.get("enabled"):
+                # Overlay drawing mutates pixels; draw on a copy to avoid races with tracker ring buffers.
+                if not self.show_landmarks:
+                    display_frame = display_frame.copy()
                 display_frame = self.draw_keyboard_overlay(display_frame, overlay_data)
                 status = overlay_data.get("status", "Keyboard active")
                 event_text = overlay_data.get("last_event", "")
                 conf = overlay_data.get("press_confidence", 0.0)
+                key_count = len(overlay_data.get("keys", []))
                 self.keyboard_status_label.setText(
-                    f"Keyboard: {status} | Last: {event_text} | Conf: {conf:.2f}"
+                    f"Keyboard: {status} | Keys: {key_count} | Last: {event_text} | Conf: {conf:.2f}"
                 )
             else:
                 self.keyboard_status_label.setText("Keyboard: Inactive")
@@ -453,23 +457,23 @@ class MainWindow(QMainWindow):
             x2 = int(max(0, min(width - 1, (key["x"] + key["w"]) * width)))
             y2 = int(max(0, min(height - 1, (key["y"] + key["h"]) * height)))
 
-            border_color = (170, 170, 170)
-            fill_color = (35, 35, 35)
-            thickness = 1
+            border_color = (230, 230, 230)
+            fill_color = (80, 80, 80)
+            thickness = 2
             if key["id"] in hovered:
-                border_color = (0, 215, 255)
-                fill_color = (0, 95, 130)
-                thickness = 2
+                border_color = (10, 245, 255)
+                fill_color = (40, 140, 210)
+                thickness = 3
             if key["id"] in pressed:
-                border_color = (0, 255, 0)
-                fill_color = (0, 110, 0)
-                thickness = 2
+                border_color = (110, 255, 110)
+                fill_color = (35, 170, 35)
+                thickness = 3
 
             if x2 > x1 and y2 > y1:
                 cv2.rectangle(fill_overlay, (x1, y1), (x2, y2), fill_color, -1)
                 key_draw_data.append((key, x1, y1, x2, y2, border_color, thickness))
 
-        image = cv2.addWeighted(fill_overlay, 0.38, image, 0.62, 0)
+        image = cv2.addWeighted(fill_overlay, 0.52, image, 0.48, 0)
 
         for key, x1, y1, x2, y2, border_color, thickness in key_draw_data:
             cv2.rectangle(image, (x1, y1), (x2, y2), border_color, thickness)

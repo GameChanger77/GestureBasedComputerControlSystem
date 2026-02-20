@@ -104,7 +104,7 @@ class GestureConfig:
         "preview_max_fps": 30,  # Cap UI preview refresh rate (tracking still runs at full speed)
         "camera_buffer_size": 1,  # Camera capture buffer for lower-latency reads
         "pipeline_metrics_window": 120,  # Rolling window size for FPS/latency metrics
-        "max_tracked_hands": 1,  # Use one hand for lower inference cost (right-hand control path)
+        "max_tracked_hands": 2,  # Two hands required for keyboard mode entry/exit gestures
 
         # Camera runtime tuning (best-effort; backend/camera dependent)
         "camera_width": 1280,
@@ -124,7 +124,7 @@ class GestureConfig:
         "camera_warmup_frames": 8,  # Drop first N frames after camera open
         "camera_readback_log": True,
         "capture_latest_frame_only": True,  # Decouple capture/inference and always process newest frame
-        "right_hand_only_processing": True,  # Skip left hand conversion for lower CPU when controls are right-hand only
+        "right_hand_only_processing": False,  # Keep both hands so keyboard mode switching can be recognized
 
         # Hand tracker confidence thresholds (tracking vs re-detection tuning)
         "hand_min_detection_confidence": 0.55,

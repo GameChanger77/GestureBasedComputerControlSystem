@@ -149,6 +149,7 @@ class Strategizer:
                 priority=15,
             )
         ]
+        self._rebuild_sorted_gestures(ControlMode.KEYBOARD)
 
     def set_mode(self, mode: ControlMode):
         """
