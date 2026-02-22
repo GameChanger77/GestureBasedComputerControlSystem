@@ -3,7 +3,7 @@ import numpy as np
 import time
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel
+    QPushButton, QLabel, QLineEdit
 )
 from PySide6.QtCore import Slot, Signal
 
@@ -29,6 +29,7 @@ class MainWindow(QMainWindow):
         self.hand_tracker = None
         self.strategizer = None
         self.action = None
+        self.config = None
 
         # Display state
         self.display_enabled = True
@@ -143,6 +144,30 @@ class MainWindow(QMainWindow):
         self.keyboard_status_label.setStyleSheet("font-family: Consolas, monospace; color: #333;")
         main_layout.addWidget(self.keyboard_status_label)
 
+        # Live tuning row for keyboard v2 press velocity threshold
+        tuning_layout = QHBoxLayout()
+        tuning_layout.setSpacing(8)
+        self.press_velocity_label = QLabel("V2 Press Velocity:")
+        self.press_velocity_label.setStyleSheet("font-weight: bold;")
+        tuning_layout.addWidget(self.press_velocity_label)
+
+        self.press_velocity_input = QLineEdit()
+        self.press_velocity_input.setPlaceholderText("e.g. 0.04")
+        self.press_velocity_input.setMaximumWidth(110)
+        self.press_velocity_input.returnPressed.connect(self.apply_press_velocity)
+        tuning_layout.addWidget(self.press_velocity_input)
+
+        self.apply_press_velocity_button = QPushButton("Apply")
+        self.apply_press_velocity_button.clicked.connect(self.apply_press_velocity)
+        self.apply_press_velocity_button.setMaximumWidth(90)
+        tuning_layout.addWidget(self.apply_press_velocity_button)
+
+        self.press_velocity_feedback = QLabel("")
+        self.press_velocity_feedback.setStyleSheet("color: #555;")
+        tuning_layout.addWidget(self.press_velocity_feedback)
+        tuning_layout.addStretch()
+        main_layout.addLayout(tuning_layout)
+
         central_widget.setLayout(main_layout)
 
         # Connect internal frame signal to video widget
@@ -161,6 +186,7 @@ class MainWindow(QMainWindow):
         self.hand_tracker = hand_tracker
         self.strategizer = strategizer
         self.action = action
+        self.config = config
 
         if config is not None:
             self.show_landmarks = bool(config.get('show_landmarks_default', False))
@@ -168,6 +194,7 @@ class MainWindow(QMainWindow):
             self._set_preview_max_fps(preview_max_fps)
             self.video_widget.set_max_preview_fps(preview_max_fps)
             self._update_landmarks_button_text()
+        self._sync_press_velocity_input()
 
         # Connect to HandTracker signals
         if self.hand_tracker:
@@ -354,6 +381,63 @@ class MainWindow(QMainWindow):
         if self.strategizer and hasattr(self.strategizer, "get_keyboard_overlay_data"):
             return self.strategizer.get_keyboard_overlay_data()
         return None
+
+    def _find_air_typing_gesture(self):
+        if not self.strategizer:
+            return None
+        gestures = getattr(self.strategizer, "keyboard_mode_gestures", [])
+        for gesture in gestures:
+            if hasattr(gesture, "v2_press_velocity"):
+                return gesture
+        return None
+
+    def _current_press_velocity(self):
+        gesture = self._find_air_typing_gesture()
+        if gesture is not None:
+            return getattr(gesture, "v2_press_velocity", None)
+        if self.config is not None:
+            return self.config.get("keyboard_v2_press_velocity", None)
+        return None
+
+    def _sync_press_velocity_input(self):
+        value = self._current_press_velocity()
+        if value is None:
+            self.press_velocity_input.setText("")
+        else:
+            self.press_velocity_input.setText(f"{float(value):.4f}".rstrip("0").rstrip("."))
+        self.press_velocity_feedback.setText("")
+
+    @Slot()
+    def apply_press_velocity(self):
+        raw = self.press_velocity_input.text().strip()
+        try:
+            value = float(raw)
+        except ValueError:
+            self.press_velocity_feedback.setStyleSheet("color: #c0392b;")
+            self.press_velocity_feedback.setText("Invalid number")
+            return
+
+        if value < 0.0:
+            self.press_velocity_feedback.setStyleSheet("color: #c0392b;")
+            self.press_velocity_feedback.setText("Must be >= 0")
+            return
+
+        if self.config is not None:
+            if hasattr(self.config, "set"):
+                self.config.set("keyboard_v2_press_velocity", value)
+            else:
+                try:
+                    self.config["keyboard_v2_press_velocity"] = value
+                except Exception:
+                    pass
+
+        gesture = self._find_air_typing_gesture()
+        if gesture is not None:
+            gesture.v2_press_velocity = value
+
+        self.press_velocity_input.setText(f"{value:.4f}".rstrip("0").rstrip("."))
+        self.press_velocity_feedback.setStyleSheet("color: #1e7e34;")
+        self.press_velocity_feedback.setText(f"Applied: {value:.4f}")
 
     def _should_flip_preview(self):
         if self.strategizer and hasattr(self.strategizer, "config"):

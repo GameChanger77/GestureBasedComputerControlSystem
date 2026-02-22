@@ -26,7 +26,6 @@ class KeyboardModeExitGesture(SnapshotGestureRecognizer):
         self.max_openness = max_openness
         self.max_extension_ratio = max_extension_ratio
         self.max_avg_finger_angle = max_avg_finger_angle
-        self._last_debug_ts = 0.0
 
     def _is_strict_fist(self, hand) -> bool:
         openness = get_hand_openness(hand)
@@ -64,16 +63,6 @@ class KeyboardModeExitGesture(SnapshotGestureRecognizer):
 
         left_fist = self._is_strict_fist(left)
         right_fist = self._is_strict_fist(right)
-        if self.strategizer.config.get("debug_mode", False):
-            import time
-            now = time.time()
-            if now - self._last_debug_ts >= 0.8:
-                print(
-                    "[MODE] exit_check "
-                    f"left_open={get_hand_openness(left):.3f} right_open={get_hand_openness(right):.3f} "
-                    f"left_fist={left_fist} right_fist={right_fist}"
-                )
-                self._last_debug_ts = now
         return left_fist and right_fist, None
 
     def execute_action(self, data):
