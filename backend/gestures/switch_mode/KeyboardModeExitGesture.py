@@ -5,7 +5,7 @@ from backend.gestures.GestureUtils import get_finger_angle, get_finger_extension
 
 class KeyboardModeExitGesture(SnapshotGestureRecognizer):
     """
-    Switch from KEYBOARD mode to MOUSE mode when both hands are fists.
+    Switch from KEYBOARD mode to MOUSE mode when the right hand is a fist.
     """
 
     def __init__(
@@ -55,15 +55,12 @@ class KeyboardModeExitGesture(SnapshotGestureRecognizer):
         if self.strategizer.current_mode.value != "keyboard":
             return False, None
 
-        if not hands_data.wrist.has_left or not hands_data.wrist.has_right:
+        if not hands_data.wrist.has_right:
             return False, None
 
-        left = hands_data.wrist.left
         right = hands_data.wrist.right
-
-        left_fist = self._is_strict_fist(left)
         right_fist = self._is_strict_fist(right)
-        return left_fist and right_fist, None
+        return right_fist, None
 
     def execute_action(self, data):
         from backend.Strategizer import ControlMode

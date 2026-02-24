@@ -1,5 +1,7 @@
 import platform
 import queue
+import shutil
+import subprocess
 import threading
 import time
 from collections import deque
@@ -63,6 +65,8 @@ class Action:
         self._held_keys = set()
         self._keyboard_send_failures = 0
         self._keyboard_disabled = False
+        self._xdotool_path = shutil.which("xdotool") if self.detected_os == "Linux" else None
+        self._warned_missing_xdotool = False
 
         # Latency tracking (capture -> action completion)
         self._latency_lock = threading.Lock()
@@ -362,6 +366,22 @@ class Action:
     def release_right_click(self):
         self._enqueue_action(self.mouse.release, (Button.right,))
 
+    def _pynput_meta_key(self, side: str):
+        """Resolve platform-appropriate meta/super/cmd key for the given side."""
+        is_left = side == "left"
+        side_super = "super_l" if is_left else "super_r"
+        side_cmd = "cmd_l" if is_left else "cmd_r"
+
+        if self.detected_os == "Linux":
+            return (
+                getattr(Key, side_super, None)
+                or getattr(Key, side_cmd, None)
+                or getattr(Key, "cmd", None)
+            )
+        if self.detected_os == "Darwin":
+            return getattr(Key, side_cmd, None) or getattr(Key, "cmd", None)
+        return getattr(Key, side_cmd, None) or getattr(Key, "cmd", None)
+
     def _pynput_key_from_logical(self, key_code: str):
         logical = normalize_key(key_code)
         if not logical:
@@ -399,8 +419,8 @@ class Action:
             "right_ctrl": getattr(Key, "ctrl_r", None),
             "left_alt": getattr(Key, "alt_l", None),
             "right_alt": getattr(Key, "alt_r", None),
-            "left_win": getattr(Key, "cmd_l", getattr(Key, "cmd", None)),
-            "right_win": getattr(Key, "cmd_r", getattr(Key, "cmd", None)),
+            "left_win": self._pynput_meta_key("left"),
+            "right_win": self._pynput_meta_key("right"),
             "insert": getattr(Key, "insert", None),
             "delete": getattr(Key, "delete", None),
             "home": getattr(Key, "home", None),
@@ -546,6 +566,103 @@ class Action:
         # Keep tap tight but explicit to maintain event ordering.
         time.sleep(0.005)
         self.key_up(logical)
+
+    def _tap_hotkey_impl(self, logical_keys):
+        if self.detected_os == "Linux" and any(k in {"left_win", "right_win"} for k in logical_keys):
+            if self._tap_hotkey_impl_xdotool(logical_keys):
+                return
+            if not self._warned_missing_xdotool:
+                print("Warning: xdotool unavailable or unsupported hotkey; falling back to pynput")
+                self._warned_missing_xdotool = True
+
+        resolved_keys = []
+        for logical in logical_keys:
+            key = self._pynput_key_from_logical(logical)
+            if key is None:
+                print(f"Warning: unsupported key code in hotkey '{logical}'")
+                return
+            resolved_keys.append(key)
+
+        try:
+            for key in resolved_keys:
+                self.keyboard.press(key)
+            # Small delay improves OS detection for composed shortcuts.
+            time.sleep(0.010)
+        finally:
+            for key in reversed(resolved_keys):
+                try:
+                    self.keyboard.release(key)
+                except Exception:
+                    pass
+
+    def _logical_to_xdotool_key(self, logical: str):
+        if len(logical) == 1:
+            return logical
+
+        key_lookup = {
+            "left_win": "Super_L",
+            "right_win": "Super_R",
+            "left_shift": "Shift_L",
+            "right_shift": "Shift_R",
+            "left_ctrl": "Control_L",
+            "right_ctrl": "Control_R",
+            "left_alt": "Alt_L",
+            "right_alt": "Alt_R",
+            "enter": "Return",
+            "backspace": "BackSpace",
+            "tab": "Tab",
+            "escape": "Escape",
+            "space": "space",
+        }
+        return key_lookup.get(logical)
+
+    def _tap_hotkey_impl_xdotool(self, logical_keys):
+        if not self._xdotool_path:
+            return False
+
+        keys = []
+        for logical in logical_keys:
+            key = self._logical_to_xdotool_key(logical)
+            if not key:
+                return False
+            keys.append(key)
+
+        chord = "+".join(keys)
+        try:
+            subprocess.run(
+                [self._xdotool_path, "key", "--", chord],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except Exception:
+            return False
+
+    def tap_hotkey(self, key_codes):
+        """Press keys together as one hotkey chord, then release."""
+        if not isinstance(key_codes, (list, tuple)):
+            return
+        logical_keys = []
+        for key in key_codes:
+            logical = normalize_key(key)
+            if logical:
+                logical_keys.append(logical)
+        if not logical_keys:
+            return
+
+        origin_ns = self._capture_latency_origin_for_action()
+        self._enqueue_action(self._tap_hotkey_impl, (logical_keys,), origin_ns=origin_ns)
+
+    def type_text(self, text):
+        """Type a text string in one action."""
+        if text is None:
+            return
+        payload = str(text)
+        if not payload:
+            return
+        origin_ns = self._capture_latency_origin_for_action()
+        self._enqueue_action(self.keyboard.type, (payload,), origin_ns=origin_ns)
 
     def release_all_keys(self):
         """Release any currently held keys."""

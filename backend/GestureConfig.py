@@ -19,7 +19,7 @@ class GestureConfig:
         "scroll_sensitivity": 100,  # Multiplier for scroll speed (higher = faster)
 
         # Click/Pinch detection
-        "pinch_threshold": 0.15,  # Maximum distance for pinch detection (wrist-relative units)
+        "pinch_threshold": 0.30,  # Maximum distance for pinch detection (wrist-relative units)
 
         # Debouncing (gesture confirmation)
         "mouse_tracking_pending_frames": 1,  # Frames to confirm mouse tracking
@@ -39,7 +39,7 @@ class GestureConfig:
         "keyboard_flip_x_for_mapping": True,
         "keyboard_split_layout": False,
         "keyboard_single_hand_center_deadband": 0.08,
-        "keyboard_fixed_center_mode": False,
+        "keyboard_fixed_center_mode": True,
         "keyboard_fixed_lock_press_plane": True,
         "keyboard_fixed_center_x": 0.5,
         "keyboard_fixed_center_y": 0.58,
@@ -74,6 +74,16 @@ class GestureConfig:
         "keyboard_resume_stability_frames": 4,
         "keyboard_debug_log_interval_sec": 0.8,
         "keyboard_mode_switch_cooldown_sec": 1.0,
+        "keyboard_swipe_enabled": True,
+        "keyboard_swipe_min_points": 4,
+        "keyboard_swipe_min_unique_keys": 3,
+        "keyboard_swipe_decode_top_k": 3,
+        "keyboard_swipe_confidence_threshold": 0.45,
+        "keyboard_swipe_release_pinch_threshold": 0.40,
+        "keyboard_swipe_release_pending_frames": 2,
+        "keyboard_swipe_lexicon_max_words": 6000,
+        "keyboard_swipe_auto_space": True,
+        "keyboard_swipe_debug": False,
 
         # Mouse move action throttling (reduces system-call churn)
         "mouse_move_min_delta_px": 2,  # Minimum pixel delta before sending cursor update
@@ -108,7 +118,7 @@ class GestureConfig:
         "camera_warmup_frames": 8,  # Drop first N frames after camera open
         "camera_readback_log": True,
         "capture_latest_frame_only": True,  # Decouple capture/inference and always process newest frame
-        "right_hand_only_processing": False,  # Keep both hands so keyboard mode switching can be recognized
+        "right_hand_only_processing": True,  # Process only right hand for mouse + keyboard modes
 
         # Hand tracker confidence thresholds (tracking vs re-detection tuning)
         "hand_min_detection_confidence": 0.65,

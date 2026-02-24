@@ -1,9 +1,13 @@
 import math
+import platform
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from backend.HandsData import HandsData
 from backend.gestures.GestureRecognizer import GestureRecognizer
+from backend.gestures.GestureUtils import are_fingers_pinched, get_pinch_distance
+from backend.gestures.keyboard_mode.SwipeDecoder import SwipeDecoder
 
 
 @dataclass
@@ -18,15 +22,45 @@ class AirTypingGesture(GestureRecognizer):
     """
     Keyboard overlay gesture for keyboard mode.
 
-    This class is intentionally display-only:
+    This gesture:
     - draws and moves keyboard overlays
     - highlights hovered keys
-    - does NOT emit key taps/presses/releases
+    - supports right-hand swipe typing with click-style pinch clutch
     """
+    _MODIFIER_SLOT_TO_FAMILY = {
+        "left_shift": "shift",
+        "right_shift": "shift",
+        "left_ctrl": "ctrl",
+        "right_ctrl": "ctrl",
+        "left_alt": "alt",
+        "right_alt": "alt",
+        "left_win": "win",
+        "right_win": "win",
+    }
+    _MODIFIER_FAMILY_TO_KEY = {
+        "shift": "left_shift",
+        "ctrl": "left_ctrl",
+        "alt": "left_alt",
+        "win": "left_win",
+    }
+    _MODIFIER_FAMILY_TO_SLOTS = {
+        "shift": ("left_shift", "right_shift"),
+        "ctrl": ("left_ctrl", "right_ctrl"),
+        "alt": ("left_alt", "right_alt"),
+        "win": ("left_win", "right_win"),
+    }
+    _MODIFIER_PRESS_ORDER = ("win", "ctrl", "alt", "shift")
 
     def __init__(self, action, config, priority=15):
         super().__init__(action, priority=priority)
         self.config = config
+        os_name = platform.system()
+        if os_name == "Darwin":
+            self._meta_key_label = "Cmd"
+        elif os_name == "Linux":
+            self._meta_key_label = "Super"
+        else:
+            self._meta_key_label = "Win"
 
         self.require_both_hands = bool(self.config.get("keyboard_require_both_hands", False))
         self.pause_on_hand_loss = bool(self.config.get("keyboard_pause_on_hand_loss", True))
@@ -38,6 +72,7 @@ class AirTypingGesture(GestureRecognizer):
 
         self.assign_hands_by_x = bool(self.config.get("keyboard_assign_hands_by_x", True))
         self.keyboard_split_layout = bool(self.config.get("keyboard_split_layout", False))
+        self.keyboard_fixed_center_mode = bool(self.config.get("keyboard_fixed_center_mode", True))
         self.single_hand_center_deadband = float(self.config.get("keyboard_single_hand_center_deadband", 0.08))
         self.flip_x_for_mapping = bool(
             self.config.get(
@@ -67,6 +102,30 @@ class AirTypingGesture(GestureRecognizer):
         self.drag_deadzone_margin_x = float(self.config.get("keyboard_drag_deadzone_margin_x", 0.14))
         self.drag_deadzone_margin_y = float(self.config.get("keyboard_drag_deadzone_margin_y", 0.18))
         self.size_ema_alpha = float(self.config.get("keyboard_hand_size_ema_alpha", 0.22))
+        self.pinch_threshold = float(self.config.get("pinch_threshold", 0.15))
+
+        # Swipe typing configuration
+        self.keyboard_swipe_enabled = bool(self.config.get("keyboard_swipe_enabled", True))
+        self.keyboard_swipe_min_points = int(self.config.get("keyboard_swipe_min_points", 4))
+        self.keyboard_swipe_min_unique_keys = int(self.config.get("keyboard_swipe_min_unique_keys", 3))
+        self.keyboard_swipe_decode_top_k = int(self.config.get("keyboard_swipe_decode_top_k", 3))
+        self.keyboard_swipe_confidence_threshold = float(
+            self.config.get("keyboard_swipe_confidence_threshold", 0.45)
+        )
+        self.keyboard_swipe_release_pinch_threshold = float(
+            self.config.get("keyboard_swipe_release_pinch_threshold", 0.50)
+        )
+        if self.keyboard_swipe_release_pinch_threshold < self.pinch_threshold:
+            self.keyboard_swipe_release_pinch_threshold = self.pinch_threshold
+        self.keyboard_swipe_release_pending_frames = int(
+            self.config.get("keyboard_swipe_release_pending_frames", 2)
+        )
+        if self.keyboard_swipe_release_pending_frames < 1:
+            self.keyboard_swipe_release_pending_frames = 1
+        self.keyboard_swipe_lexicon_max_words = int(self.config.get("keyboard_swipe_lexicon_max_words", 6000))
+        self.keyboard_swipe_auto_space = bool(self.config.get("keyboard_swipe_auto_space", True))
+        self.keyboard_swipe_debug = bool(self.config.get("keyboard_swipe_debug", False))
+        self._swipe_point_min_distance = 0.0035
 
         self._paused = True
         self._status = "Keyboard Initializing..."
@@ -83,9 +142,26 @@ class AirTypingGesture(GestureRecognizer):
         self._active_frames: Dict[str, Optional[HandFrame]] = {"left": None, "right": None}
         self._drag_bounds_by_side: Dict[str, HandFrame] = {}
         self._hovered_slots = set()
+        self._right_frame_for_swipe: Optional[HandFrame] = None
+
+        self._swipe_active = False
+        self._swipe_points: List[Tuple[float, float]] = []
+        self._swipe_trace_slots: List[str] = []
+        self._swipe_trace: List[str] = []
+        self._swipe_candidates: List[str] = []
+        self._swipe_best = ""
+        self._swipe_confidence = 0.0
+        self._swipe_release_counter = 0
+        self._special_key_pinch_latched = False
+        self._active_modifiers = set()
+        self._caps_lock_active = False
 
         self._rows_by_side = self._build_split_rows()
         self._rows_unified = self._build_unified_rows()
+        self._slot_to_key = self._build_slot_key_map()
+
+        lexicon_path = Path(__file__).resolve().parent / "data" / "swipe_words_6000.txt"
+        self._swipe_decoder = SwipeDecoder(lexicon_path, max_words=self.keyboard_swipe_lexicon_max_words)
 
     def _slot(self, slot_id: str, label: str, key: str, width: float = 1.0) -> Dict[str, object]:
         return {"id": slot_id, "label": label, "key": key, "w": width}
@@ -126,7 +202,7 @@ class AirTypingGesture(GestureRecognizer):
             ],
             [
                 self._slot("left_ctrl", "Ctrl", "left_ctrl", 1.2),
-                self._slot("left_win", "Win", "left_win", 1.1),
+                self._slot("left_win", self._meta_key_label, "left_win", 1.1),
                 self._slot("left_alt", "Alt", "left_alt", 1.1),
                 self._slot("left_space", "Space", "space", 3.6),
             ],
@@ -173,7 +249,7 @@ class AirTypingGesture(GestureRecognizer):
             [
                 self._slot("right_space", "Space", "space", 3.6),
                 self._slot("right_alt", "Alt", "right_alt", 1.1),
-                self._slot("right_win", "Win", "right_win", 1.1),
+                self._slot("right_win", self._meta_key_label, "right_win", 1.1),
                 self._slot("right_ctrl", "Ctrl", "right_ctrl", 1.2),
             ],
         ]
@@ -245,14 +321,27 @@ class AirTypingGesture(GestureRecognizer):
             ],
             [
                 self._slot("left_ctrl", "Ctrl", "left_ctrl", 1.2),
-                self._slot("left_win", "Win", "left_win", 1.1),
+                self._slot("left_win", self._meta_key_label, "left_win", 1.1),
                 self._slot("left_alt", "Alt", "left_alt", 1.1),
                 self._slot("space", "Space", "space", 6.5),
                 self._slot("right_alt", "Alt", "right_alt", 1.1),
-                self._slot("right_win", "Win", "right_win", 1.1),
+                self._slot("right_win", self._meta_key_label, "right_win", 1.1),
                 self._slot("right_ctrl", "Ctrl", "right_ctrl", 1.2),
             ],
         ]
+
+    def _build_slot_key_map(self) -> Dict[str, str]:
+        mapping: Dict[str, str] = {}
+        for side in ("left", "right"):
+            for row in self._rows_by_side.get(side, []):
+                for slot in row:
+                    slot_id = str(slot["id"])
+                    mapping[slot_id] = str(slot["key"])
+        for row in self._rows_unified:
+            for slot in row:
+                slot_id = str(slot["id"])
+                mapping[slot_id] = str(slot["key"])
+        return mapping
 
     def _normalized_point(self, point: Optional[Tuple[float, float, float]]) -> Optional[Tuple[float, float, float]]:
         if point is None:
@@ -750,6 +839,307 @@ class AirTypingGesture(GestureRecognizer):
     def _both_hands_present(self, hands_data: HandsData) -> bool:
         return hands_data.camera.has_left and hands_data.camera.has_right
 
+    @staticmethod
+    def _slot_id_to_letter(slot_id: Optional[str]) -> Optional[str]:
+        if not slot_id:
+            return None
+        if len(slot_id) == 1 and slot_id.isalpha():
+            return slot_id.lower()
+        return None
+
+    @classmethod
+    def _modifier_family_for_slot(cls, slot_id: Optional[str]) -> Optional[str]:
+        if not slot_id:
+            return None
+        return cls._MODIFIER_SLOT_TO_FAMILY.get(str(slot_id))
+
+    @classmethod
+    def _modifier_key_for_family(cls, family: str) -> Optional[str]:
+        return cls._MODIFIER_FAMILY_TO_KEY.get(family)
+
+    def _active_modifier_key_codes(self) -> List[str]:
+        keys: List[str] = []
+        for family in self._MODIFIER_PRESS_ORDER:
+            if family not in self._active_modifiers:
+                continue
+            key_code = self._modifier_key_for_family(family)
+            if key_code:
+                keys.append(key_code)
+        return keys
+
+    def _active_modifier_families_ordered(self) -> List[str]:
+        families: List[str] = []
+        for family in self._MODIFIER_PRESS_ORDER:
+            if family in self._active_modifiers:
+                families.append(family)
+        return families
+
+    def _active_modifier_slot_ids(self) -> List[str]:
+        slots: List[str] = []
+        if self._caps_lock_active:
+            slots.append("caps_lock")
+        for family in self._MODIFIER_PRESS_ORDER:
+            if family not in self._active_modifiers:
+                continue
+            slots.extend(self._MODIFIER_FAMILY_TO_SLOTS.get(family, ()))
+        return slots
+
+    def _toggle_caps_lock(self):
+        self._caps_lock_active = not self._caps_lock_active
+        self._last_event = "caps_on" if self._caps_lock_active else "caps_off"
+        self._last_confidence = 1.0
+
+    def _toggle_modifier_family(self, family: str):
+        if family in self._active_modifiers:
+            self._active_modifiers.remove(family)
+            self._last_event = f"modifier_off:{family}"
+        else:
+            self._active_modifiers.add(family)
+            self._last_event = f"modifier_on:{family}"
+        self._last_confidence = 1.0
+
+    def _tap_with_active_modifiers(self, key_code: str):
+        is_alpha_key = isinstance(key_code, str) and len(key_code) == 1 and key_code.isalpha()
+        oneshot_families = set(self._active_modifiers)
+        shift_from_modifiers = "shift" in oneshot_families
+        effective_shift = shift_from_modifiers
+        if is_alpha_key and self._caps_lock_active:
+            # Emulate caps-lock behavior in gesture layer so it works across OS backends:
+            # caps ON toggles letter case, and Shift inverts it.
+            effective_shift = not shift_from_modifiers
+
+        modifier_key_codes: List[str] = []
+        for family in self._MODIFIER_PRESS_ORDER:
+            if family == "shift":
+                continue
+            if family not in oneshot_families:
+                continue
+            key = self._modifier_key_for_family(family)
+            if key:
+                modifier_key_codes.append(key)
+
+        if effective_shift:
+            shift_key = self._modifier_key_for_family("shift")
+            if shift_key:
+                modifier_key_codes.append(shift_key)
+
+        if not modifier_key_codes:
+            self.action.tap_key(key_code)
+            self._last_event = f"tap:{key_code}"
+            self._last_confidence = 1.0
+            return
+
+        self.action.tap_hotkey(modifier_key_codes + [key_code])
+
+        combo_tokens: List[str] = []
+        if is_alpha_key and self._caps_lock_active:
+            combo_tokens.append("caps")
+        for family in self._MODIFIER_PRESS_ORDER:
+            if family == "shift":
+                continue
+            if family in oneshot_families:
+                combo_tokens.append(family)
+        if effective_shift:
+            combo_tokens.append("shift")
+        combo_label = "+".join(combo_tokens + [key_code])
+        self._last_event = f"combo:{combo_label}"
+        self._last_confidence = 1.0
+        self._active_modifiers.clear()
+
+    def _is_right_click_style_pinch(self, hands_data: HandsData) -> bool:
+        if not hands_data.wrist.has_right:
+            return False
+        hand = hands_data.wrist.right
+        return are_fingers_pinched(hand.thumb.tip, hand.middle.tip, self.pinch_threshold)
+
+    def _right_pinch_distance(self, hands_data: HandsData) -> Optional[float]:
+        if not hands_data.wrist.has_right:
+            return None
+        hand = hands_data.wrist.right
+        return get_pinch_distance(hand.thumb.tip, hand.middle.tip)
+
+    def _start_swipe(self):
+        self._swipe_active = True
+        self._swipe_release_counter = 0
+        self._swipe_points = []
+        self._swipe_trace_slots = []
+        self._swipe_trace = []
+        self._swipe_candidates = []
+        self._swipe_best = ""
+        self._swipe_confidence = 0.0
+
+    def _cancel_swipe(self):
+        self._swipe_active = False
+        self._swipe_release_counter = 0
+        self._swipe_points = []
+        self._swipe_trace_slots = []
+        self._swipe_trace = []
+
+    def _capture_swipe_sample(self, hands_data: HandsData):
+        right_hand = hands_data.camera.right if hands_data.camera.has_right else None
+        frame = self._right_frame_for_swipe
+        if right_hand is None or not right_hand.exists or frame is None:
+            return
+
+        tip = self._get_tip(right_hand, "index")
+        if tip is None:
+            return
+
+        point = (tip[0], tip[1])
+        if not self._swipe_points:
+            self._swipe_points.append(point)
+        else:
+            dx = point[0] - self._swipe_points[-1][0]
+            dy = point[1] - self._swipe_points[-1][1]
+            if (dx * dx + dy * dy) >= (self._swipe_point_min_distance * self._swipe_point_min_distance):
+                self._swipe_points.append(point)
+
+        slot = self._map_tip_to_slot("right", tip, frame)
+        if slot is None:
+            return
+        slot_id = str(slot["id"])
+        if not self._swipe_trace_slots or self._swipe_trace_slots[-1] != slot_id:
+            self._swipe_trace_slots.append(slot_id)
+
+        letter = self._slot_id_to_letter(slot_id)
+        if letter and (not self._swipe_trace or self._swipe_trace[-1] != letter):
+            self._swipe_trace.append(letter)
+
+    def _fallback_word_from_trace(self) -> str:
+        return "".join(ch for ch in self._swipe_trace if isinstance(ch, str) and len(ch) == 1 and ch.isalpha())
+
+    def _emit_word(self, word: str):
+        text = str(word)
+        if self._caps_lock_active:
+            text = "".join(ch.upper() if ch.isalpha() else ch for ch in text)
+        if self.keyboard_swipe_auto_space:
+            text += " "
+        self.action.type_text(text)
+
+    def _current_right_slot_id(self, hands_data: HandsData) -> Optional[str]:
+        right_hand = hands_data.camera.right if hands_data.camera.has_right else None
+        frame = self._right_frame_for_swipe
+        if right_hand is None or not right_hand.exists or frame is None:
+            return None
+
+        tip = self._get_tip(right_hand, "index")
+        if tip is None:
+            return None
+
+        slot = self._map_tip_to_slot("right", tip, frame)
+        if slot is None:
+            return None
+        return str(slot["id"])
+
+    def _tap_slot_key(self, slot_id: str) -> bool:
+        key_code = self._slot_to_key.get(str(slot_id))
+        if not key_code:
+            return False
+        self._tap_with_active_modifiers(key_code)
+        return True
+
+    def _commit_swipe(self):
+        unique_keys = len(set(self._swipe_trace_slots))
+        if unique_keys == 1 and self._swipe_trace_slots:
+            self._tap_slot_key(self._swipe_trace_slots[-1])
+            self._swipe_best = ""
+            self._swipe_confidence = 1.0
+            self._swipe_candidates = []
+            self._cancel_swipe()
+            return
+
+        if len(self._swipe_points) < self.keyboard_swipe_min_points:
+            self._cancel_swipe()
+            return
+        if unique_keys < self.keyboard_swipe_min_unique_keys:
+            self._cancel_swipe()
+            return
+
+        best_word, confidence, candidates = self._swipe_decoder.decode(
+            self._swipe_trace,
+            top_k=self.keyboard_swipe_decode_top_k,
+        )
+
+        # Prefer decoded words over raw trace gibberish; only fall back when
+        # decoder cannot produce any word at all.
+        if not best_word:
+            best_word = self._fallback_word_from_trace()
+
+        if not best_word:
+            self._cancel_swipe()
+            return
+
+        self._emit_word(best_word)
+        self._swipe_best = best_word
+        self._swipe_confidence = confidence
+        self._swipe_candidates = candidates
+        self._last_event = f"swipe:{best_word}"
+        self._last_confidence = confidence
+        self._cancel_swipe()
+
+    def _update_swipe(self, hands_data: HandsData, camera_hands: Dict[str, object]):
+        if not self.keyboard_swipe_enabled:
+            self._cancel_swipe()
+            self._special_key_pinch_latched = False
+            return
+
+        right_present = hands_data.camera.has_right and hands_data.wrist.has_right
+        pinch_distance = self._right_pinch_distance(hands_data) if right_present else None
+        start_pinch_active = (
+            pinch_distance is not None and pinch_distance < self.pinch_threshold
+        )
+        release_reached = (
+            pinch_distance is None or pinch_distance >= self.keyboard_swipe_release_pinch_threshold
+        )
+
+        if not right_present:
+            self._special_key_pinch_latched = False
+        if self._swipe_active and not right_present:
+            self._cancel_swipe()
+            return
+
+        if self._special_key_pinch_latched:
+            if release_reached:
+                self._special_key_pinch_latched = False
+            return
+
+        if self._swipe_active:
+            if release_reached:
+                self._swipe_release_counter += 1
+                if self._swipe_release_counter >= self.keyboard_swipe_release_pending_frames:
+                    self._commit_swipe()
+                return
+            self._swipe_release_counter = 0
+            self._capture_swipe_sample(hands_data)
+            return
+
+        if start_pinch_active:
+            slot_id = self._current_right_slot_id(hands_data)
+            if slot_id == "caps_lock":
+                self._toggle_caps_lock()
+                self._special_key_pinch_latched = True
+                return
+
+            modifier_family = self._modifier_family_for_slot(slot_id)
+            if modifier_family:
+                self._toggle_modifier_family(modifier_family)
+                self._special_key_pinch_latched = True
+                return
+
+            if slot_id and self._active_modifiers:
+                if self._tap_slot_key(slot_id):
+                    self._special_key_pinch_latched = True
+                return
+
+            if slot_id and self._slot_id_to_letter(slot_id) is None:
+                if self._tap_slot_key(slot_id):
+                    self._special_key_pinch_latched = True
+                return
+            if not self._swipe_active:
+                self._start_swipe()
+            self._capture_swipe_sample(hands_data)
+            return
+
     def _pause(self, reason: str):
         if self._paused and self._status == reason:
             return
@@ -758,6 +1148,8 @@ class AirTypingGesture(GestureRecognizer):
             self.action.release_all_keys()
 
         self._hovered_slots.clear()
+        self._cancel_swipe()
+        self._active_modifiers.clear()
         self._paused = True
         self._resume_counter = 0
         self._status = reason
@@ -775,24 +1167,32 @@ class AirTypingGesture(GestureRecognizer):
             return False
 
         self._paused = False
-        self._status = "Keyboard Ready (Display Only)"
+        self._status = "Keyboard Ready (Swipe)"
         return True
 
     def _update_overlay_only(self, hands_data: HandsData):
         camera_hands = self._get_hands_by_side(hands_data.camera)
-        candidate_frames = {
-            "left": self._compute_hand_frame("left", camera_hands.get("left")),
-            "right": self._compute_hand_frame("right", camera_hands.get("right")),
-        }
-
-        self._update_active_frames(candidate_frames, recenter=self._paused)
-        active_frames = self._spread_overlay_frames(self._active_frames)
-        if active_frames.get("left") is None and active_frames.get("right") is None:
+        if self.keyboard_fixed_center_mode:
             active_frames = self._fallback_overlay_frames()
+            self._active_frames = {
+                "left": self._copy_frame(active_frames.get("left")),
+                "right": self._copy_frame(active_frames.get("right")),
+            }
+        else:
+            candidate_frames = {
+                "left": self._compute_hand_frame("left", camera_hands.get("left")),
+                "right": self._compute_hand_frame("right", camera_hands.get("right")),
+            }
+
+            self._update_active_frames(candidate_frames, recenter=self._paused)
+            active_frames = self._spread_overlay_frames(self._active_frames)
+            if active_frames.get("left") is None and active_frames.get("right") is None:
+                active_frames = self._fallback_overlay_frames()
 
         self._set_overlay_keys(self._build_overlay_keys(active_frames))
         self._update_drag_bounds(active_frames)
         unified_frame = self._resolve_unified_frame(active_frames) if not self.keyboard_split_layout else None
+        self._right_frame_for_swipe = unified_frame if unified_frame is not None else active_frames.get("right")
 
         if self.require_both_hands and not self._both_hands_present(hands_data):
             self._pause("Typing Paused: both hands required")
@@ -803,9 +1203,9 @@ class AirTypingGesture(GestureRecognizer):
             if self._paused:
                 return False
 
-        if self.require_both_hands and (
-            candidate_frames["left"] is None or candidate_frames["right"] is None
-        ):
+        left_present = camera_hands.get("left") is not None and camera_hands["left"].exists
+        right_present = camera_hands.get("right") is not None and camera_hands["right"].exists
+        if self.require_both_hands and (not left_present or not right_present):
             self._pause("Typing Paused: both hands required")
             return False
 
@@ -825,13 +1225,12 @@ class AirTypingGesture(GestureRecognizer):
                     hovered_slots.add(str(slot["id"]))
 
         self._hovered_slots = hovered_slots
-        self._status = "Keyboard Ready (Display Only)"
-        self._last_event = ""
-        self._last_confidence = 0.0
+        self._update_swipe(hands_data, camera_hands)
+        self._status = "Keyboard Ready (Swipe)"
         return False
 
     def update(self, hands_data: HandsData, frame_capture_ts_ns=None):
-        # frame_capture_ts_ns intentionally unused in display-only mode.
+        # frame_capture_ts_ns intentionally unused for swipe MVP.
         return self._update_overlay_only(hands_data)
 
     def detect_gesture(self, hands_data: HandsData):
@@ -849,6 +1248,17 @@ class AirTypingGesture(GestureRecognizer):
         self._drag_bounds_by_side = {}
         self._anchor_avg = {"left": None, "right": None}
         self._size_avg = {"left": None, "right": None}
+        self._right_frame_for_swipe = None
+        self._swipe_active = False
+        self._swipe_points = []
+        self._swipe_trace_slots = []
+        self._swipe_trace = []
+        self._swipe_candidates = []
+        self._swipe_best = ""
+        self._swipe_confidence = 0.0
+        self._swipe_release_counter = 0
+        self._special_key_pinch_latched = False
+        self._active_modifiers = set()
         self._paused = True
         self._resume_counter = 0
         self._status = "Keyboard Initializing..."
@@ -886,9 +1296,15 @@ class AirTypingGesture(GestureRecognizer):
             "keys": self._overlay_keys,
             "drag_bounds": drag_bounds,
             "hovered_keys": list(self._hovered_slots),
-            "pressed_keys": [],
-            "last_event": "",
-            "press_confidence": 0.0,
+            "pressed_keys": self._active_modifier_slot_ids(),
+            "last_event": self._last_event,
+            "press_confidence": self._last_confidence,
             "finger_diagnostics": [],
             "calibration": {"active": False, "progress": 1.0},
+            "swipe_active": self._swipe_active,
+            "swipe_path_points": [{"x": p[0], "y": p[1]} for p in self._swipe_points],
+            "swipe_trace": list(self._swipe_trace),
+            "swipe_candidates": list(self._swipe_candidates),
+            "swipe_best": self._swipe_best,
+            "swipe_confidence": self._swipe_confidence,
         }

@@ -1,11 +1,11 @@
 from backend.HandsData import HandsData
 from backend.gestures.GestureRecognizer import SnapshotGestureRecognizer
-from backend.gestures.GestureUtils import is_hand_fully_open, is_palm_facing_camera
+from backend.gestures.GestureUtils import is_hand_fully_open
 
 
 class KeyboardModeEntryGesture(SnapshotGestureRecognizer):
     """
-    Switch from MOUSE mode to KEYBOARD mode when both hands are fully open.
+    Switch from MOUSE mode to KEYBOARD mode when the right hand is fully open.
     """
 
     def __init__(
@@ -25,17 +25,11 @@ class KeyboardModeEntryGesture(SnapshotGestureRecognizer):
         if self.strategizer.current_mode.value != "mouse":
             return False, None
 
-        if not hands_data.wrist.has_left or not hands_data.wrist.has_right:
+        if not hands_data.wrist.has_right:
             return False, None
 
-        left_open = is_hand_fully_open(hands_data.wrist.left, extension_threshold=self.extension_threshold)
         right_open = is_hand_fully_open(hands_data.wrist.right, extension_threshold=self.extension_threshold)
-        if not left_open or not right_open:
-            return False, None
-
-        left_palm = is_palm_facing_camera(hands_data.camera.left)
-        right_palm = is_palm_facing_camera(hands_data.camera.right)
-        if not left_palm or not right_palm:
+        if not right_open:
             return False, None
 
         return True, None
@@ -44,4 +38,3 @@ class KeyboardModeEntryGesture(SnapshotGestureRecognizer):
         from backend.Strategizer import ControlMode
 
         self.strategizer.set_mode(ControlMode.KEYBOARD)
-

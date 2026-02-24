@@ -540,6 +540,19 @@ class MainWindow(QMainWindow):
                     cv2.LINE_AA,
                 )
 
+        swipe_points = overlay_data.get("swipe_path_points", [])
+        if swipe_points:
+            pts = []
+            for p in swipe_points:
+                px = int(max(0, min(width - 1, p.get("x", 0.0) * width)))
+                py = int(max(0, min(height - 1, p.get("y", 0.0) * height)))
+                pts.append((px, py))
+            if len(pts) >= 2:
+                for i in range(1, len(pts)):
+                    cv2.line(image, pts[i - 1], pts[i], (0, 215, 255), 2, cv2.LINE_AA)
+            if pts:
+                cv2.circle(image, pts[-1], 4, (0, 255, 255), -1)
+
         status = overlay_data.get("status", "")
         if status:
             cv2.putText(
@@ -549,6 +562,21 @@ class MainWindow(QMainWindow):
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
                 (0, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+
+        swipe_best = overlay_data.get("swipe_best", "")
+        if swipe_best:
+            swipe_conf = float(overlay_data.get("swipe_confidence", 0.0))
+            swipe_label = f"Swipe: {swipe_best} ({swipe_conf:.2f})"
+            cv2.putText(
+                image,
+                swipe_label,
+                (10, 46),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 225, 255),
                 2,
                 cv2.LINE_AA,
             )
