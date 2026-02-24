@@ -101,6 +101,7 @@ class HandTracker(QThread):
         self._processed_frame_seq = 0
         self._capture_error_count = 0
         self._dynamic_exposure_frame_counter = 0
+        self._empty_hands_data = HandsData({}, {})
 
         # Timestamp monotonicity for detect_for_video
         self._last_video_timestamp_ms = 0
@@ -195,10 +196,11 @@ class HandTracker(QThread):
             if self.camera_gain_value is not None and hasattr(cv2, 'CAP_PROP_GAIN'):
                 self._set_camera_prop(cv2.CAP_PROP_GAIN, float(self.camera_gain_value))
 
-            # Best-effort webcam format tuning on Windows.
+            # Best-effort webcam format tuning on desktop platforms.
             selected_format = None
-            if is_windows and hasattr(cv2, 'CAP_PROP_FOURCC'):
-                for fourcc_text in ("MJPG", "YUY2"):
+            if (is_windows or is_linux) and hasattr(cv2, 'CAP_PROP_FOURCC'):
+                preferred_fourccs = ("MJPG", "YUYV", "YUY2")
+                for fourcc_text in preferred_fourccs:
                     fourcc = cv2.VideoWriter_fourcc(*fourcc_text)
                     self._set_camera_prop(cv2.CAP_PROP_FOURCC, fourcc)
                     reported = self._decode_fourcc(self.cap.get(cv2.CAP_PROP_FOURCC))
@@ -635,6 +637,7 @@ class HandTracker(QThread):
 
                     should_strategize = True
                     if self.right_hand_only_processing and not hands_data.wrist.has_right:
+                        hands_data = self._empty_hands_data
                         should_strategize = False
 
                     if should_strategize:
@@ -643,16 +646,8 @@ class HandTracker(QThread):
                         strategize_end_ns = time.perf_counter_ns()
                         strategize_ms = (strategize_end_ns - strategize_start_ns) / 1_000_000.0
                 else:
-                    # Feed an explicit empty state so gesture recognizers can pause/reset on hand loss.
-                    hands_data_start_ns = time.perf_counter_ns()
-                    hands_data = HandsData({}, {})
-                    hands_data_end_ns = time.perf_counter_ns()
-                    hands_data_ms = (hands_data_end_ns - hands_data_start_ns) / 1_000_000.0
-
-                    strategize_start_ns = time.perf_counter_ns()
-                    self.strategizer.strategize(hands_data, frame_capture_ts_ns=capture_ts_ns)
-                    strategize_end_ns = time.perf_counter_ns()
-                    strategize_ms = (strategize_end_ns - strategize_start_ns) / 1_000_000.0
+                    # Reuse explicit empty state and skip strategizer when no hands are present.
+                    hands_data = self._empty_hands_data
 
                 loop_end_ns = time.perf_counter_ns()
 

@@ -9,6 +9,36 @@
 winget install --id=astral-sh.uv -e
 ```
 
+## Linux Camera Tuning (optional, for lower capture latency)
+Install camera utilities:
+```bash
+sudo apt install v4l-utils
+```
+
+Inspect camera devices and supported formats:
+```bash
+v4l2-ctl --list-devices
+v4l2-ctl -d /dev/video0 --list-formats-ext
+```
+
+Try low-latency capture settings (prefer MJPG):
+```bash
+v4l2-ctl -d /dev/video0 --set-fmt-video=width=640,height=480,pixelformat=MJPG
+v4l2-ctl -d /dev/video0 --set-parm=30
+```
+
+Optional manual exposure tuning:
+```bash
+v4l2-ctl -d /dev/video0 -c exposure_auto=1
+v4l2-ctl -d /dev/video0 -c exposure_absolute=200
+```
+
+Reset to common defaults:
+```bash
+v4l2-ctl -d /dev/video0 -c exposure_auto=3
+v4l2-ctl -d /dev/video0 --set-fmt-video=width=640,height=480,pixelformat=YUYV
+```
+
 ## Install dependencies
 Run this from the repository root:
 ```powershell
@@ -19,6 +49,17 @@ uv sync
 Run this from the repository root:
 ```powershell
 uv run python main.py
+```
+
+## Run tests
+Run all tests:
+```bash
+uv run python -m unittest discover -s tests
+```
+
+Run keyboard/swipe tests only:
+```bash
+uv run python -m unittest discover -s tests/keyboard
 ```
 
 ## Verify environment

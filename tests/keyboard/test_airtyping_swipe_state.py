@@ -106,6 +106,7 @@ class AirTypingSwipeStateTests(unittest.TestCase):
             "keyboard_swipe_decode_top_k": 3,
             "keyboard_swipe_confidence_threshold": 0.45,
             "keyboard_swipe_release_pending_frames": 1,
+            "keyboard_swipe_tracking_grace_frames": 2,
             "keyboard_swipe_auto_space": True,
             "keyboard_active_fingers": ["index"],
             "keyboard_use_thumb_fingers": False,
@@ -152,16 +153,31 @@ class AirTypingSwipeStateTests(unittest.TestCase):
         self.assertEqual(self.action.tapped, [])
         self.assertFalse(self.gesture._swipe_active)
 
-    def test_right_hand_loss_cancels_active_swipe(self):
+    def test_right_hand_loss_cancels_active_swipe_after_grace(self):
         start = _make_hands_data(right_present=True, right_pinch=True, right_index_x=0.66)
         self.gesture.update(start)
         self.assertTrue(self.gesture._swipe_active)
 
         lost = _make_hands_data(right_present=False, left_present=False)
         self.gesture.update(lost)
+        self.assertTrue(self.gesture._swipe_active)
+        self.gesture.update(lost)
+        self.assertTrue(self.gesture._swipe_active)
+        self.gesture.update(lost)
 
         self.assertFalse(self.gesture._swipe_active)
         self.assertEqual(self.action.tapped, [])
+
+    def test_right_hand_loss_within_grace_resumes_swipe(self):
+        self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=0.62))
+        lost = _make_hands_data(right_present=False, left_present=False)
+        self.gesture.update(lost)
+        self.assertTrue(self.gesture._swipe_active)
+        self.assertEqual(self.gesture._swipe_lost_frames, 1)
+
+        self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=0.66))
+        self.assertTrue(self.gesture._swipe_active)
+        self.assertEqual(self.gesture._swipe_lost_frames, 0)
 
     def test_no_pinch_no_commit(self):
         for x in [0.62, 0.66, 0.70, 0.74, 0.78]:
@@ -181,6 +197,22 @@ class AirTypingSwipeStateTests(unittest.TestCase):
 
         self.assertEqual(self.action.tapped, ["h"])
         self.assertFalse(self.gesture._swipe_active)
+
+    def test_release_outside_keyboard_cancels_swipe_commit(self):
+        self.gesture._map_tip_to_slot = lambda side, tip, frame: (
+            {"id": "h"} if tip[0] < 0.64 else
+            {"id": "e"} if tip[0] < 0.68 else
+            {"id": "l"} if tip[0] < 0.74 else
+            None
+        )
+
+        for x in [0.62, 0.66, 0.70]:
+            self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=x))
+        # Release outside all keys.
+        self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.90))
+
+        self.assertEqual(self.action.typed_text, [])
+        self.assertEqual(self.action.tapped, [])
 
     def test_special_key_pinch_taps_immediately_and_latches_until_release(self):
         self.gesture._map_tip_to_slot = lambda side, tip, frame: {"id": "backspace"}

@@ -567,14 +567,7 @@ class Action:
         time.sleep(0.005)
         self.key_up(logical)
 
-    def _tap_hotkey_impl(self, logical_keys):
-        if self.detected_os == "Linux" and any(k in {"left_win", "right_win"} for k in logical_keys):
-            if self._tap_hotkey_impl_xdotool(logical_keys):
-                return
-            if not self._warned_missing_xdotool:
-                print("Warning: xdotool unavailable or unsupported hotkey; falling back to pynput")
-                self._warned_missing_xdotool = True
-
+    def _tap_hotkey_impl_pynput(self, logical_keys):
         resolved_keys = []
         for logical in logical_keys:
             key = self._pynput_key_from_logical(logical)
@@ -594,6 +587,21 @@ class Action:
                     self.keyboard.release(key)
                 except Exception:
                     pass
+
+    def _tap_hotkey_impl_linux(self, logical_keys):
+        if any(k in {"left_win", "right_win"} for k in logical_keys):
+            if self._tap_hotkey_impl_xdotool(logical_keys):
+                return
+            if not self._warned_missing_xdotool:
+                print("Warning: xdotool unavailable or unsupported hotkey; falling back to pynput")
+                self._warned_missing_xdotool = True
+        self._tap_hotkey_impl_pynput(logical_keys)
+
+    def _tap_hotkey_impl(self, logical_keys):
+        if self.detected_os == "Linux":
+            self._tap_hotkey_impl_linux(logical_keys)
+            return
+        self._tap_hotkey_impl_pynput(logical_keys)
 
     def _logical_to_xdotool_key(self, logical: str):
         if len(logical) == 1:

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel
 )
 from PySide6.QtCore import Slot, Signal
+from PySide6.QtCore import QTimer
 
 from frontend.video_widget import VideoWidget
 from frontend.widgets.stats_widget import PerformanceStatsWidget
@@ -36,6 +37,7 @@ class MainWindow(QMainWindow):
         self.show_landmarks = False
         self._preview_interval_ns = int(1_000_000_000 / 30)
         self._last_preview_emit_ns = 0
+        self._auto_start_requested = False
 
         # Hand landmark connections (for drawing)
         self.HAND_CONNECTIONS = [
@@ -165,7 +167,7 @@ class MainWindow(QMainWindow):
         self.config = config
 
         if config is not None:
-            self.show_landmarks = bool(config.get('show_landmarks_default', False))
+            self.show_landmarks = True
             preview_max_fps = int(config.get('preview_max_fps', 30))
             self._set_preview_max_fps(preview_max_fps)
             self.video_widget.set_max_preview_fps(preview_max_fps)
@@ -178,6 +180,18 @@ class MainWindow(QMainWindow):
             self.hand_tracker.tracking_started.connect(self.on_tracking_started)
             self.hand_tracker.tracking_stopped.connect(self.on_tracking_stopped)
             self.hand_tracker.error_occurred.connect(self.on_tracking_error)
+
+        if not self._auto_start_requested:
+            self._auto_start_requested = True
+            QTimer.singleShot(0, self._auto_start_tracking)
+
+    def _auto_start_tracking(self):
+        """Start tracking automatically once UI event loop is running."""
+        if not self.hand_tracker:
+            return
+        if self.hand_tracker.isRunning():
+            return
+        self.toggle_tracking()
 
     @Slot()
     def toggle_tracking(self):
@@ -206,8 +220,8 @@ class MainWindow(QMainWindow):
             self.stats_widget.reset()
         else:
             # Start tracking
-            cam_w = 1280
-            cam_h = 720
+            cam_w = 640
+            cam_h = 480
             if self.strategizer and hasattr(self.strategizer, "config"):
                 cam_w = int(self.strategizer.config.get("camera_width", cam_w))
                 cam_h = int(self.strategizer.config.get("camera_height", cam_h))
@@ -518,6 +532,53 @@ class MainWindow(QMainWindow):
                 cv2.LINE_AA,
             )
 
+        suggestion_chips = overlay_data.get("suggestion_chips", [])
+        if suggestion_chips:
+            for chip in suggestion_chips:
+                label = str(chip.get("text", "")).strip()
+                if not label:
+                    continue
+                x1 = int(max(0, min(width - 1, chip["x"] * width)))
+                y1 = int(max(0, min(height - 1, chip["y"] * height)))
+                x2 = int(max(0, min(width - 1, (chip["x"] + chip["w"]) * width)))
+                y2 = int(max(0, min(height - 1, (chip["y"] + chip["h"]) * height)))
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
+                hovered_chip = bool(chip.get("hovered", False))
+                fill_color = (55, 95, 155) if hovered_chip else (60, 60, 60)
+                border_color = (80, 250, 255) if hovered_chip else (215, 215, 215)
+                cv2.rectangle(image, (x1, y1), (x2, y2), fill_color, -1)
+                cv2.rectangle(image, (x1, y1), (x2, y2), border_color, 2)
+
+                chip_w = x2 - x1
+                chip_h = y2 - y1
+                font_scale = max(0.36, min(0.60, min(chip_w / 56.0, chip_h / 20.0)))
+                text_thickness = 1 if font_scale < 0.52 else 2
+                text_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_thickness)
+                tx = x1 + max(2, (chip_w - text_size[0]) // 2)
+                ty = y1 + max(text_size[1] + 2, (chip_h + text_size[1]) // 2 - 1)
+                cv2.putText(
+                    image,
+                    label,
+                    (tx, ty),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    font_scale,
+                    (0, 0, 0),
+                    text_thickness + 1,
+                    cv2.LINE_AA,
+                )
+                cv2.putText(
+                    image,
+                    label,
+                    (tx, ty),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    font_scale,
+                    (250, 250, 250),
+                    text_thickness,
+                    cv2.LINE_AA,
+                )
+
         if draw_drag_bounds:
             for bound in overlay_data.get("drag_bounds", []):
                 x1 = int(max(0, min(width - 1, bound["x"] * width)))
@@ -539,6 +600,36 @@ class MainWindow(QMainWindow):
                     1,
                     cv2.LINE_AA,
                 )
+
+            hud = overlay_data.get("debug_hud", {})
+            if isinstance(hud, dict):
+                pinch_value = hud.get("pinch_value", None)
+                lost_frames = int(hud.get("lost_frames", 0))
+                pinch_text = "Pinch: --"
+                if pinch_value is not None:
+                    pinch_text = f"Pinch: {float(pinch_value):.3f}"
+                hud_lines = [pinch_text]
+                if lost_frames > 0:
+                    hud_lines.append(f"Lost frames: {lost_frames}")
+
+                if hud_lines:
+                    panel_x = 10
+                    panel_y = 58
+                    panel_w = 210
+                    panel_h = 28 + (20 * len(hud_lines))
+                    cv2.rectangle(image, (panel_x, panel_y), (panel_x + panel_w, panel_y + panel_h), (30, 30, 30), -1)
+                    cv2.rectangle(image, (panel_x, panel_y), (panel_x + panel_w, panel_y + panel_h), (110, 255, 255), 1)
+                    for idx, line in enumerate(hud_lines):
+                        cv2.putText(
+                            image,
+                            line,
+                            (panel_x + 8, panel_y + 22 + (idx * 20)),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.50,
+                            (235, 235, 235),
+                            1,
+                            cv2.LINE_AA,
+                        )
 
         swipe_points = overlay_data.get("swipe_path_points", [])
         if swipe_points:

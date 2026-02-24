@@ -50,6 +50,7 @@ class AirTypingGesture(GestureRecognizer):
         "win": ("left_win", "right_win"),
     }
     _MODIFIER_PRESS_ORDER = ("win", "ctrl", "alt", "shift")
+    _SUGGESTION_CHIP_COUNT = 3
 
     def __init__(self, action, config, priority=15):
         super().__init__(action, priority=priority)
@@ -108,7 +109,7 @@ class AirTypingGesture(GestureRecognizer):
         self.keyboard_swipe_enabled = bool(self.config.get("keyboard_swipe_enabled", True))
         self.keyboard_swipe_min_points = int(self.config.get("keyboard_swipe_min_points", 4))
         self.keyboard_swipe_min_unique_keys = int(self.config.get("keyboard_swipe_min_unique_keys", 3))
-        self.keyboard_swipe_decode_top_k = int(self.config.get("keyboard_swipe_decode_top_k", 3))
+        self.keyboard_swipe_decode_top_k = 8
         self.keyboard_swipe_confidence_threshold = float(
             self.config.get("keyboard_swipe_confidence_threshold", 0.45)
         )
@@ -122,10 +123,16 @@ class AirTypingGesture(GestureRecognizer):
         )
         if self.keyboard_swipe_release_pending_frames < 1:
             self.keyboard_swipe_release_pending_frames = 1
-        self.keyboard_swipe_lexicon_max_words = int(self.config.get("keyboard_swipe_lexicon_max_words", 6000))
+        self.keyboard_swipe_tracking_grace_frames = int(
+            self.config.get("keyboard_swipe_tracking_grace_frames", 8)
+        )
+        if self.keyboard_swipe_tracking_grace_frames < 0:
+            self.keyboard_swipe_tracking_grace_frames = 0
+        self.keyboard_swipe_lexicon_max_words = 12000
         self.keyboard_swipe_auto_space = bool(self.config.get("keyboard_swipe_auto_space", True))
         self.keyboard_swipe_debug = bool(self.config.get("keyboard_swipe_debug", False))
         self._swipe_point_min_distance = 0.0035
+        self._swipe_point_min_distance_sq = self._swipe_point_min_distance * self._swipe_point_min_distance
 
         self._paused = True
         self._status = "Keyboard Initializing..."
@@ -152,15 +159,24 @@ class AirTypingGesture(GestureRecognizer):
         self._swipe_best = ""
         self._swipe_confidence = 0.0
         self._swipe_release_counter = 0
+        self._swipe_lost_frames = 0
         self._special_key_pinch_latched = False
+        self._last_pinch_value: Optional[float] = None
+        self._last_swipe_emitted_text = ""
+        self._last_swipe_word = ""
+        self._last_swipe_candidates: List[str] = []
+        self._suggestion_words: List[str] = []
+        self._suggestion_chips: List[Dict[str, object]] = []
+        self._hovered_suggestion_idx: Optional[int] = None
         self._active_modifiers = set()
         self._caps_lock_active = False
+        self._overlay_bounds: Optional[Tuple[float, float, float, float]] = None
 
         self._rows_by_side = self._build_split_rows()
         self._rows_unified = self._build_unified_rows()
         self._slot_to_key = self._build_slot_key_map()
 
-        lexicon_path = Path(__file__).resolve().parent / "data" / "swipe_words_6000.txt"
+        lexicon_path = Path(__file__).resolve().parent / "data" / "swipe_words_12000.txt"
         self._swipe_decoder = SwipeDecoder(lexicon_path, max_words=self.keyboard_swipe_lexicon_max_words)
 
     def _slot(self, slot_id: str, label: str, key: str, width: float = 1.0) -> Dict[str, object]:
@@ -652,6 +668,99 @@ class AirTypingGesture(GestureRecognizer):
     def _set_overlay_keys(self, key_rects: List[Dict[str, object]]):
         self._overlay_keys = key_rects
         self._overlay_by_id = {str(key["id"]): key for key in key_rects}
+        if key_rects:
+            min_x = min(float(key["x"]) for key in key_rects)
+            min_y = min(float(key["y"]) for key in key_rects)
+            max_x = max(float(key["x"]) + float(key["w"]) for key in key_rects)
+            max_y = max(float(key["y"]) + float(key["h"]) for key in key_rects)
+            self._overlay_bounds = (min_x, min_y, max_x, max_y)
+        else:
+            self._overlay_bounds = None
+        self._layout_suggestion_chips()
+
+    def _layout_suggestion_chips(self):
+        self._suggestion_chips = []
+        if not self._suggestion_words or self._overlay_bounds is None:
+            return
+
+        min_x, min_y, max_x, max_y = self._overlay_bounds
+        keyboard_w = max(0.05, max_x - min_x)
+        keyboard_h = max(0.05, max_y - min_y)
+        chip_gap = 0.006
+        chip_count = self._SUGGESTION_CHIP_COUNT
+        chip_h = self._clamp(keyboard_h * 0.20, 0.038, 0.060)
+        chip_y = max(0.008, min_y - chip_h - 0.010)
+        total_gap = chip_gap * (chip_count - 1)
+        chip_w = max(0.05, (keyboard_w - total_gap) / chip_count)
+
+        for idx in range(chip_count):
+            label = self._suggestion_words[idx] if idx < len(self._suggestion_words) else ""
+            chip_x = min_x + (idx * (chip_w + chip_gap))
+            self._suggestion_chips.append(
+                {
+                    "id": f"suggestion_{idx}",
+                    "index": idx,
+                    "text": label,
+                    "x": chip_x,
+                    "y": chip_y,
+                    "w": chip_w,
+                    "h": chip_h,
+                }
+            )
+
+    @staticmethod
+    def _point_in_rect(point: Tuple[float, float], rect: Dict[str, object]) -> bool:
+        px, py = point
+        x = float(rect["x"])
+        y = float(rect["y"])
+        w = float(rect["w"])
+        h = float(rect["h"])
+        return (x <= px <= (x + w)) and (y <= py <= (y + h))
+
+    def _suggestion_index_at_point(self, point: Tuple[float, float]) -> Optional[int]:
+        for chip in self._suggestion_chips:
+            if not chip.get("text"):
+                continue
+            if self._point_in_rect(point, chip):
+                return int(chip["index"])
+        return None
+
+    def _current_right_tip(self, hands_data: HandsData) -> Optional[Tuple[float, float, float]]:
+        right_hand = hands_data.camera.right if hands_data.camera.has_right else None
+        if right_hand is None or not right_hand.exists:
+            return None
+        return self._get_tip(right_hand, "index")
+
+    def _current_right_suggestion_index(self, hands_data: HandsData) -> Optional[int]:
+        tip = self._current_right_tip(hands_data)
+        if tip is None:
+            return None
+        return self._suggestion_index_at_point((tip[0], tip[1]))
+
+    @staticmethod
+    def _unique_words(words: List[str]) -> List[str]:
+        out: List[str] = []
+        seen = set()
+        for word in words:
+            if not word:
+                continue
+            w = str(word).strip().lower()
+            if not w or w in seen:
+                continue
+            seen.add(w)
+            out.append(w)
+        return out
+
+    def _set_suggestions_from_candidates(self, selected_word: str, candidates: List[str]):
+        ordered = self._unique_words([selected_word] + list(candidates))
+        alternatives = [w for w in ordered if w != selected_word]
+        if len(alternatives) < self._SUGGESTION_CHIP_COUNT:
+            if selected_word and selected_word not in alternatives:
+                alternatives.append(selected_word)
+        while len(alternatives) < self._SUGGESTION_CHIP_COUNT and ordered:
+            alternatives.append(ordered[min(len(alternatives), len(ordered) - 1)])
+        self._suggestion_words = alternatives[: self._SUGGESTION_CHIP_COUNT]
+        self._layout_suggestion_chips()
 
     @staticmethod
     def _copy_frame(frame: Optional[HandFrame]) -> Optional[HandFrame]:
@@ -961,6 +1070,7 @@ class AirTypingGesture(GestureRecognizer):
     def _start_swipe(self):
         self._swipe_active = True
         self._swipe_release_counter = 0
+        self._swipe_lost_frames = 0
         self._swipe_points = []
         self._swipe_trace_slots = []
         self._swipe_trace = []
@@ -971,6 +1081,7 @@ class AirTypingGesture(GestureRecognizer):
     def _cancel_swipe(self):
         self._swipe_active = False
         self._swipe_release_counter = 0
+        self._swipe_lost_frames = 0
         self._swipe_points = []
         self._swipe_trace_slots = []
         self._swipe_trace = []
@@ -991,7 +1102,7 @@ class AirTypingGesture(GestureRecognizer):
         else:
             dx = point[0] - self._swipe_points[-1][0]
             dy = point[1] - self._swipe_points[-1][1]
-            if (dx * dx + dy * dy) >= (self._swipe_point_min_distance * self._swipe_point_min_distance):
+            if (dx * dx + dy * dy) >= self._swipe_point_min_distance_sq:
                 self._swipe_points.append(point)
 
         slot = self._map_tip_to_slot("right", tip, frame)
@@ -1008,13 +1119,14 @@ class AirTypingGesture(GestureRecognizer):
     def _fallback_word_from_trace(self) -> str:
         return "".join(ch for ch in self._swipe_trace if isinstance(ch, str) and len(ch) == 1 and ch.isalpha())
 
-    def _emit_word(self, word: str):
+    def _emit_word(self, word: str) -> str:
         text = str(word)
         if self._caps_lock_active:
             text = "".join(ch.upper() if ch.isalpha() else ch for ch in text)
         if self.keyboard_swipe_auto_space:
             text += " "
         self.action.type_text(text)
+        return text
 
     def _current_right_slot_id(self, hands_data: HandsData) -> Optional[str]:
         right_hand = hands_data.camera.right if hands_data.camera.has_right else None
@@ -1038,7 +1150,33 @@ class AirTypingGesture(GestureRecognizer):
         self._tap_with_active_modifiers(key_code)
         return True
 
-    def _commit_swipe(self):
+    def _replace_last_swipe_word(self, suggestion_idx: int) -> bool:
+        if suggestion_idx < 0 or suggestion_idx >= len(self._suggestion_words):
+            return False
+        replacement = self._suggestion_words[suggestion_idx]
+        if not replacement:
+            return False
+        if not self._last_swipe_emitted_text:
+            return False
+
+        for _ in range(len(self._last_swipe_emitted_text)):
+            self.action.tap_key("backspace")
+
+        emitted = self._emit_word(replacement)
+        self._last_swipe_word = replacement
+        self._last_swipe_emitted_text = emitted
+        self._swipe_best = replacement
+        self._swipe_confidence = 1.0
+        self._last_event = f"suggest:{replacement}"
+        self._last_confidence = 1.0
+        self._set_suggestions_from_candidates(replacement, self._last_swipe_candidates)
+        return True
+
+    def _commit_swipe(self, release_slot_id: Optional[str]):
+        if release_slot_id is None:
+            self._cancel_swipe()
+            return
+
         unique_keys = len(set(self._swipe_trace_slots))
         if unique_keys == 1 and self._swipe_trace_slots:
             self._tap_slot_key(self._swipe_trace_slots[-1])
@@ -1069,10 +1207,14 @@ class AirTypingGesture(GestureRecognizer):
             self._cancel_swipe()
             return
 
-        self._emit_word(best_word)
+        emitted = self._emit_word(best_word)
         self._swipe_best = best_word
         self._swipe_confidence = confidence
         self._swipe_candidates = candidates
+        self._last_swipe_word = best_word
+        self._last_swipe_emitted_text = emitted
+        self._last_swipe_candidates = list(candidates)
+        self._set_suggestions_from_candidates(best_word, candidates)
         self._last_event = f"swipe:{best_word}"
         self._last_confidence = confidence
         self._cancel_swipe()
@@ -1083,8 +1225,11 @@ class AirTypingGesture(GestureRecognizer):
             self._special_key_pinch_latched = False
             return
 
-        right_present = hands_data.camera.has_right and hands_data.wrist.has_right
+        right_camera_present = hands_data.camera.has_right and hands_data.camera.right.exists
+        right_wrist_present = hands_data.wrist.has_right and hands_data.wrist.right.exists
+        right_present = right_camera_present and right_wrist_present
         pinch_distance = self._right_pinch_distance(hands_data) if right_present else None
+        self._last_pinch_value = pinch_distance
         start_pinch_active = (
             pinch_distance is not None and pinch_distance < self.pinch_threshold
         )
@@ -1092,11 +1237,8 @@ class AirTypingGesture(GestureRecognizer):
             pinch_distance is None or pinch_distance >= self.keyboard_swipe_release_pinch_threshold
         )
 
-        if not right_present:
+        if not right_camera_present:
             self._special_key_pinch_latched = False
-        if self._swipe_active and not right_present:
-            self._cancel_swipe()
-            return
 
         if self._special_key_pinch_latched:
             if release_reached:
@@ -1104,16 +1246,36 @@ class AirTypingGesture(GestureRecognizer):
             return
 
         if self._swipe_active:
+            if not right_camera_present:
+                self._swipe_lost_frames += 1
+                if self._swipe_lost_frames > self.keyboard_swipe_tracking_grace_frames:
+                    self._cancel_swipe()
+                return
+
+            if self._swipe_lost_frames > 0:
+                self._swipe_lost_frames = 0
+
+            # Keep swipe alive until wrist landmarks return; do not force release.
+            if not right_wrist_present:
+                return
+
             if release_reached:
                 self._swipe_release_counter += 1
                 if self._swipe_release_counter >= self.keyboard_swipe_release_pending_frames:
-                    self._commit_swipe()
+                    release_slot_id = self._current_right_slot_id(hands_data)
+                    self._commit_swipe(release_slot_id)
                 return
             self._swipe_release_counter = 0
             self._capture_swipe_sample(hands_data)
             return
 
         if start_pinch_active:
+            suggestion_idx = self._current_right_suggestion_index(hands_data)
+            if suggestion_idx is not None:
+                if self._replace_last_swipe_word(suggestion_idx):
+                    self._special_key_pinch_latched = True
+                return
+
             slot_id = self._current_right_slot_id(hands_data)
             if slot_id == "caps_lock":
                 self._toggle_caps_lock()
@@ -1148,6 +1310,7 @@ class AirTypingGesture(GestureRecognizer):
             self.action.release_all_keys()
 
         self._hovered_slots.clear()
+        self._hovered_suggestion_idx = None
         self._cancel_swipe()
         self._active_modifiers.clear()
         self._paused = True
@@ -1210,6 +1373,7 @@ class AirTypingGesture(GestureRecognizer):
             return False
 
         hovered_slots = set()
+        self._hovered_suggestion_idx = None
         for side in ("left", "right"):
             frame = unified_frame if unified_frame is not None else active_frames.get(side)
             camera_hand = camera_hands.get(side)
@@ -1223,6 +1387,11 @@ class AirTypingGesture(GestureRecognizer):
                 slot = self._map_tip_to_slot(side, tip, frame)
                 if slot is not None:
                     hovered_slots.add(str(slot["id"]))
+
+                if side == "right":
+                    suggestion_idx = self._suggestion_index_at_point((tip[0], tip[1]))
+                    if suggestion_idx is not None:
+                        self._hovered_suggestion_idx = suggestion_idx
 
         self._hovered_slots = hovered_slots
         self._update_swipe(hands_data, camera_hands)
@@ -1257,7 +1426,16 @@ class AirTypingGesture(GestureRecognizer):
         self._swipe_best = ""
         self._swipe_confidence = 0.0
         self._swipe_release_counter = 0
+        self._swipe_lost_frames = 0
         self._special_key_pinch_latched = False
+        self._last_pinch_value = None
+        self._last_swipe_emitted_text = ""
+        self._last_swipe_word = ""
+        self._last_swipe_candidates = []
+        self._suggestion_words = []
+        self._suggestion_chips = []
+        self._hovered_suggestion_idx = None
+        self._overlay_bounds = None
         self._active_modifiers = set()
         self._paused = True
         self._resume_counter = 0
@@ -1289,6 +1467,26 @@ class AirTypingGesture(GestureRecognizer):
                 }
             )
 
+        swipe_points = self._swipe_points
+        if len(swipe_points) > 180:
+            stride = max(1, len(swipe_points) // 180)
+            swipe_points = swipe_points[::stride]
+
+        suggestion_chips = []
+        for chip in self._suggestion_chips:
+            suggestion_chips.append(
+                {
+                    "id": chip["id"],
+                    "index": chip["index"],
+                    "text": chip.get("text", ""),
+                    "x": chip["x"],
+                    "y": chip["y"],
+                    "w": chip["w"],
+                    "h": chip["h"],
+                    "hovered": self._hovered_suggestion_idx == chip["index"],
+                }
+            )
+
         return {
             "enabled": True,
             "calibrated": not self._paused,
@@ -1302,9 +1500,14 @@ class AirTypingGesture(GestureRecognizer):
             "finger_diagnostics": [],
             "calibration": {"active": False, "progress": 1.0},
             "swipe_active": self._swipe_active,
-            "swipe_path_points": [{"x": p[0], "y": p[1]} for p in self._swipe_points],
+            "swipe_path_points": [{"x": p[0], "y": p[1]} for p in swipe_points],
             "swipe_trace": list(self._swipe_trace),
             "swipe_candidates": list(self._swipe_candidates),
             "swipe_best": self._swipe_best,
             "swipe_confidence": self._swipe_confidence,
+            "suggestion_chips": suggestion_chips,
+            "debug_hud": {
+                "pinch_value": self._last_pinch_value,
+                "lost_frames": self._swipe_lost_frames,
+            },
         }

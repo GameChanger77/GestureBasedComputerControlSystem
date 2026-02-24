@@ -81,6 +81,7 @@ class GestureConfig:
         "keyboard_swipe_confidence_threshold": 0.45,
         "keyboard_swipe_release_pinch_threshold": 0.40,
         "keyboard_swipe_release_pending_frames": 2,
+        "keyboard_swipe_tracking_grace_frames": 8,
         "keyboard_swipe_lexicon_max_words": 6000,
         "keyboard_swipe_auto_space": True,
         "keyboard_swipe_debug": False,
@@ -98,11 +99,11 @@ class GestureConfig:
         "preview_max_fps": 30,  # Cap UI preview refresh rate (tracking still runs at full speed)
         "camera_buffer_size": 1,  # Camera capture buffer for lower-latency reads
         "pipeline_metrics_window": 120,  # Rolling window size for FPS/latency metrics
-        "max_tracked_hands": 2,  # Two hands required for keyboard mode entry/exit gestures
+        "max_tracked_hands": 1,  # Only one hand is required so far
 
         # Camera runtime tuning (best-effort; backend/camera dependent)
-        "camera_width": 1280,
-        "camera_height": 720,
+        "camera_width": 640,
+        "camera_height": 480,
         "camera_target_fps": 30,
         "camera_auto_exposure": True,
         "camera_dynamic_exposure": True,  # Manual fallback adaptation when auto exposure is disabled
