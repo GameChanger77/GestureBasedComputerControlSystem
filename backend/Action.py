@@ -6,7 +6,7 @@ import threading
 import time
 from collections import deque
 
-from backend.keyboard.KeyCodes import get_windows_vk, normalize_key
+from backend.gestures.keyboard_mode.KeyCodes import get_windows_vk, normalize_key
 from pynput.mouse import Controller as Mouse, Button
 from pynput.keyboard import Controller as Keyboard, Key
 from pyparsing import ABC, abstractmethod
