@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "global": {
+    "default_pending_frames": 3,
+    "default_ending_frames": 2
+  },
+  "custom_gestures": [
+    {
+      "id": "g_index_middle_leftclick",
+      "name": "Index+Middle Click",
+      "enabled": true,
+      "mode": "mouse",
+      "type": "pose",
+      "priority": 10,
+      "hand": "right",
+      "conditions": [
+        { "op": "only_fingers_extended", "fingers": ["index", "middle"], "threshold_deg": 155 }
+      ],
+      "confirm": { "pending_frames": 3, "ending_frames": 2 },
+      "action": {
+        "type": "left_click",
+        "params": { "at": "index.tip", "space": "camera" }
+      }
+    }
+  ]
+}

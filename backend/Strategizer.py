@@ -38,6 +38,8 @@ class Strategizer:
         # Initialize mode-specific gestures
         self._initialize_mouse_mode()
         # Add other mode initializations when they are implemented
+        self._custom_gesture_instances = []
+        self.load_custom_rules("gesture_custom_rules.json")
 
     def _initialize_mouse_mode(self):
         """Initialize gesture recognizers for mouse mode"""
@@ -202,3 +204,46 @@ class Strategizer:
             self.keyboard_mode_gestures.remove(gesture)
         elif mode == ControlMode.HOTKEY and gesture in self.hotkey_mode_gestures:
             self.hotkey_mode_gestures.remove(gesture)
+
+    def load_custom_rules(self, path: str = "gesture_custom_rules.json"):
+        from backend.custom_rules.RuleLoader import RuleLoader
+        from backend.custom_rules.RuleCompiler import RuleCompiler
+
+        # Remove previously loaded custom gestures (supports reload)
+        for g in getattr(self, "_custom_gesture_instances", []):
+            if g in self.mouse_mode_gestures:
+                self.mouse_mode_gestures.remove(g)
+            if g in self.keyboard_mode_gestures:
+                self.keyboard_mode_gestures.remove(g)
+            if g in self.hotkey_mode_gestures:
+                self.hotkey_mode_gestures.remove(g)
+        self._custom_gesture_instances = []
+
+        try:
+            rules = RuleLoader(path).load()
+        except Exception as e:
+            print(f"⚠ Failed to load custom rules: {e}")
+            return
+
+        compiler = RuleCompiler(self.config, self.screen_width, self.screen_height)
+        global_cfg = rules.get("global", {})
+
+        for rule in rules.get("custom_gestures", []):
+            if not rule.get("enabled", False):
+                continue
+
+            mode_str = rule.get("mode", "mouse")
+            if mode_str == "mouse":
+                mode = ControlMode.MOUSE
+            elif mode_str == "keyboard":
+                mode = ControlMode.KEYBOARD
+            else:
+                mode = ControlMode.HOTKEY
+
+            try:
+                recognizer = compiler.compile_gesture(self.action, rule, global_cfg)
+                self.add_custom_gesture(recognizer, mode=mode)
+                self._custom_gesture_instances.append(recognizer)
+                print(f"✓ Loaded custom gesture: {rule.get('id')} ({mode_str})")
+            except Exception as e:
+                print(f"⚠ Skipped custom gesture {rule.get('id')}: {e}")
