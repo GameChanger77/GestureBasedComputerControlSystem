@@ -5,7 +5,7 @@ import os
 import time
 
 from PySide6.QtCore import QThread, Signal
-
+from paths import resource
 from backend.HandsData import HandsData
 from backend.LandmarkSmoother import LandmarkSmoother
 
@@ -17,7 +17,7 @@ class HandTracker(QThread):
     tracking_stopped = Signal()
     error_occurred = Signal(str)
 
-    def __init__(self, strategizer, action, model_path=os.path.join('.', 'backend', 'models', 'hand_landmarker.task'),
+    def __init__(self, strategizer, action, model_path=resource(r"backend\models\hand_landmarker.task"),
                  num_hands=2):
         """
         Initialize the Hand Landmark Detector

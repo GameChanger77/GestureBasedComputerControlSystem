@@ -2,13 +2,12 @@ import sys
 import os
 import pyautogui
 from PySide6.QtWidgets import QApplication
-
+from paths import resource
 from backend.Action import Action
 from backend.HandTracker import HandTracker
 from backend.Strategizer import Strategizer
 from backend.GestureConfig import GestureConfig
 from frontend.main_window import MainWindow
-
 
 def main():
     """Main application entry point"""
@@ -36,7 +35,7 @@ def main():
     hand_tracker = HandTracker(
         strategizer=strategizer,
         action=action,
-        model_path=os.path.join('.', 'backend', 'models', 'hand_landmarker.task'),
+        model_path=str(resource(r"backend\models\hand_landmarker.task")),
         num_hands=2
     )
 
