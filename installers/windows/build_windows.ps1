@@ -7,7 +7,14 @@ $ENTRY    = "main.py"
 $ICON     = "icons\gbccs_icon.ico"
 $ISS_PATH = "installers\windows\windows_setup_wizard.iss"
 $SPEC_PATH = "$APP_NAME.spec"
+$CLEAN_BUILD_DIR = $true
 # --------------
+
+$HERE = Split-Path -Parent $MyInvocation.MyCommand.Path
+$REPO = Resolve-Path (Join-Path $HERE "..\..")
+
+Write-Host "== cd to repo root: $REPO =="
+Set-Location $REPO
 
 Write-Host "== Sync deps (uv) =="
 uv sync
@@ -48,13 +55,18 @@ if (-not $ISCC) {
   $fallback = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
   if (Test-Path $fallback) { $ISCC = $fallback }
 }
-
 if (-not $ISCC) {
   throw "Could not find ISCC.exe. Install Inno Setup or set `$ISCC to the full path."
 }
 
 Write-Host "== Compile Inno installer =="
 & $ISCC $ISS_PATH
+
+# ---- Optional cleanup ----
+if ($CLEAN_BUILD_DIR) {
+  Write-Host "== Removing PyInstaller build/ folder (safe) =="
+  Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+}
 
 Write-Host ""
 Write-Host "DONE."
