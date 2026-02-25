@@ -38,7 +38,7 @@ def main():
     hand_tracker = HandTracker(
         strategizer=strategizer,
         action=action,
-        model_path=str(resource(r"backend\models\hand_landmarker.task")),
+        model_path=str(resource(r"backend/models/hand_landmarker.task")),
         num_hands=max_tracked_hands,
         config=config
     )

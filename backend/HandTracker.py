@@ -23,7 +23,7 @@ class HandTracker(QThread):
         self,
         strategizer,
         action,
-        model_path=resource(r"backend\models\hand_landmarker.task"),
+        model_path=resource(r"backend/models/hand_landmarker.task"),
         num_hands=2,
         config=None,
     ):
