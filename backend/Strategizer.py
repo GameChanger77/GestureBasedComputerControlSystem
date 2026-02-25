@@ -34,6 +34,9 @@ class Strategizer:
         self.mouse_mode_gestures = []
         self.keyboard_mode_gestures = []
         self.hotkey_mode_gestures = []
+        self._sorted_mouse_mode_gestures = []
+        self._sorted_keyboard_mode_gestures = []
+        self._sorted_hotkey_mode_gestures = []
 
         # Initialize mode-specific gestures
         self._initialize_mouse_mode()
@@ -54,6 +57,8 @@ class Strategizer:
         click_pending = self.config['click_pending_frames']
         scroll_pending = self.config['scroll_pending_frames']
         ending = self.config['ending_frames']
+        mouse_min_delta_px = self.config.get('mouse_move_min_delta_px', 2)
+        mouse_cadence_ms = self.config.get('mouse_move_cadence_ms', 75)
 
         # Create mouse mode gestures
         # Priority order: Clicks (10) > Scroll (5) > Mouse tracking (1)
@@ -87,9 +92,12 @@ class Strategizer:
                 priority=1,
                 extension_threshold=finger_angle,
                 pending_frames=mouse_pending,
-                ending_frames=ending
+                ending_frames=ending,
+                min_delta_px=mouse_min_delta_px,
+                cadence_ms=mouse_cadence_ms
             ),
         ]
+        self._rebuild_sorted_gestures(ControlMode.MOUSE)
 
     def _initialize_switch_mode(self):
         """Initialize gesture recognizers for switching from one mode to another"""
@@ -125,7 +133,32 @@ class Strategizer:
             return self.hotkey_mode_gestures
         return []
 
-    def strategize(self, hands_data: HandsData):
+    def _get_current_mode_sorted_gestures(self):
+        """Get pre-sorted gesture recognizers for the current mode."""
+        if self.current_mode == ControlMode.MOUSE:
+            return self._sorted_mouse_mode_gestures
+        elif self.current_mode == ControlMode.KEYBOARD:
+            return self._sorted_keyboard_mode_gestures
+        elif self.current_mode == ControlMode.HOTKEY:
+            return self._sorted_hotkey_mode_gestures
+        return []
+
+    def _rebuild_sorted_gestures(self, mode: ControlMode):
+        """Rebuild the cached priority-sorted gesture list for a mode."""
+        if mode == ControlMode.MOUSE:
+            self._sorted_mouse_mode_gestures = sorted(
+                self.mouse_mode_gestures, key=lambda g: g.priority, reverse=True
+            )
+        elif mode == ControlMode.KEYBOARD:
+            self._sorted_keyboard_mode_gestures = sorted(
+                self.keyboard_mode_gestures, key=lambda g: g.priority, reverse=True
+            )
+        elif mode == ControlMode.HOTKEY:
+            self._sorted_hotkey_mode_gestures = sorted(
+                self.hotkey_mode_gestures, key=lambda g: g.priority, reverse=True
+            )
+
+    def strategize(self, hands_data: HandsData, frame_capture_ts_ns=None):
         """
         Update all gesture recognizers for the current mode.
 
@@ -135,13 +168,11 @@ class Strategizer:
 
         Args:
             hands_data: Current hand landmark data
+            frame_capture_ts_ns: Frame capture timestamp (ns) for latency tracking
         """
         # TODO make it loop through the switch mode gestures to see if it should switch the mode before doing the actual mode gestures
 
-        current_gestures = self._get_current_mode_gestures()
-
-        # Sort gestures by priority (highest first)
-        sorted_gestures = sorted(current_gestures, key=lambda g: g.priority, reverse=True)
+        sorted_gestures = self._get_current_mode_sorted_gestures()
 
         # Track if any high-priority gesture is active
         high_priority_active = False
@@ -152,7 +183,7 @@ class Strategizer:
                 continue
 
             # Update gesture
-            action_executed = gesture.update(hands_data)
+            action_executed = gesture.update(hands_data, frame_capture_ts_ns=frame_capture_ts_ns)
 
             # If a high-priority gesture executed an action, prevent lower-priority gestures
             if action_executed and gesture.priority >= 5:
@@ -171,10 +202,13 @@ class Strategizer:
 
         if mode == ControlMode.MOUSE:
             self.mouse_mode_gestures.append(gesture)
+            self._rebuild_sorted_gestures(ControlMode.MOUSE)
         elif mode == ControlMode.KEYBOARD:
             self.keyboard_mode_gestures.append(gesture)
+            self._rebuild_sorted_gestures(ControlMode.KEYBOARD)
         elif mode == ControlMode.HOTKEY:
             self.hotkey_mode_gestures.append(gesture)
+            self._rebuild_sorted_gestures(ControlMode.HOTKEY)
 
     def get_active_gestures(self):
         """
@@ -198,7 +232,10 @@ class Strategizer:
 
         if mode == ControlMode.MOUSE and gesture in self.mouse_mode_gestures:
             self.mouse_mode_gestures.remove(gesture)
+            self._rebuild_sorted_gestures(ControlMode.MOUSE)
         elif mode == ControlMode.KEYBOARD and gesture in self.keyboard_mode_gestures:
             self.keyboard_mode_gestures.remove(gesture)
+            self._rebuild_sorted_gestures(ControlMode.KEYBOARD)
         elif mode == ControlMode.HOTKEY and gesture in self.hotkey_mode_gestures:
             self.hotkey_mode_gestures.remove(gesture)
+            self._rebuild_sorted_gestures(ControlMode.HOTKEY)

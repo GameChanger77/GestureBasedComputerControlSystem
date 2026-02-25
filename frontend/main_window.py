@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import time
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel
@@ -31,6 +32,9 @@ class MainWindow(QMainWindow):
 
         # Display state
         self.display_enabled = True
+        self.show_landmarks = False
+        self._preview_interval_ns = int(1_000_000_000 / 30)
+        self._last_preview_emit_ns = 0
 
         # Hand landmark connections (for drawing)
         self.HAND_CONNECTIONS = [
@@ -104,6 +108,23 @@ class MainWindow(QMainWindow):
         """)
         button_layout.addWidget(self.toggle_display_button)
 
+        # Toggle landmark overlay button
+        self.toggle_landmarks_button = QPushButton("Show Landmarks")
+        self.toggle_landmarks_button.setMinimumHeight(40)
+        self.toggle_landmarks_button.clicked.connect(self.toggle_landmarks)
+        self.toggle_landmarks_button.setStyleSheet("""
+            QPushButton {
+                background-color: #607D8B;
+                color: white;
+                font-weight: bold;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #546E7A;
+            }
+        """)
+        button_layout.addWidget(self.toggle_landmarks_button)
+
         # Status label
         self.status_label = QLabel("Status: Not started")
         self.status_label.setStyleSheet("font-weight: bold;")
@@ -117,7 +138,7 @@ class MainWindow(QMainWindow):
         # Connect internal frame signal to video widget
         self.frame_ready.connect(self.video_widget.update_frame)
 
-    def set_components(self, hand_tracker, strategizer, action):
+    def set_components(self, hand_tracker, strategizer, action, config=None):
         """
         Inject backend components and connect signals.
 
@@ -125,13 +146,22 @@ class MainWindow(QMainWindow):
             hand_tracker: HandTracker instance
             strategizer: Strategizer instance
             action: Action instance
+            config: GestureConfig instance (optional)
         """
         self.hand_tracker = hand_tracker
         self.strategizer = strategizer
         self.action = action
 
+        if config is not None:
+            self.show_landmarks = bool(config.get('show_landmarks_default', False))
+            preview_max_fps = int(config.get('preview_max_fps', 30))
+            self._set_preview_max_fps(preview_max_fps)
+            self.video_widget.set_max_preview_fps(preview_max_fps)
+            self._update_landmarks_button_text()
+
         # Connect to HandTracker signals
         if self.hand_tracker:
+            self.hand_tracker.set_preview_enabled(self.display_enabled)
             self.hand_tracker.landmarks_detected.connect(self.on_landmarks_detected)
             self.hand_tracker.tracking_started.connect(self.on_tracking_started)
             self.hand_tracker.tracking_stopped.connect(self.on_tracking_stopped)
@@ -183,15 +213,46 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def toggle_display(self):
-        """Toggle video display on/off (tracking continues)"""
+        """Toggle video preview on/off while preserving layout space."""
         self.display_enabled = not self.display_enabled
 
         if self.display_enabled:
             self.toggle_display_button.setText("Hide Preview")
-            self.video_widget.show()
+            self.video_widget.set_preview_enabled(True)
+            if self.hand_tracker:
+                self.hand_tracker.set_preview_enabled(True)
+            self._last_preview_emit_ns = 0
+            # Keep widget visible so layout spacing is preserved.
+            if not self.hand_tracker or not self.hand_tracker.isRunning():
+                self.video_widget.clear_frame()
         else:
             self.toggle_display_button.setText("Show Preview")
-            self.video_widget.hide()
+            self.video_widget.set_preview_enabled(False)
+            if self.hand_tracker:
+                self.hand_tracker.set_preview_enabled(False)
+            self._last_preview_emit_ns = 0
+            # Keep widget visible and show placeholder when preview is disabled.
+            self.video_widget.show_preview_hidden()
+
+    @Slot()
+    def toggle_landmarks(self):
+        """Toggle hand landmark overlay drawing on preview frames."""
+        self.show_landmarks = not self.show_landmarks
+        self._update_landmarks_button_text()
+
+    def _update_landmarks_button_text(self):
+        """Update landmark toggle button text from current state."""
+        if self.show_landmarks:
+            self.toggle_landmarks_button.setText("Hide Landmarks")
+        else:
+            self.toggle_landmarks_button.setText("Show Landmarks")
+
+    def _set_preview_max_fps(self, max_fps: int):
+        """Set UI preview refresh cap without affecting backend tracking FPS."""
+        if max_fps <= 0:
+            self._preview_interval_ns = 0
+        else:
+            self._preview_interval_ns = int(1_000_000_000 / max_fps)
 
     @Slot(dict, object)
     def on_landmarks_detected(self, landmarks_data, frame):
@@ -202,72 +263,111 @@ class MainWindow(QMainWindow):
             landmarks_data: Dictionary with landmark data
             frame: Camera frame as numpy array
         """
-        if frame is None or frame.size == 0:
-            return
+        # Update backend-reported pipeline metrics
+        metrics = landmarks_data.get('metrics', {}) if landmarks_data else {}
+        pipeline_fps = metrics.get('pipeline_fps')
+        if pipeline_fps is not None:
+            self.stats_widget.update_fps(float(pipeline_fps))
+        self.stats_widget.update_latency(
+            metrics.get('action_latency_avg_ms'),
+            metrics.get('action_latency_latest_ms'),
+            metrics.get('action_latency_p95_ms')
+        )
+        self.stats_widget.update_pipeline_breakdown(metrics)
 
-        # Update stats (always, even if display is off)
-        self.stats_widget.record_frame()
-
-        # Update hands count
+        # Update hands count from smoothed data
         hands_count = 0
-        if landmarks_data and 'detection_result' in landmarks_data:
-            detection_result = landmarks_data['detection_result']
-            if detection_result and detection_result.hand_landmarks:
-                hands_count = len(detection_result.hand_landmarks)
+        if landmarks_data and 'smoothed_hands_data' in landmarks_data:
+            smoothed_hands_data = landmarks_data['smoothed_hands_data']
+            if smoothed_hands_data:
+                if smoothed_hands_data.camera.has_left:
+                    hands_count += 1
+                if smoothed_hands_data.camera.has_right:
+                    hands_count += 1
         self.stats_widget.update_hands_count(hands_count)
 
-        # Only update display if enabled
-        if self.display_enabled:
-            # Draw landmarks on frame
-            if landmarks_data and 'detection_result' in landmarks_data:
-                frame = self.draw_landmarks(frame, landmarks_data['detection_result'])
+        # Only update preview if enabled and frame data was provided.
+        if self.display_enabled and frame is not None and frame.size != 0:
+            now_ns = time.perf_counter_ns()
+            if (
+                self._preview_interval_ns > 0
+                and (now_ns - self._last_preview_emit_ns) < self._preview_interval_ns
+            ):
+                return
 
-            # Emit to video widget (thread-safe)
-            self.frame_ready.emit(frame.copy())
+            self._last_preview_emit_ns = now_ns
 
-    def draw_landmarks(self, image, detection_result):
+            display_frame = frame
+
+            # Draw landmarks on a copy so tracker-owned frame buffers stay read-only on the UI thread.
+            if self.show_landmarks and landmarks_data and 'smoothed_hands_data' in landmarks_data:
+                display_frame = frame.copy()
+                display_frame = self.draw_landmarks(display_frame, landmarks_data['smoothed_hands_data'])
+
+            self.frame_ready.emit(display_frame)
+
+    def draw_landmarks(self, image, hands_data):
         """
-        Draw hand landmarks and connections on the image.
+        Draw hand landmarks and connections from smoothed HandsData.
 
         Args:
             image: OpenCV image array
-            detection_result: MediaPipe detection result
+            hands_data: HandsData object with smoothed landmarks
 
         Returns:
             Annotated image with landmarks drawn
         """
-        if detection_result.hand_landmarks:
-            for hand_landmarks in detection_result.hand_landmarks:
-                # Convert normalized coordinates to pixel coordinates
-                height, width, _ = image.shape
-                landmark_points = []
+        if hands_data is None:
+            return image
 
-                for landmark in hand_landmarks:
-                    x = int(landmark.x * width)
-                    y = int(landmark.y * height)
+        height, width, _ = image.shape
+
+        # Process both left and right hands
+        for hand in [hands_data.camera.left, hands_data.camera.right]:
+            if not hand.exists:
+                continue
+
+            # Build flat list of landmarks for connections
+            # Order: wrist(0), thumb(1-4), index(5-8), middle(9-12), ring(13-16), pinky(17-20)
+            landmark_points = []
+
+            # Add wrist
+            wrist = hand.wrist
+            if wrist is not None:
+                x = int(wrist[0] * width)
+                y = int(wrist[1] * height)
+                landmark_points.append((x, y))
+            else:
+                continue
+
+            # Add all finger joints
+            for finger in [hand.thumb, hand.index, hand.middle, hand.ring, hand.pinky]:
+                for joint in finger.joints:
+                    x = int(joint[0] * width)
+                    y = int(joint[1] * height)
                     landmark_points.append((x, y))
 
-                # Draw connections
-                for connection in self.HAND_CONNECTIONS:
-                    start_idx, end_idx = connection
-                    if start_idx < len(landmark_points) and end_idx < len(landmark_points):
-                        cv2.line(image, landmark_points[start_idx], landmark_points[end_idx],
-                                 (0, 255, 0), 2)
+            # Draw connections
+            for connection in self.HAND_CONNECTIONS:
+                start_idx, end_idx = connection
+                if start_idx < len(landmark_points) and end_idx < len(landmark_points):
+                    cv2.line(image, landmark_points[start_idx], landmark_points[end_idx],
+                             (0, 255, 0), 2)
 
-                # Draw landmark points
-                for i, point in enumerate(landmark_points):
-                    # Different colors for different finger parts
-                    if i == 0:  # Wrist
-                        color = (255, 0, 0)  # Red
-                        radius = 8
-                    elif i in [4, 8, 12, 16, 20]:  # Fingertips
-                        color = (0, 0, 255)  # Blue
-                        radius = 6
-                    else:  # Other joints
-                        color = (255, 255, 0)  # Cyan
-                        radius = 4
+            # Draw landmark points
+            for i, point in enumerate(landmark_points):
+                # Different colors for different finger parts
+                if i == 0:  # Wrist
+                    color = (255, 0, 0)  # Red
+                    radius = 8
+                elif i in [4, 8, 12, 16, 20]:  # Fingertips
+                    color = (0, 0, 255)  # Blue
+                    radius = 6
+                else:  # Other joints
+                    color = (255, 255, 0)  # Cyan
+                    radius = 4
 
-                    cv2.circle(image, point, radius, color, -1)
+                cv2.circle(image, point, radius, color, -1)
 
         return image
 
@@ -281,6 +381,7 @@ class MainWindow(QMainWindow):
         """Handle tracking stopped signal"""
         self.status_label.setText("Status: Stopped")
         self.start_button.setText("Start Tracking")
+        self.video_widget.clear_frame()
 
     @Slot(str)
     def on_tracking_error(self, error_message):
@@ -292,4 +393,9 @@ class MainWindow(QMainWindow):
         # Stop tracking when window closes
         if self.hand_tracker and self.hand_tracker.isRunning():
             self.hand_tracker.stop_tracking()
+        if self.action and hasattr(self.action, 'close'):
+            try:
+                self.action.close()
+            except Exception:
+                pass
         event.accept()

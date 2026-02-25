@@ -1,4 +1,4 @@
-import numpy as np
+import math
 
 """
 Utility functions for gesture detection.
@@ -40,30 +40,28 @@ def calculate_angle(p1, p2, p3):
     Returns:
         float: Angle in degrees (0-180)
     """
-    p1 = np.array(p1)
-    p2 = np.array(p2)
-    p3 = np.array(p3)
+    # Vectors from p2 to p1 and p2 to p3 (scalar math avoids tiny array allocations).
+    v1x = p1[0] - p2[0]
+    v1y = p1[1] - p2[1]
+    v1z = p1[2] - p2[2]
+    v2x = p3[0] - p2[0]
+    v2y = p3[1] - p2[1]
+    v2z = p3[2] - p2[2]
 
-    # Vectors from p2 to p1 and p2 to p3
-    v1 = p1 - p2
-    v2 = p3 - p2
+    v1_norm = math.sqrt(v1x * v1x + v1y * v1y + v1z * v1z)
+    v2_norm = math.sqrt(v2x * v2x + v2y * v2y + v2z * v2z)
 
-    # Normalize vectors
-    v1_norm = np.linalg.norm(v1)
-    v2_norm = np.linalg.norm(v2)
-
-    if v1_norm < 1e-6 or v2_norm < 1e-6:
+    if v1_norm <= 1e-6 or v2_norm <= 1e-6:
         return 0.0
 
-    v1 = v1 / v1_norm
-    v2 = v2 / v2_norm
-
     # Calculate angle using dot product
-    cos_angle = np.dot(v1, v2)
+    cos_angle = (
+        (v1x * v2x + v1y * v2y + v1z * v2z) / (v1_norm * v2_norm)
+    )
     # Clamp to [-1, 1] to avoid numerical errors
-    cos_angle = np.clip(cos_angle, -1.0, 1.0)
-    angle_rad = np.arccos(cos_angle)
-    angle_deg = np.degrees(angle_rad)
+    cos_angle = max(-1.0, min(1.0, cos_angle))
+    angle_rad = math.acos(cos_angle)
+    angle_deg = math.degrees(angle_rad)
 
     return angle_deg
 
@@ -87,7 +85,15 @@ def is_finger_extended(finger, threshold=155.0):
     if finger is None or len(finger.joints) < 4:
         return False
 
-    joints = [np.array(j) for j in finger.joints]
+    # Per-frame cache on the Finger object (HandsData is recreated each frame).
+    cache = getattr(finger, "_extended_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(finger, "_extended_cache", cache)
+
+    cache_key = float(threshold)
+    if cache_key in cache:
+        return cache[cache_key]
 
     # Calculate angles at each joint (excluding first and last)
     angles = []
@@ -96,8 +102,8 @@ def is_finger_extended(finger, threshold=155.0):
     # Calculate 3 angles:
     # - Angle at joint 1 (PIP): between joints 0-1-2
     # - Angle at joint 2 (DIP): between joints 1-2-3
-    for i in range(1, len(joints) - 1):
-        angle = calculate_angle(joints[i-1], joints[i], joints[i+1])
+    for i in range(1, len(finger.joints) - 1):
+        angle = calculate_angle(finger.joints[i - 1], finger.joints[i], finger.joints[i + 1])
         angles.append(angle)
 
     if not angles:
@@ -106,7 +112,9 @@ def is_finger_extended(finger, threshold=155.0):
     # Average angle - extended fingers have high average angles
     avg_angle = sum(angles) / len(angles)
 
-    return avg_angle > threshold
+    is_extended = avg_angle > threshold
+    cache[cache_key] = is_extended
+    return is_extended
 
 
 def are_fingers_pinched(finger1_tip, finger2_tip, threshold):
@@ -220,14 +228,20 @@ def get_finger_extension(finger):
     # Calculate total length along finger joints
     total_length = 0.0
     for i in range(len(finger.joints) - 1):
-        j1 = np.array(finger.joints[i])
-        j2 = np.array(finger.joints[i + 1])
-        total_length += np.linalg.norm(j2 - j1)
+        j1 = finger.joints[i]
+        j2 = finger.joints[i + 1]
+        dx = j2[0] - j1[0]
+        dy = j2[1] - j1[1]
+        dz = j2[2] - j1[2]
+        total_length += math.sqrt(dx * dx + dy * dy + dz * dz)
 
     # Calculate straight-line distance from base to tip
-    base = np.array(finger.joints[0])
-    tip = np.array(finger.joints[-1])
-    straight_distance = np.linalg.norm(tip - base)
+    base = finger.joints[0]
+    tip = finger.joints[-1]
+    dx = tip[0] - base[0]
+    dy = tip[1] - base[1]
+    dz = tip[2] - base[2]
+    straight_distance = math.sqrt(dx * dx + dy * dy + dz * dz)
 
     # Extension ratio (approaches 1 when finger is straight)
     if total_length > 1e-6:
@@ -340,11 +354,10 @@ def get_finger_angle(finger):
     if finger is None or len(finger.joints) < 4:
         return 0.0
 
-    joints = [np.array(j) for j in finger.joints]
     angles = []
 
-    for i in range(1, len(joints) - 1):
-        angle = calculate_angle(joints[i-1], joints[i], joints[i+1])
+    for i in range(1, len(finger.joints) - 1):
+        angle = calculate_angle(finger.joints[i - 1], finger.joints[i], finger.joints[i + 1])
         angles.append(angle)
 
     if not angles:
@@ -374,22 +387,35 @@ def are_only_fingers_extended(hand, extended_fingers, extension_threshold):
     if not hand.exists:
         return False
 
+    # Per-frame cache on the Hand object keyed by requested finger set + threshold.
+    hand_cache = getattr(hand, "_only_fingers_extended_cache", None)
+    if hand_cache is None:
+        hand_cache = {}
+        setattr(hand, "_only_fingers_extended_cache", hand_cache)
+
+    cache_key = (tuple(sorted(extended_fingers)), float(extension_threshold))
+    cached_value = hand_cache.get(cache_key)
+    if cached_value is not None:
+        return cached_value
+
     # Check all non-thumb fingers
     all_fingers = ['index', 'middle', 'ring', 'pinky']
 
     for finger_name in all_fingers:
         finger = getattr(hand, finger_name)
-        avg_angle = get_finger_angle(finger)
 
         if finger_name in extended_fingers:
             # This finger should be extended
             is_ext = is_finger_extended(finger, threshold=extension_threshold)
             if not is_ext:
+                hand_cache[cache_key] = False
                 return False
         else:
             # This finger should be curled (NOT extended)
             is_ext = is_finger_extended(finger, threshold=extension_threshold)
             if is_ext:
+                hand_cache[cache_key] = False
                 return False
 
+    hand_cache[cache_key] = True
     return True

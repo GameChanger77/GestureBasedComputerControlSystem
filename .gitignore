@@ -16,3 +16,4 @@ __pycache__/
 gesture_config.json
 
 **/gesture-test/
+plans/
