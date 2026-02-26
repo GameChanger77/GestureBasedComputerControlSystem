@@ -4,11 +4,27 @@ from typing import Any, Dict
 
 
 class RuleLoader:
+    """
+    Loads and validates gesture_custom_rules.json.
+
+    Purpose:
+    - Users author custom gestures in JSON (no Python required).
+    - We validate the JSON early so errors are readable and deterministic.
+    - Returns a normalized dict structure for RuleCompiler to consume.
+    """
+
     def __init__(self, path: str = "gesture_custom_rules.json"):
         self.path = path
 
     def load(self) -> Dict[str, Any]:
+        """
+        Load JSON from disk.
+
+        Returns:
+            dict: Parsed rules file (with defaults if file missing)
+        """
         if not os.path.exists(self.path):
+            # Missing file is not fatal; just means no custom gestures
             return {
                 "version": 1,
                 "global": {"default_pending_frames": 3, "default_ending_frames": 2},
@@ -22,6 +38,12 @@ class RuleLoader:
         return data
 
     def _validate(self, data: Dict[str, Any]) -> None:
+        """
+        Validate the top-level schema and each gesture entry.
+
+        Raises:
+            ValueError: if schema is invalid
+        """
         if not isinstance(data, dict):
             raise ValueError("Root must be an object")
 
@@ -35,16 +57,19 @@ class RuleLoader:
         if not isinstance(global_cfg, dict):
             raise ValueError("global must be an object")
 
+        # Validate each custom gesture entry
         for i, g in enumerate(data["custom_gestures"]):
             path = f"custom_gestures[{i}]"
             if not isinstance(g, dict):
                 raise ValueError(f"{path} must be an object")
 
+            # Required keys for compilation
             required = ["id", "name", "enabled", "mode", "type", "priority", "hand", "conditions", "action"]
             for r in required:
                 if r not in g:
                     raise ValueError(f"{path}.{r} is required")
 
+            # Enforce supported types/modes/hands
             if g["type"] not in ["pose", "hold"]:
                 raise ValueError(f"{path}.type must be 'pose' or 'hold'")
 
@@ -57,8 +82,10 @@ class RuleLoader:
             if not isinstance(g["conditions"], list):
                 raise ValueError(f"{path}.conditions must be a list")
 
+            # Action must be an object with at least a type
             if not isinstance(g["action"], dict) or "type" not in g["action"]:
                 raise ValueError(f"{path}.action must be an object with action.type")
 
+            # confirm is optional but must be object if present
             if "confirm" in g and not isinstance(g["confirm"], dict):
                 raise ValueError(f"{path}.confirm must be an object if present")
