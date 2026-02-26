@@ -60,6 +60,14 @@ if [[ ! -d "${APP_PATH}" ]]; then
   exit 1
 fi
 
+APP_PLIST="${APP_PATH}/Contents/Info.plist"
+
+echo "== add macOS privacy usage descriptions (Camera) =="
+/usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string \"GBCCS uses the camera to detect hand gestures for controlling your computer.\"" \
+  "${APP_PLIST}" 2>/dev/null || \
+/usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription \"GBCCS uses the camera to detect hand gestures for controlling your computer.\"" \
+  "${APP_PLIST}"
+
 echo "== build DMG (simple drag-to-Applications style) =="
 DMG_PATH="${OUT_DIR}/${APP_NAME}.dmg"
 TEMP_DMG="${OUT_DIR}/${APP_NAME}-temp.dmg"
