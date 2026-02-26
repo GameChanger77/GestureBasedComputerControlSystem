@@ -508,5 +508,3 @@ Edit `gesture_config.json` to customize behavior:
 - Increase `scroll_sensitivity` for faster scrolling
 - Increase `screen_safe_margin` to prevent cursor from sticking to edges
 
-
-test push on linux
