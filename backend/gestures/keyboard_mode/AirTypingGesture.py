@@ -110,9 +110,6 @@ class AirTypingGesture(GestureRecognizer):
         self.keyboard_swipe_min_points = int(self.config.get("keyboard_swipe_min_points", 4))
         self.keyboard_swipe_min_unique_keys = int(self.config.get("keyboard_swipe_min_unique_keys", 3))
         self.keyboard_swipe_decode_top_k = 8
-        self.keyboard_swipe_confidence_threshold = float(
-            self.config.get("keyboard_swipe_confidence_threshold", 0.45)
-        )
         self.keyboard_swipe_release_pinch_threshold = float(
             self.config.get("keyboard_swipe_release_pinch_threshold", 0.50)
         )
@@ -130,7 +127,6 @@ class AirTypingGesture(GestureRecognizer):
             self.keyboard_swipe_tracking_grace_frames = 0
         self.keyboard_swipe_lexicon_max_words = 12000
         self.keyboard_swipe_auto_space = bool(self.config.get("keyboard_swipe_auto_space", True))
-        self.keyboard_swipe_debug = bool(self.config.get("keyboard_swipe_debug", False))
         self._swipe_point_min_distance = 0.0035
         self._swipe_point_min_distance_sq = self._swipe_point_min_distance * self._swipe_point_min_distance
 
