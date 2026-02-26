@@ -8,7 +8,7 @@ from threading import Condition, Thread
 import numpy as np
 
 from PySide6.QtCore import QThread, Signal
-
+from paths import resource
 from backend.HandsData import HandsData
 
 
@@ -23,7 +23,7 @@ class HandTracker(QThread):
         self,
         strategizer,
         action,
-        model_path=os.path.join('.', 'backend', 'models', 'hand_landmarker.task'),
+        model_path=resource(r"backend/models/hand_landmarker.task"),
         num_hands=2,
         config=None,
     ):
