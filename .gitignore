@@ -8,6 +8,7 @@ __pycache__/
 /installers/linux/AppDir
 /installers/linux/out
 /installers/linux/tools
+installers/mac/installer_out/
 # Byte-compiled / optimized / DLL files
 *.spec
 *.py[cod]
