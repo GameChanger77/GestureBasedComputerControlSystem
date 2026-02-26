@@ -10,6 +10,7 @@ ICON_PNG_REL="installers/linux/${APP_NAME}_icon.png"
 TOOLS_DIR_REL="installers/linux/tools"
 OUT_DIR_REL="installers/linux/out"
 APPDIR_REL="installers/linux/AppDir"
+CLEAN_BUILD_DIR=1  # set to 0 to keep build/
 
 # appimagetool download
 APPIMAGETOOL_URL="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
@@ -131,6 +132,11 @@ fi
 echo "== build AppImage =="
 OUT_APPIMAGE="${OUT_DIR}/${APP_NAME}-x86_64.AppImage"
 "${APPIMAGETOOL_PATH}" "${APPDIR}" "${OUT_APPIMAGE}"
+
+if [[ "${CLEAN_BUILD_DIR}" -eq 1 ]]; then
+  echo "== cleanup: removing PyInstaller build/ folder =="
+  rm -rf build
+fi
 
 echo ""
 echo "DONE."
