@@ -37,9 +37,6 @@ class GestureConfig:
 
         # Keyboard overlay and movement (display-only)
         "keyboard_flip_x_for_mapping": True,
-        "keyboard_split_layout": False,
-        "keyboard_single_hand_center_deadband": 0.08,
-        "keyboard_fixed_center_mode": True,
         "keyboard_fixed_center_x": 0.5,
         "keyboard_fixed_center_y": 0.58,
         "keyboard_fixed_width": 0.78,
@@ -60,20 +57,12 @@ class GestureConfig:
         "keyboard_drag_deadzone_margin_x": 0.14,
         "keyboard_drag_deadzone_margin_y": 0.18,
         "keyboard_hand_size_ema_alpha": 0.08,
-        "keyboard_active_fingers": ["index"],
-        "keyboard_assign_hands_by_x": True,
-        "keyboard_use_thumb_fingers": False,
-        "keyboard_require_both_hands": False,
-        "keyboard_pause_on_hand_loss": True,
-        "keyboard_resume_stability_frames": 4,
         "keyboard_mode_switch_cooldown_sec": 1.0,
-        "keyboard_swipe_enabled": True,
         "keyboard_swipe_min_points": 4,
         "keyboard_swipe_min_unique_keys": 3,
         "keyboard_swipe_release_pinch_threshold": 0.40,
         "keyboard_swipe_release_pending_frames": 2,
         "keyboard_swipe_tracking_grace_frames": 8,
-        "keyboard_swipe_auto_space": True,
 
         # Mouse move action throttling (reduces system-call churn)
         "mouse_move_min_delta_px": 2,  # Minimum pixel delta before sending cursor update

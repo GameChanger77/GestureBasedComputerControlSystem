@@ -63,18 +63,14 @@ class AirTypingGesture(GestureRecognizer):
         else:
             self._meta_key_label = "Win"
 
-        self.require_both_hands = bool(self.config.get("keyboard_require_both_hands", False))
-        self.pause_on_hand_loss = bool(self.config.get("keyboard_pause_on_hand_loss", True))
-        self.resume_stability_frames = int(self.config.get("keyboard_resume_stability_frames", 4))
-        self.use_thumb_fingers = bool(self.config.get("keyboard_use_thumb_fingers", True))
-        self.active_fingers = self.config.get("keyboard_active_fingers", ["index"])
-        if not isinstance(self.active_fingers, list) or not self.active_fingers:
-            self.active_fingers = ["index"]
+        # constants for unified swipe keyboard mode.
+        self.require_both_hands = False
+        self.pause_on_hand_loss = True
+        self.resume_stability_frames = 4
+        self.use_thumb_fingers = False
+        self.active_fingers = ["index"]
 
-        self.assign_hands_by_x = bool(self.config.get("keyboard_assign_hands_by_x", True))
-        self.keyboard_split_layout = bool(self.config.get("keyboard_split_layout", False))
-        self.keyboard_fixed_center_mode = bool(self.config.get("keyboard_fixed_center_mode", True))
-        self.single_hand_center_deadband = float(self.config.get("keyboard_single_hand_center_deadband", 0.08))
+        self.keyboard_fixed_center_mode = True
         self.flip_x_for_mapping = bool(
             self.config.get(
                 "keyboard_flip_x_for_mapping",
@@ -106,7 +102,7 @@ class AirTypingGesture(GestureRecognizer):
         self.pinch_threshold = float(self.config.get("pinch_threshold", 0.15))
 
         # Swipe typing configuration
-        self.keyboard_swipe_enabled = bool(self.config.get("keyboard_swipe_enabled", True))
+        self.keyboard_swipe_enabled = True
         self.keyboard_swipe_min_points = int(self.config.get("keyboard_swipe_min_points", 4))
         self.keyboard_swipe_min_unique_keys = int(self.config.get("keyboard_swipe_min_unique_keys", 3))
         self.keyboard_swipe_decode_top_k = 8
@@ -126,14 +122,13 @@ class AirTypingGesture(GestureRecognizer):
         if self.keyboard_swipe_tracking_grace_frames < 0:
             self.keyboard_swipe_tracking_grace_frames = 0
         self.keyboard_swipe_lexicon_max_words = 12000
-        self.keyboard_swipe_auto_space = bool(self.config.get("keyboard_swipe_auto_space", True))
+        self.keyboard_swipe_auto_space = True
         self._swipe_point_min_distance = 0.0035
         self._swipe_point_min_distance_sq = self._swipe_point_min_distance * self._swipe_point_min_distance
 
         self._paused = True
         self._status = "Keyboard Initializing..."
         self._resume_counter = 0
-        self._single_hand_side_hint: Optional[str] = None
 
         self._last_event = ""
         self._last_confidence = 0.0
@@ -168,7 +163,6 @@ class AirTypingGesture(GestureRecognizer):
         self._caps_lock_active = False
         self._overlay_bounds: Optional[Tuple[float, float, float, float]] = None
 
-        self._rows_by_side = self._build_split_rows()
         self._rows_unified = self._build_unified_rows()
         self._slot_to_key = self._build_slot_key_map()
 
@@ -177,96 +171,6 @@ class AirTypingGesture(GestureRecognizer):
 
     def _slot(self, slot_id: str, label: str, key: str, width: float = 1.0) -> Dict[str, object]:
         return {"id": slot_id, "label": label, "key": key, "w": width}
-
-    def _build_split_rows(self) -> Dict[str, List[List[Dict[str, object]]]]:
-        left_rows = [
-            [
-                self._slot("backtick", "`", "backtick"),
-                self._slot("1", "1", "1"),
-                self._slot("2", "2", "2"),
-                self._slot("3", "3", "3"),
-                self._slot("4", "4", "4"),
-                self._slot("5", "5", "5"),
-            ],
-            [
-                self._slot("tab", "Tab", "tab", 1.4),
-                self._slot("q", "Q", "q"),
-                self._slot("w", "W", "w"),
-                self._slot("e", "E", "e"),
-                self._slot("r", "R", "r"),
-                self._slot("t", "T", "t"),
-            ],
-            [
-                self._slot("caps_lock", "Caps", "caps_lock", 1.7),
-                self._slot("a", "A", "a"),
-                self._slot("s", "S", "s"),
-                self._slot("d", "D", "d"),
-                self._slot("f", "F", "f"),
-                self._slot("g", "G", "g"),
-            ],
-            [
-                self._slot("left_shift", "Shift", "left_shift", 2.0),
-                self._slot("z", "Z", "z"),
-                self._slot("x", "X", "x"),
-                self._slot("c", "C", "c"),
-                self._slot("v", "V", "v"),
-                self._slot("b", "B", "b"),
-            ],
-            [
-                self._slot("left_ctrl", "Ctrl", "left_ctrl", 1.2),
-                self._slot("left_win", self._meta_key_label, "left_win", 1.1),
-                self._slot("left_alt", "Alt", "left_alt", 1.1),
-                self._slot("left_space", "Space", "space", 3.6),
-            ],
-        ]
-
-        right_rows = [
-            [
-                self._slot("6", "6", "6"),
-                self._slot("7", "7", "7"),
-                self._slot("8", "8", "8"),
-                self._slot("9", "9", "9"),
-                self._slot("0", "0", "0"),
-                self._slot("minus", "-", "minus"),
-                self._slot("equals", "=", "equals"),
-                self._slot("backspace", "Back", "backspace", 1.8),
-            ],
-            [
-                self._slot("y", "Y", "y"),
-                self._slot("u", "U", "u"),
-                self._slot("i", "I", "i"),
-                self._slot("o", "O", "o"),
-                self._slot("p", "P", "p"),
-                self._slot("left_bracket", "[", "left_bracket"),
-                self._slot("right_bracket", "]", "right_bracket"),
-                self._slot("backslash", "\\", "backslash"),
-            ],
-            [
-                self._slot("h", "H", "h"),
-                self._slot("j", "J", "j"),
-                self._slot("k", "K", "k"),
-                self._slot("l", "L", "l"),
-                self._slot("semicolon", ";", "semicolon"),
-                self._slot("quote", "'", "quote"),
-                self._slot("enter", "Enter", "enter", 1.8),
-            ],
-            [
-                self._slot("n", "N", "n"),
-                self._slot("m", "M", "m"),
-                self._slot("comma", ",", "comma"),
-                self._slot("period", ".", "period"),
-                self._slot("slash", "/", "slash"),
-                self._slot("right_shift", "Shift", "right_shift", 1.8),
-            ],
-            [
-                self._slot("right_space", "Space", "space", 3.6),
-                self._slot("right_alt", "Alt", "right_alt", 1.1),
-                self._slot("right_win", self._meta_key_label, "right_win", 1.1),
-                self._slot("right_ctrl", "Ctrl", "right_ctrl", 1.2),
-            ],
-        ]
-
-        return {"left": left_rows, "right": right_rows}
 
     def _build_unified_rows(self) -> List[List[Dict[str, object]]]:
         return [
@@ -344,11 +248,6 @@ class AirTypingGesture(GestureRecognizer):
 
     def _build_slot_key_map(self) -> Dict[str, str]:
         mapping: Dict[str, str] = {}
-        for side in ("left", "right"):
-            for row in self._rows_by_side.get(side, []):
-                for slot in row:
-                    slot_id = str(slot["id"])
-                    mapping[slot_id] = str(slot["key"])
         for row in self._rows_unified:
             for slot in row:
                 slot_id = str(slot["id"])
@@ -385,49 +284,11 @@ class AirTypingGesture(GestureRecognizer):
             fingers = [f for f in fingers if f != "thumb"]
         return fingers
 
-    def _get_hands_by_side(self, coord_space) -> Dict[str, object]:
-        left = coord_space.left if coord_space.has_left else None
-        right = coord_space.right if coord_space.has_right else None
-
-        if not self.assign_hands_by_x:
-            return {"left": left, "right": right}
-
-        if left is None and right is None:
-            return {"left": None, "right": None}
-
-        # Single-hand fallback: keep one hand driving one side.
-        if left is None or right is None:
-            single = left if left is not None else right
-            side_hint = self._single_hand_side_hint if self._single_hand_side_hint in {"left", "right"} else None
-            side = side_hint
-
-            wrist = self._normalized_point(single.wrist) if single is not None else None
-            if wrist is not None:
-                x = wrist[0]
-                deadband = self._clamp(self.single_hand_center_deadband, 0.0, 0.25)
-                if x < (0.5 - deadband):
-                    side = "left"
-                elif x > (0.5 + deadband):
-                    side = "right"
-                elif side is None:
-                    side = "left" if x <= 0.5 else "right"
-
-            if side is None:
-                side = "left" if left is not None else "right"
-
-            self._single_hand_side_hint = side
-            return {"left": single if side == "left" else None, "right": single if side == "right" else None}
-
-        self._single_hand_side_hint = None
-
-        lw = self._normalized_point(left.wrist)
-        rw = self._normalized_point(right.wrist)
-        if lw is None or rw is None:
-            return {"left": left, "right": right}
-
-        if lw[0] <= rw[0]:
-            return {"left": left, "right": right}
-        return {"left": right, "right": left}
+    def _get_camera_hands(self, coord_space) -> Dict[str, object]:
+        return {
+            "left": coord_space.left if coord_space.has_left else None,
+            "right": coord_space.right if coord_space.has_right else None,
+        }
 
     def _get_tip(self, hand, finger_name: str) -> Optional[Tuple[float, float, float]]:
         if hand is None or not hand.exists:
@@ -522,7 +383,7 @@ class AirTypingGesture(GestureRecognizer):
         if u < 0.0 or u > 1.0 or v < 0.0 or v > 1.0:
             return None
 
-        rows = self._rows_by_side.get(side, []) if self.keyboard_split_layout else self._rows_unified
+        rows = self._rows_unified
         if not rows:
             return None
 
@@ -549,76 +410,39 @@ class AirTypingGesture(GestureRecognizer):
         return self._slot_from_uv(side, u, v)
 
     def _build_overlay_keys(self, frames: Dict[str, Optional[HandFrame]]) -> List[Dict[str, object]]:
-        if not self.keyboard_split_layout:
-            frame = self._resolve_unified_frame(frames)
-            if frame is None:
-                return []
+        frame = self._resolve_unified_frame(frames)
+        if frame is None:
+            return []
 
-            rows = self._rows_unified
-            if not rows:
-                return []
-
-            key_rects = []
-            row_h = frame.height / len(rows)
-            for row_idx, row in enumerate(rows):
-                row_top = frame.top + (row_h * row_idx)
-                row_total = sum(float(slot["w"]) for slot in row)
-                if row_total <= 1e-6:
-                    continue
-
-                accum = 0.0
-                for slot in row:
-                    slot_w = float(slot["w"]) / row_total
-                    x = frame.left + (frame.width * accum)
-                    w = frame.width * slot_w
-                    key_rects.append(
-                        {
-                            "id": str(slot["id"]),
-                            "side": "full",
-                            "label": str(slot["label"]),
-                            "x": x,
-                            "y": row_top,
-                            "w": w,
-                            "h": row_h,
-                        }
-                    )
-                    accum += slot_w
-            return key_rects
+        rows = self._rows_unified
+        if not rows:
+            return []
 
         key_rects = []
-        for side in ("left", "right"):
-            frame = frames.get(side)
-            if frame is None:
+        row_h = frame.height / len(rows)
+        for row_idx, row in enumerate(rows):
+            row_top = frame.top + (row_h * row_idx)
+            row_total = sum(float(slot["w"]) for slot in row)
+            if row_total <= 1e-6:
                 continue
-            rows = self._rows_by_side[side]
-            if not rows:
-                continue
 
-            row_h = frame.height / len(rows)
-            for row_idx, row in enumerate(rows):
-                row_top = frame.top + (row_h * row_idx)
-                row_total = sum(float(slot["w"]) for slot in row)
-                if row_total <= 1e-6:
-                    continue
-
-                accum = 0.0
-                for slot in row:
-                    slot_w = float(slot["w"]) / row_total
-                    x = frame.left + (frame.width * accum)
-                    w = frame.width * slot_w
-                    key_rects.append(
-                        {
-                            "id": str(slot["id"]),
-                            "side": side,
-                            "label": str(slot["label"]),
-                            "x": x,
-                            "y": row_top,
-                            "w": w,
-                            "h": row_h,
-                        }
-                    )
-                    accum += slot_w
-
+            accum = 0.0
+            for slot in row:
+                slot_w = float(slot["w"]) / row_total
+                x = frame.left + (frame.width * accum)
+                w = frame.width * slot_w
+                key_rects.append(
+                    {
+                        "id": str(slot["id"]),
+                        "side": "full",
+                        "label": str(slot["label"]),
+                        "x": x,
+                        "y": row_top,
+                        "w": w,
+                        "h": row_h,
+                    }
+                )
+                accum += slot_w
         return key_rects
 
     def _resolve_unified_frame(self, frames: Dict[str, Optional[HandFrame]]) -> Optional[HandFrame]:
@@ -787,17 +611,9 @@ class AirTypingGesture(GestureRecognizer):
 
     def _update_drag_bounds(self, frames: Dict[str, Optional[HandFrame]]):
         self._drag_bounds_by_side = {}
-        if not self.keyboard_split_layout:
-            unified_frame = self._resolve_unified_frame(frames)
-            if unified_frame is not None:
-                self._drag_bounds_by_side["full"] = self._compute_deadzone_frame(unified_frame)
-            return
-
-        for side in ("left", "right"):
-            frame = frames.get(side)
-            if frame is None:
-                continue
-            self._drag_bounds_by_side[side] = self._compute_deadzone_frame(frame)
+        unified_frame = self._resolve_unified_frame(frames)
+        if unified_frame is not None:
+            self._drag_bounds_by_side["full"] = self._compute_deadzone_frame(unified_frame)
 
     def _update_active_frames(
         self,
@@ -885,59 +701,6 @@ class AirTypingGesture(GestureRecognizer):
                 top=center_y - (full_height / 2.0),
                 width=half_width,
                 height=full_height,
-            ),
-        }
-
-    def _spread_overlay_frames(
-        self,
-        frames: Dict[str, Optional[HandFrame]],
-    ) -> Dict[str, Optional[HandFrame]]:
-        """Ensure overlay keeps two visible halves when frames collapse/overlap."""
-        left = frames.get("left")
-        right = frames.get("right")
-
-        if left is None and right is None:
-            return frames
-
-        if left is not None and right is not None:
-            left_cx = left.left + (left.width / 2.0)
-            right_cx = right.left + (right.width / 2.0)
-            avg_width = (left.width + right.width) / 2.0
-            min_separation = avg_width * 0.35
-
-            if abs(right_cx - left_cx) >= min_separation:
-                return frames
-
-            source_center_x = (left_cx + right_cx) / 2.0
-            source_center_y = (
-                (left.top + (left.height / 2.0)) + (right.top + (right.height / 2.0))
-            ) / 2.0
-            width = avg_width
-            height = (left.height + right.height) / 2.0
-        else:
-            source = left if left is not None else right
-            source_center_x = source.left + (source.width / 2.0)
-            source_center_y = source.top + (source.height / 2.0)
-            width = source.width
-            height = source.height
-
-        gap = max(0.02, width * 0.10)
-        left_center_x = self._clamp(source_center_x - ((width + gap) / 2.0), width / 2.0, 1.0 - (width / 2.0))
-        right_center_x = self._clamp(source_center_x + ((width + gap) / 2.0), width / 2.0, 1.0 - (width / 2.0))
-        center_y = self._clamp(source_center_y, height / 2.0, 1.0 - (height / 2.0))
-
-        return {
-            "left": HandFrame(
-                left=left_center_x - (width / 2.0),
-                top=center_y - (height / 2.0),
-                width=width,
-                height=height,
-            ),
-            "right": HandFrame(
-                left=right_center_x - (width / 2.0),
-                top=center_y - (height / 2.0),
-                width=width,
-                height=height,
             ),
         }
 
@@ -1330,7 +1093,7 @@ class AirTypingGesture(GestureRecognizer):
         return True
 
     def _update_overlay_only(self, hands_data: HandsData):
-        camera_hands = self._get_hands_by_side(hands_data.camera)
+        camera_hands = self._get_camera_hands(hands_data.camera)
         if self.keyboard_fixed_center_mode:
             active_frames = self._fallback_overlay_frames()
             self._active_frames = {
@@ -1344,14 +1107,14 @@ class AirTypingGesture(GestureRecognizer):
             }
 
             self._update_active_frames(candidate_frames, recenter=self._paused)
-            active_frames = self._spread_overlay_frames(self._active_frames)
+            active_frames = self._active_frames
             if active_frames.get("left") is None and active_frames.get("right") is None:
                 active_frames = self._fallback_overlay_frames()
 
         self._set_overlay_keys(self._build_overlay_keys(active_frames))
         self._update_drag_bounds(active_frames)
-        unified_frame = self._resolve_unified_frame(active_frames) if not self.keyboard_split_layout else None
-        self._right_frame_for_swipe = unified_frame if unified_frame is not None else active_frames.get("right")
+        unified_frame = self._resolve_unified_frame(active_frames)
+        self._right_frame_for_swipe = unified_frame
 
         if self.require_both_hands and not self._both_hands_present(hands_data):
             self._pause("Typing Paused: both hands required")
@@ -1436,7 +1199,6 @@ class AirTypingGesture(GestureRecognizer):
         self._paused = True
         self._resume_counter = 0
         self._status = "Keyboard Initializing..."
-        self._single_hand_side_hint = None
         self._last_event = ""
         self._last_confidence = 0.0
 

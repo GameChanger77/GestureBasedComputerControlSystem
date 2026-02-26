@@ -99,24 +99,19 @@ class AirTypingSwipeStateTests(unittest.TestCase):
     def setUp(self):
         self.action = _FakeAction()
         self.config = {
-            "keyboard_resume_stability_frames": 1,
-            "keyboard_swipe_enabled": True,
             "keyboard_swipe_min_points": 3,
             "keyboard_swipe_min_unique_keys": 3,
             "keyboard_swipe_decode_top_k": 3,
             "keyboard_swipe_confidence_threshold": 0.45,
             "keyboard_swipe_release_pending_frames": 1,
             "keyboard_swipe_tracking_grace_frames": 2,
-            "keyboard_swipe_auto_space": True,
-            "keyboard_active_fingers": ["index"],
-            "keyboard_use_thumb_fingers": False,
-            "keyboard_require_both_hands": False,
             "pinch_threshold": 0.15,
-            "keyboard_split_layout": False,
-            "keyboard_assign_hands_by_x": True,
             "keyboard_flip_x_for_mapping": False,
         }
         self.gesture = AirTypingGesture(self.action, config=self.config, priority=15)
+        # Hardcoded resume_stability_frames=4 in gesture; warm up once for deterministic tests.
+        for _ in range(4):
+            self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.74))
 
         # Deterministic decoder behavior for integration-state tests.
         self.gesture._swipe_decoder.decode = lambda trace, top_k=3: ("hello", 0.90, ["hello", "help"])
