@@ -5,6 +5,9 @@ __pycache__/
 /build/
 /dist/
 /installers/windows/installer_out/
+/installers/linux/AppDir
+/installers/linux/out
+/installers/linux/tools
 # Byte-compiled / optimized / DLL files
 *.spec
 *.py[cod]
