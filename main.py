@@ -1,13 +1,27 @@
 import sys
 import os
-import pyautogui
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QGuiApplication
 from paths import resource
 from backend.Action import Action
 from backend.HandTracker import HandTracker
 from backend.Strategizer import Strategizer
 from backend.GestureConfig import GestureConfig
 from frontend.main_window import MainWindow
+
+def get_screen_size():
+    screen = QGuiApplication.primaryScreen()
+    if screen:
+        size = screen.size()
+        return size.width(), size.height()
+
+    # Fallback: pyautogui (lazy import so it can't kill startup)
+    try:
+        import pyautogui
+        return pyautogui.size()
+    except Exception as e:
+        print(f"[WARN] Could not get screen size via pyautogui: {e}")
+        return 1920, 1080  # safe default
 
 def main():
     """Main application entry point"""
@@ -17,7 +31,7 @@ def main():
     app.setStyle("Fusion")  # Use Fusion style for consistent look across platforms
 
     # Dynamically get screen resolution (works on Windows and macOS)
-    screen_width, screen_height = pyautogui.size()
+    screen_width, screen_height = get_screen_size()
     print(f"Detected screen resolution: {screen_width}x{screen_height}")
 
     # Create backend components
