@@ -1,3 +1,4 @@
+import os
 import platform
 import queue
 import shutil
@@ -66,7 +67,12 @@ class Action:
         self._keyboard_send_failures = 0
         self._keyboard_disabled = False
         self._xdotool_path = shutil.which("xdotool") if self.detected_os == "Linux" else None
+        self._ydotool_path = shutil.which("ydotool") if self.detected_os == "Linux" else None
+        self._linux_session_type = (
+            os.environ.get("XDG_SESSION_TYPE", "").strip().lower() if self.detected_os == "Linux" else ""
+        )
         self._warned_missing_xdotool = False
+        self._warned_missing_ydotool = False
 
         # Latency tracking (capture -> action completion)
         self._latency_lock = threading.Lock()
@@ -562,10 +568,8 @@ class Action:
         if not logical:
             return
 
-        self.key_down(logical)
-        # Keep tap tight but explicit to maintain event ordering.
-        time.sleep(0.005)
-        self.key_up(logical)
+        origin_ns = self._capture_latency_origin_for_action()
+        self._enqueue_action(self._tap_key_impl, (logical,), origin_ns=origin_ns)
 
     def _tap_hotkey_impl_pynput(self, logical_keys):
         resolved_keys = []
@@ -589,13 +593,16 @@ class Action:
                     pass
 
     def _tap_hotkey_impl_linux(self, logical_keys):
-        if any(k in {"left_win", "right_win"} for k in logical_keys):
-            if self._tap_hotkey_impl_xdotool(logical_keys):
+        for backend in self._linux_keyboard_backend_order():
+            if backend == "xdotool":
+                if self._tap_hotkey_impl_xdotool(logical_keys):
+                    return
+            elif backend == "ydotool":
+                if self._tap_hotkey_impl_ydotool(logical_keys):
+                    return
+            else:
+                self._tap_hotkey_impl_pynput(logical_keys)
                 return
-            if not self._warned_missing_xdotool:
-                print("Warning: xdotool unavailable or unsupported hotkey; falling back to pynput")
-                self._warned_missing_xdotool = True
-        self._tap_hotkey_impl_pynput(logical_keys)
 
     def _tap_hotkey_impl(self, logical_keys):
         if self.detected_os == "Linux":
@@ -620,9 +627,188 @@ class Action:
             "backspace": "BackSpace",
             "tab": "Tab",
             "escape": "Escape",
+            "caps_lock": "Caps_Lock",
             "space": "space",
+            "delete": "Delete",
+            "insert": "Insert",
+            "home": "Home",
+            "end": "End",
+            "page_up": "Page_Up",
+            "page_down": "Page_Down",
+            "arrow_left": "Left",
+            "arrow_right": "Right",
+            "arrow_up": "Up",
+            "arrow_down": "Down",
+            "f1": "F1",
+            "f2": "F2",
+            "f3": "F3",
+            "f4": "F4",
+            "f5": "F5",
+            "f6": "F6",
+            "f7": "F7",
+            "f8": "F8",
+            "f9": "F9",
+            "f10": "F10",
+            "f11": "F11",
+            "f12": "F12",
         }
         return key_lookup.get(logical)
+
+    def _logical_to_ydotool_code(self, logical: str):
+        if not logical:
+            return None
+        if len(logical) == 1:
+            ch = logical.lower()
+            alpha_codes = {
+                "a": 30, "b": 48, "c": 46, "d": 32, "e": 18, "f": 33, "g": 34, "h": 35, "i": 23,
+                "j": 36, "k": 37, "l": 38, "m": 50, "n": 49, "o": 24, "p": 25, "q": 16, "r": 19,
+                "s": 31, "t": 20, "u": 22, "v": 47, "w": 17, "x": 45, "y": 21, "z": 44,
+            }
+            digit_codes = {"1": 2, "2": 3, "3": 4, "4": 5, "5": 6, "6": 7, "7": 8, "8": 9, "9": 10, "0": 11}
+            return alpha_codes.get(ch) or digit_codes.get(ch)
+
+        key_lookup = {
+            "backtick": 41,
+            "minus": 12,
+            "equals": 13,
+            "left_bracket": 26,
+            "right_bracket": 27,
+            "backslash": 43,
+            "semicolon": 39,
+            "quote": 40,
+            "comma": 51,
+            "period": 52,
+            "slash": 53,
+            "tab": 15,
+            "backspace": 14,
+            "enter": 28,
+            "space": 57,
+            "escape": 1,
+            "caps_lock": 58,
+            "left_shift": 42,
+            "right_shift": 54,
+            "left_ctrl": 29,
+            "right_ctrl": 97,
+            "left_alt": 56,
+            "right_alt": 100,
+            "left_win": 125,
+            "right_win": 126,
+            "insert": 110,
+            "delete": 111,
+            "home": 102,
+            "end": 107,
+            "page_up": 104,
+            "page_down": 109,
+            "arrow_left": 105,
+            "arrow_right": 106,
+            "arrow_up": 103,
+            "arrow_down": 108,
+            "f1": 59,
+            "f2": 60,
+            "f3": 61,
+            "f4": 62,
+            "f5": 63,
+            "f6": 64,
+            "f7": 65,
+            "f8": 66,
+            "f9": 67,
+            "f10": 68,
+            "f11": 87,
+            "f12": 88,
+        }
+        return key_lookup.get(logical)
+
+    def _linux_keyboard_backend_order(self):
+        if self.detected_os != "Linux":
+            return []
+
+        preferred = ["ydotool", "xdotool", "pynput"] if self._linux_session_type == "wayland" else ["xdotool", "ydotool", "pynput"]
+        available = []
+        for backend in preferred:
+            if backend == "xdotool" and self._xdotool_path:
+                available.append("xdotool")
+            elif backend == "ydotool" and self._ydotool_path:
+                available.append("ydotool")
+            elif backend == "pynput":
+                available.append("pynput")
+        return available
+
+    def _run_input_command(self, args):
+        try:
+            result = subprocess.run(
+                args,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _tap_key_impl_xdotool(self, logical: str):
+        if not self._xdotool_path:
+            return False
+        key = self._logical_to_xdotool_key(logical)
+        if not key:
+            return False
+        return self._run_input_command([self._xdotool_path, "key", "--", key])
+
+    def _tap_key_impl_ydotool(self, logical: str):
+        if not self._ydotool_path:
+            return False
+        code = self._logical_to_ydotool_code(logical)
+        if code is None:
+            return False
+        return self._run_input_command([self._ydotool_path, "key", f"{code}:1", f"{code}:0"])
+
+    def _tap_key_impl_pynput(self, logical: str):
+        key = self._pynput_key_from_logical(logical)
+        if key is None:
+            return False
+        try:
+            self.keyboard.press(key)
+            time.sleep(0.005)
+            self.keyboard.release(key)
+            return True
+        except Exception:
+            return False
+
+    def _tap_key_impl_linux(self, logical: str):
+        for backend in self._linux_keyboard_backend_order():
+            if backend == "xdotool" and self._tap_key_impl_xdotool(logical):
+                return True
+            if backend == "ydotool" and self._tap_key_impl_ydotool(logical):
+                return True
+            if backend == "pynput" and self._tap_key_impl_pynput(logical):
+                return True
+        return False
+
+    def _type_text_impl_xdotool(self, text: str):
+        if not self._xdotool_path:
+            return False
+        return self._run_input_command([self._xdotool_path, "type", "--clearmodifiers", "--delay", "0", "--", text])
+
+    def _type_text_impl_ydotool(self, text: str):
+        if not self._ydotool_path:
+            return False
+        return self._run_input_command([self._ydotool_path, "type", text])
+
+    def _type_text_impl_pynput(self, text: str):
+        try:
+            self.keyboard.type(text)
+            return True
+        except Exception:
+            return False
+
+    def _type_text_impl_linux(self, text: str):
+        for backend in self._linux_keyboard_backend_order():
+            if backend == "xdotool" and self._type_text_impl_xdotool(text):
+                return True
+            if backend == "ydotool" and self._type_text_impl_ydotool(text):
+                return True
+            if backend == "pynput" and self._type_text_impl_pynput(text):
+                return True
+        return False
 
     def _tap_hotkey_impl_xdotool(self, logical_keys):
         if not self._xdotool_path:
@@ -636,16 +822,29 @@ class Action:
             keys.append(key)
 
         chord = "+".join(keys)
-        try:
-            subprocess.run(
-                [self._xdotool_path, "key", "--", chord],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            return True
-        except Exception:
+        return self._run_input_command([self._xdotool_path, "key", "--", chord])
+
+    def _tap_hotkey_impl_ydotool(self, logical_keys):
+        if not self._ydotool_path:
             return False
+
+        codes = []
+        for logical in logical_keys:
+            code = self._logical_to_ydotool_code(logical)
+            if code is None:
+                return False
+            codes.append(code)
+        if not codes:
+            return False
+
+        events = []
+        for code in codes[:-1]:
+            events.append(f"{code}:1")
+        events.append(f"{codes[-1]}:1")
+        events.append(f"{codes[-1]}:0")
+        for code in reversed(codes[:-1]):
+            events.append(f"{code}:0")
+        return self._run_input_command([self._ydotool_path, "key", *events])
 
     def tap_hotkey(self, key_codes):
         """Press keys together as one hotkey chord, then release."""
@@ -662,6 +861,14 @@ class Action:
         origin_ns = self._capture_latency_origin_for_action()
         self._enqueue_action(self._tap_hotkey_impl, (logical_keys,), origin_ns=origin_ns)
 
+    def _tap_key_impl(self, logical):
+        if self.detected_os == "Linux":
+            if self._tap_key_impl_linux(logical):
+                return
+            print(f"Warning: failed to inject Linux key tap '{logical}' via xdotool/ydotool/pynput")
+            return
+        self._tap_key_impl_pynput(logical)
+
     def type_text(self, text):
         """Type a text string in one action."""
         if text is None:
@@ -670,7 +877,15 @@ class Action:
         if not payload:
             return
         origin_ns = self._capture_latency_origin_for_action()
-        self._enqueue_action(self.keyboard.type, (payload,), origin_ns=origin_ns)
+        self._enqueue_action(self._type_text_impl, (payload,), origin_ns=origin_ns)
+
+    def _type_text_impl(self, payload: str):
+        if self.detected_os == "Linux":
+            if self._type_text_impl_linux(payload):
+                return
+            print("Warning: failed to inject Linux text via xdotool/ydotool/pynput")
+            return
+        self._type_text_impl_pynput(payload)
 
     def release_all_keys(self):
         """Release any currently held keys."""
