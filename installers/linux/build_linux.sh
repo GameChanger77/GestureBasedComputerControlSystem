@@ -5,6 +5,7 @@ set -euo pipefail
 APP_NAME="gbccs"
 ENTRY="main.py"
 ICON_PNG_REL="installers/linux/${APP_NAME}_icon.png"
+# Bundled builds always enforce prod UI mode at runtime.
 
 # Tools & Output
 TOOLS_DIR_REL="installers/linux/tools"
