@@ -238,6 +238,45 @@ class AirTypingSwipeStateTests(unittest.TestCase):
         self.assertEqual(self.gesture._active_modifiers, {"shift"})
         self.assertFalse(self.gesture._swipe_active)
 
+    def test_fn_modifier_maps_number_row_to_function_key(self):
+        self.gesture._map_tip_to_slot = lambda side, tip, frame: {"id": "fn"}
+        self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=0.40))
+        self.assertEqual(self.gesture._active_modifiers, {"fn"})
+
+        # Release to clear special-key latch, then press "1".
+        self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.40))
+        self.gesture._map_tip_to_slot = lambda side, tip, frame: {"id": "1"}
+        self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=0.60))
+
+        self.assertEqual(self.action.tapped, ["f1"])
+        self.assertEqual(self.gesture._active_modifiers, set())
+
+    def test_ctrl_plus_fn_plus_number_emits_ctrl_function_hotkey(self):
+        self.gesture._map_tip_to_slot = lambda side, tip, frame: {"id": "left_ctrl"}
+        self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=0.45))
+        self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.45))
+
+        self.gesture._map_tip_to_slot = lambda side, tip, frame: {"id": "fn"}
+        self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=0.50))
+        self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.50))
+
+        self.gesture._map_tip_to_slot = lambda side, tip, frame: {"id": "1"}
+        self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=0.60))
+
+        self.assertEqual(self.action.hotkeys, [["left_ctrl", "f1"]])
+        self.assertEqual(self.gesture._active_modifiers, set())
+
+    def test_fn_active_relabels_number_row_to_function_keys_in_overlay(self):
+        self.gesture._map_tip_to_slot = lambda side, tip, frame: {"id": "fn"}
+        self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=0.50))
+
+        overlay = self.gesture.get_overlay_data()
+        labels = {k["id"]: k.get("label", "") for k in overlay.get("keys", [])}
+        self.assertEqual(labels.get("1"), "F1")
+        self.assertEqual(labels.get("0"), "F10")
+        self.assertEqual(labels.get("minus"), "F11")
+        self.assertEqual(labels.get("equals"), "F12")
+
     def test_caps_lock_pinch_toggles_caps_state(self):
         self.gesture._map_tip_to_slot = lambda side, tip, frame: {"id": "caps_lock"}
 

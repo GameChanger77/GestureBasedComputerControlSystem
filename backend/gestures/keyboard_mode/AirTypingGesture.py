@@ -36,20 +36,37 @@ class AirTypingGesture(GestureRecognizer):
         "right_alt": "alt",
         "left_win": "win",
         "right_win": "win",
+        "fn": "fn",
     }
     _MODIFIER_FAMILY_TO_KEY = {
         "shift": "left_shift",
         "ctrl": "left_ctrl",
         "alt": "left_alt",
         "win": "left_win",
+        "fn": None,
     }
     _MODIFIER_FAMILY_TO_SLOTS = {
         "shift": ("left_shift", "right_shift"),
         "ctrl": ("left_ctrl", "right_ctrl"),
         "alt": ("left_alt", "right_alt"),
         "win": ("left_win", "right_win"),
+        "fn": ("fn",),
     }
-    _MODIFIER_PRESS_ORDER = ("win", "ctrl", "alt", "shift")
+    _MODIFIER_PRESS_ORDER = ("win", "ctrl", "alt", "fn", "shift")
+    _FN_KEY_TO_FUNCTION = {
+        "1": "f1",
+        "2": "f2",
+        "3": "f3",
+        "4": "f4",
+        "5": "f5",
+        "6": "f6",
+        "7": "f7",
+        "8": "f8",
+        "9": "f9",
+        "0": "f10",
+        "minus": "f11",
+        "equals": "f12",
+    }
     _SUGGESTION_CHIP_COUNT = 3
 
     def __init__(self, action, config, priority=15):
@@ -239,6 +256,7 @@ class AirTypingGesture(GestureRecognizer):
                 self._slot("left_ctrl", "Ctrl", "left_ctrl", 1.2),
                 self._slot("left_win", self._meta_key_label, "left_win", 1.1),
                 self._slot("left_alt", "Alt", "left_alt", 1.1),
+                self._slot("fn", "Fn", "fn", 1.0),
                 self._slot("space", "Space", "space", 6.5),
                 self._slot("right_alt", "Alt", "right_alt", 1.1),
                 self._slot("right_win", self._meta_key_label, "right_win", 1.1),
@@ -767,8 +785,9 @@ class AirTypingGesture(GestureRecognizer):
         self._last_confidence = 1.0
 
     def _tap_with_active_modifiers(self, key_code: str):
-        is_alpha_key = isinstance(key_code, str) and len(key_code) == 1 and key_code.isalpha()
         oneshot_families = set(self._active_modifiers)
+        key_to_tap = self._FN_KEY_TO_FUNCTION.get(key_code, key_code) if "fn" in oneshot_families else key_code
+        is_alpha_key = isinstance(key_to_tap, str) and len(key_to_tap) == 1 and key_to_tap.isalpha()
         shift_from_modifiers = "shift" in oneshot_families
         effective_shift = shift_from_modifiers
         if is_alpha_key and self._caps_lock_active:
@@ -792,12 +811,14 @@ class AirTypingGesture(GestureRecognizer):
                 modifier_key_codes.append(shift_key)
 
         if not modifier_key_codes:
-            self.action.tap_key(key_code)
-            self._last_event = f"tap:{key_code}"
+            self.action.tap_key(key_to_tap)
+            self._last_event = f"tap:{key_to_tap}"
             self._last_confidence = 1.0
+            if "fn" in oneshot_families:
+                self._active_modifiers.clear()
             return
 
-        self.action.tap_hotkey(modifier_key_codes + [key_code])
+        self.action.tap_hotkey(modifier_key_codes + [key_to_tap])
 
         combo_tokens: List[str] = []
         if is_alpha_key and self._caps_lock_active:
@@ -809,7 +830,7 @@ class AirTypingGesture(GestureRecognizer):
                 combo_tokens.append(family)
         if effective_shift:
             combo_tokens.append("shift")
-        combo_label = "+".join(combo_tokens + [key_code])
+        combo_label = "+".join(combo_tokens + [key_to_tap])
         self._last_event = f"combo:{combo_label}"
         self._last_confidence = 1.0
         self._active_modifiers.clear()
@@ -1245,11 +1266,21 @@ class AirTypingGesture(GestureRecognizer):
                 }
             )
 
+        fn_active = "fn" in self._active_modifiers
+        overlay_keys = []
+        for key in self._overlay_keys:
+            key_view = dict(key)
+            if fn_active:
+                fn_key = self._FN_KEY_TO_FUNCTION.get(str(key_view.get("id", "")))
+                if fn_key:
+                    key_view["label"] = fn_key.upper()
+            overlay_keys.append(key_view)
+
         return {
             "enabled": True,
             "calibrated": not self._paused,
             "status": self._status,
-            "keys": self._overlay_keys,
+            "keys": overlay_keys,
             "drag_bounds": drag_bounds,
             "hovered_keys": list(self._hovered_slots),
             "pressed_keys": self._active_modifier_slot_ids(),
