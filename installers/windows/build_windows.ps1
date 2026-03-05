@@ -8,6 +8,7 @@ $ICON     = "icons\gbccs_icon.ico"
 $ISS_PATH = "installers\windows\windows_setup_wizard.iss"
 $SPEC_PATH = "$APP_NAME.spec"
 $CLEAN_BUILD_DIR = $true
+# Bundled builds always enforce prod UI mode at runtime.
 # --------------
 
 $HERE = Split-Path -Parent $MyInvocation.MyCommand.Path

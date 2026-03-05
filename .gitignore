@@ -23,4 +23,4 @@ gesture_config.json
 plans/
 /videos
 /tools
-tests/keyboard/test_airtyping_v2.py
+gesture_config.json

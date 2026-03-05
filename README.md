@@ -61,6 +61,15 @@ Run keyboard/swipe tests only:
 ```bash
 uv run python -m unittest discover -s tests/keyboard
 ```
+Default source mode is `dev`.
+
+Explicit modes:
+```powershell
+uv run python main.py --dev
+uv run python main.py --prod
+```
+
+Bundled installer builds always run `prod` mode, even if `--dev` is passed.
 
 ## Verify environment
 ```powershell

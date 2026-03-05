@@ -6,6 +6,7 @@ APP_NAME="gbccs"
 ENTRY="main.py"
 ICNS_REL="icons/gbccs_icon.icns"
 OUT_DIR_REL="installers/mac/installer_out"
+# Bundled builds always enforce prod UI mode at runtime.
 
 # Toggle: regenerate spec each run (like your earlier Windows script)
 REGEN_SPEC=1   # set to 0 to keep existing spec
