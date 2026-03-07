@@ -1,7 +1,9 @@
 import argparse
+import signal
 import sys
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QTimer
 from paths import resource
 from backend.GestureConfig import GestureConfig
 
@@ -47,7 +49,7 @@ def resolve_ui_mode(args):
     return requested_mode or "dev"
 
 
-def create_backend_components(screen_width, screen_height, config_path):
+def create_backend_components(screen_width, screen_height, config_path, ui_mode):
     """Create backend component graph from current config file."""
     from backend.Action import Action
     from backend.HandTracker import HandTracker
@@ -59,12 +61,15 @@ def create_backend_components(screen_width, screen_height, config_path):
         action=action,
         config=config,
         screen_width=screen_width,
-        screen_height=screen_height
+        screen_height=screen_height,
+        ui_mode=ui_mode,
     )
 
     max_tracked_hands = int(config.get('max_tracked_hands', 1))
     if max_tracked_hands < 1:
         max_tracked_hands = 1
+    if max_tracked_hands > 2:
+        max_tracked_hands = 2
 
     hand_tracker = HandTracker(
         strategizer=strategizer,
@@ -104,6 +109,7 @@ def main():
         screen_width=screen_width,
         screen_height=screen_height,
         config_path=config_path,
+        ui_mode=effective_ui_mode,
     )
     components = component_factory()
 
@@ -116,6 +122,22 @@ def main():
         config=components["config"],
     )
     main_window.show()
+
+    def _handle_sigint(signum, frame):
+        _ = signum, frame
+        print("\n[APP] Ctrl+C received, shutting down.")
+        try:
+            main_window.close()
+        except Exception:
+            pass
+        app.quit()
+
+    # Ensure Ctrl+C is processed while Qt event loop is running.
+    signal.signal(signal.SIGINT, _handle_sigint)
+    sigint_timer = QTimer()
+    sigint_timer.setInterval(100)
+    sigint_timer.timeout.connect(lambda: None)
+    sigint_timer.start()
 
     print("Qt Application started. Close window to exit.")
 

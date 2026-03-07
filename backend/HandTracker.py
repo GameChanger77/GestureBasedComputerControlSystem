@@ -85,7 +85,7 @@ class HandTracker(QThread):
         self.camera_warmup_frames = int(config.get('camera_warmup_frames', 8)) if config else 8
         self.camera_readback_log = bool(config.get('camera_readback_log', True)) if config else True
         self.capture_latest_frame_only = bool(config.get('capture_latest_frame_only', True)) if config else True
-        self.right_hand_only_processing = bool(config.get('right_hand_only_processing', True)) if config else True
+        self.right_hand_only_processing = bool(config.get('right_hand_only_processing', False)) if config else False
 
         # Runtime state
         self.landmarker = None
@@ -102,6 +102,7 @@ class HandTracker(QThread):
         self._processed_frame_seq = 0
         self._capture_error_count = 0
         self._dynamic_exposure_frame_counter = 0
+        self._empty_hands_data = HandsData({}, {})
 
         # Timestamp monotonicity for detect_for_video
         self._last_video_timestamp_ms = 0
@@ -154,12 +155,30 @@ class HandTracker(QThread):
         """Initialize the camera."""
         try:
             is_windows = platform.system() == "Windows"
-            using_dshow = bool(camera_backend == getattr(cv2, 'CAP_DSHOW', None))
+            is_linux = platform.system() == "Linux"
+            using_dshow = False
+            using_v4l2 = False
 
             if camera_backend:
                 self.cap = cv2.VideoCapture(camera_index, camera_backend)
+                using_dshow = bool(camera_backend == getattr(cv2, 'CAP_DSHOW', None))
+                using_v4l2 = bool(camera_backend == getattr(cv2, 'CAP_V4L2', None))
+            elif is_windows and hasattr(cv2, 'CAP_DSHOW'):
+                # On Windows prefer DirectShow to avoid MSMF instability/overhead where possible.
+                self.cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
+                using_dshow = bool(self.cap and self.cap.isOpened())
+            elif is_linux and hasattr(cv2, 'CAP_V4L2'):
+                # On Linux prefer V4L2 so UVC controls (auto-exposure, gain, etc.) are addressable.
+                self.cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
+                using_v4l2 = bool(self.cap and self.cap.isOpened())
             else:
                 self.cap = cv2.VideoCapture(camera_index)
+
+            if (not self.cap) or (not self.cap.isOpened()):
+                # Only use a generic backend fallback when there was no explicit
+                # user-selected backend to preserve device-to-stream mapping.
+                if not camera_backend:
+                    self.cap = cv2.VideoCapture(camera_index)
 
             if (not self.cap) or (not self.cap.isOpened()):
                 raise Exception('Could not open webcam')
@@ -185,10 +204,11 @@ class HandTracker(QThread):
             if self.camera_gain_value is not None and hasattr(cv2, 'CAP_PROP_GAIN'):
                 self._set_camera_prop(cv2.CAP_PROP_GAIN, float(self.camera_gain_value))
 
-            # Best-effort webcam format tuning on Windows.
+            # Best-effort webcam format tuning on desktop platforms.
             selected_format = None
-            if is_windows and hasattr(cv2, 'CAP_PROP_FOURCC'):
-                for fourcc_text in ("MJPG", "YUY2"):
+            if (is_windows or is_linux) and hasattr(cv2, 'CAP_PROP_FOURCC'):
+                preferred_fourccs = ("MJPG", "YUYV", "YUY2")
+                for fourcc_text in preferred_fourccs:
                     fourcc = cv2.VideoWriter_fourcc(*fourcc_text)
                     self._set_camera_prop(cv2.CAP_PROP_FOURCC, fourcc)
                     reported = self._decode_fourcc(self.cap.get(cv2.CAP_PROP_FOURCC))
@@ -202,9 +222,12 @@ class HandTracker(QThread):
                     selected_format = self._decode_fourcc(self.cap.get(cv2.CAP_PROP_FOURCC))
 
             backend_name = self.cap.getBackendName() if hasattr(self.cap, 'getBackendName') else 'unknown'
+            backend_upper = str(backend_name).upper()
+            using_v4l2 = using_v4l2 or ('V4L' in backend_upper)
             self._camera_readback = {
                 'backend': backend_name,
                 'dshow': using_dshow,
+                'v4l2': using_v4l2,
                 'fourcc': selected_format or self._decode_fourcc(self._read_camera_prop(cv2.CAP_PROP_FOURCC)),
                 'width': self._read_camera_prop(cv2.CAP_PROP_FRAME_WIDTH),
                 'height': self._read_camera_prop(cv2.CAP_PROP_FRAME_HEIGHT),
@@ -225,6 +248,7 @@ class HandTracker(QThread):
                     'Camera initialized - '
                     f"res={width_text}x{height_text}, "
                     f"backend={self._camera_readback['backend']}, dshow={self._camera_readback['dshow']}, "
+                    f"v4l2={self._camera_readback['v4l2']}, "
                     f"fourcc={self._camera_readback['fourcc'] or 'default'}, "
                     f"fps={fps_text}, auto_exp={self._camera_readback['auto_exposure']}, "
                     f"exp={self._camera_readback['exposure']}, gain={self._camera_readback['gain']}"
@@ -232,7 +256,8 @@ class HandTracker(QThread):
             else:
                 print(
                     f'Camera initialized - Resolution: {width}x{height}, '
-                    f'backend={backend_name}, dshow={using_dshow}, fourcc={selected_format or "default"}'
+                    f'backend={backend_name}, dshow={using_dshow}, v4l2={using_v4l2}, '
+                    f'fourcc={selected_format or "default"}'
                 )
 
         except Exception as e:
@@ -244,10 +269,22 @@ class HandTracker(QThread):
         if not hasattr(cv2, 'CAP_PROP_AUTO_EXPOSURE'):
             return
 
+        backend_name = ''
+        if self.cap is not None and hasattr(self.cap, 'getBackendName'):
+            try:
+                backend_name = self.cap.getBackendName()
+            except Exception:
+                backend_name = ''
+        backend_upper = str(backend_name).upper()
+
         # Common backend conventions:
-        # - DSHOW: 0.75 auto, 0.25 manual
-        # - Other drivers: 1 auto, 0 manual
-        candidates = (0.75, 1.0) if enabled else (0.25, 0.0)
+        # - V4L2 (Linux): 3 auto, 1 manual
+        # - Existing cross-platform behavior in this project: 0.75 auto, 0.25 manual
+        if ('V4L' in backend_upper) or (platform.system() == "Linux"):
+            candidates = (3.0,) if enabled else (1.0,)
+        else:
+            candidates = (0.75, 1.0) if enabled else (0.25, 0.0)
+
         for value in candidates:
             self._set_camera_prop(cv2.CAP_PROP_AUTO_EXPOSURE, value)
 
@@ -610,6 +647,7 @@ class HandTracker(QThread):
 
                     should_strategize = True
                     if self.right_hand_only_processing and not hands_data.wrist.has_right:
+                        hands_data = self._empty_hands_data
                         should_strategize = False
 
                     if should_strategize:
@@ -617,6 +655,9 @@ class HandTracker(QThread):
                         self.strategizer.strategize(hands_data, frame_capture_ts_ns=capture_ts_ns)
                         strategize_end_ns = time.perf_counter_ns()
                         strategize_ms = (strategize_end_ns - strategize_start_ns) / 1_000_000.0
+                else:
+                    # Reuse explicit empty state and skip strategizer when no hands are present.
+                    hands_data = self._empty_hands_data
 
                 loop_end_ns = time.perf_counter_ns()
 
@@ -711,6 +752,9 @@ class HandTracker(QThread):
         with self._frame_condition:
             self._frame_condition.notify_all()
         self._stop_capture_thread()
+
+        if hasattr(self.action, "release_all_keys"):
+            self.action.release_all_keys()
 
         if self.cap:
             self.cap.release()
