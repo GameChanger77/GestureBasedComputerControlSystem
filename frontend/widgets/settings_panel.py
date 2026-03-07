@@ -1,27 +1,33 @@
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QListWidget,
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from backend.GestureConfig import GestureConfig
+from backend.camera_devices import build_camera_options
 
 
 class SettingsPanel(QWidget):
     """Generated settings editor for all gesture config keys."""
 
     settings_saved = Signal(dict)
+    CAMERA_OPTION_ROLE = Qt.UserRole + 1
 
-    def __init__(self, parent=None):
+    def __init__(self, ui_mode="dev", parent=None):
         super().__init__(parent)
+        self.ui_mode = ui_mode
         self._field_controls = {}
         self._create_ui()
 
@@ -30,33 +36,28 @@ class SettingsPanel(QWidget):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(8)
 
-        self._scroll_area = QScrollArea()
-        self._scroll_area.setWidgetResizable(True)
+        content_row = QHBoxLayout()
+        content_row.setContentsMargins(0, 0, 0, 0)
+        content_row.setSpacing(10)
 
-        container = QWidget()
-        container_layout = QVBoxLayout()
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(10)
+        self._submenu_list = QListWidget()
+        self._submenu_list.setMinimumWidth(180)
+        self._submenu_list.setMaximumWidth(220)
+        content_row.addWidget(self._submenu_list)
 
-        for group_name, keys in GestureConfig.get_grouped_keys().items():
-            group_box = QGroupBox(group_name)
-            group_layout = QFormLayout()
-            group_layout.setContentsMargins(8, 8, 8, 8)
-            group_layout.setSpacing(6)
+        self._page_stack = QStackedWidget()
+        content_row.addWidget(self._page_stack, 1)
 
-            for key in keys:
-                metadata = GestureConfig.get_field_metadata(key)
-                control = self._build_control(key, metadata)
-                self._field_controls[key] = control
-                group_layout.addRow(metadata["label"], control["widget"])
+        page_definitions = GestureConfig.get_page_definitions(ui_mode=self.ui_mode)
+        for page_name, groups in page_definitions.items():
+            self._submenu_list.addItem(page_name)
+            self._page_stack.addWidget(self._build_page_widget(groups))
 
-            group_box.setLayout(group_layout)
-            container_layout.addWidget(group_box)
+        self._submenu_list.currentRowChanged.connect(self._page_stack.setCurrentIndex)
+        if self._submenu_list.count() > 0:
+            self._submenu_list.setCurrentRow(0)
 
-        container_layout.addStretch()
-        container.setLayout(container_layout)
-        self._scroll_area.setWidget(container)
-        root_layout.addWidget(self._scroll_area)
+        root_layout.addLayout(content_row)
 
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 0, 0, 0)
@@ -74,9 +75,52 @@ class SettingsPanel(QWidget):
         root_layout.addLayout(button_row)
         self.setLayout(root_layout)
 
+    def _build_page_widget(self, groups):
+        """Build a scrollable settings page with grouped controls."""
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+
+        container = QWidget()
+        container_layout = QVBoxLayout()
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(10)
+
+        for group_name, keys in groups.items():
+            group_box = QGroupBox(group_name)
+            group_layout = QFormLayout()
+            group_layout.setContentsMargins(8, 8, 8, 8)
+            group_layout.setSpacing(6)
+
+            for key in keys:
+                metadata = GestureConfig.get_field_metadata(key)
+                control = self._build_control(key, metadata)
+                self._field_controls[key] = control
+                group_layout.addRow(metadata["label"], control["widget"])
+
+            group_box.setLayout(group_layout)
+            container_layout.addWidget(group_box)
+
+        container_layout.addStretch()
+        container.setLayout(container_layout)
+        scroll_area.setWidget(container)
+        return scroll_area
+
     def _build_control(self, key, metadata):
         control_type = metadata.get("type")
         nullable = bool(metadata.get("nullable", False))
+
+        if control_type == "choice":
+            combo = QComboBox()
+            control = {
+                "widget": combo,
+                "type": "choice",
+                "combo": combo,
+                "metadata": metadata,
+                "key": key,
+                "options": [],
+            }
+            self._populate_choice_options(control)
+            return control
 
         if control_type == "bool":
             checkbox = QCheckBox()
@@ -147,6 +191,77 @@ class SettingsPanel(QWidget):
             "key": key,
         }
 
+    def _populate_choice_options(self, control, saved_values=None):
+        """Populate a combo box from a metadata-driven options provider."""
+        combo = control["combo"]
+        metadata = control["metadata"]
+
+        combo.blockSignals(True)
+        combo.clear()
+
+        provider_name = metadata.get("options_provider")
+        options = []
+        if provider_name == "camera_options":
+            options = build_camera_options()
+        control["options"] = options
+
+        for option in options:
+            combo.addItem(option["label"], option["index"])
+            item_index = combo.count() - 1
+            combo.setItemData(item_index, option, self.CAMERA_OPTION_ROLE)
+
+        selected_index = self._resolve_choice_index(control, saved_values)
+        if selected_index >= 0:
+            combo.setCurrentIndex(selected_index)
+        elif combo.count() > 0:
+            combo.setCurrentIndex(0)
+
+        combo.blockSignals(False)
+
+    def _resolve_choice_index(self, control, saved_values=None):
+        """Resolve the best current choice item for saved config values."""
+        combo = control["combo"]
+        if combo.count() == 0:
+            return -1
+
+        if not saved_values:
+            return 0
+
+        key = control["key"]
+        saved_index = int(saved_values.get(key, 0) or 0)
+        saved_backend = int(saved_values.get("camera_backend", 0) or 0)
+        saved_path = str(saved_values.get("camera_device_path", "") or "").strip().casefold()
+        saved_name = str(saved_values.get("camera_device_name", "") or "").strip().casefold()
+
+        if saved_path:
+            for item_index in range(combo.count()):
+                option = combo.itemData(item_index, self.CAMERA_OPTION_ROLE) or {}
+                option_path = str(option.get("path", "") or "").strip().casefold()
+                if option_path and option_path == saved_path:
+                    return item_index
+
+        if saved_name:
+            matching_names = []
+            for item_index in range(combo.count()):
+                option = combo.itemData(item_index, self.CAMERA_OPTION_ROLE) or {}
+                option_name = str(option.get("name", "") or "").strip().casefold()
+                if option_name == saved_name:
+                    matching_names.append(item_index)
+            if len(matching_names) == 1:
+                return matching_names[0]
+
+        for item_index in range(combo.count()):
+            option = combo.itemData(item_index, self.CAMERA_OPTION_ROLE) or {}
+            if int(option.get("backend", 0) or 0) == saved_backend and int(option.get("index", 0) or 0) == saved_index:
+                return item_index
+
+        for item_index in range(combo.count()):
+            option = combo.itemData(item_index, self.CAMERA_OPTION_ROLE) or {}
+            if int(option.get("index", 0) or 0) == saved_index:
+                return item_index
+
+        return 0
+
     def load_values(self, values):
         """Load UI controls from a dictionary of config values."""
         for key, control in self._field_controls.items():
@@ -158,6 +273,10 @@ class SettingsPanel(QWidget):
 
             if control_type == "bool":
                 control["checkbox"].setChecked(bool(value))
+                continue
+
+            if control_type == "choice":
+                self._populate_choice_options(control, values)
                 continue
 
             is_nullable = bool(control.get("nullable", False))
@@ -178,6 +297,17 @@ class SettingsPanel(QWidget):
 
             if control_type == "bool":
                 values[key] = bool(control["checkbox"].isChecked())
+                continue
+
+            if control_type == "choice":
+                combo_value = control["combo"].currentData()
+                values[key] = int(combo_value) if combo_value is not None else 0
+
+                selected_option = control["combo"].currentData(self.CAMERA_OPTION_ROLE) or {}
+                if key == "camera_index":
+                    values["camera_backend"] = int(selected_option.get("backend", 0) or 0)
+                    values["camera_device_path"] = str(selected_option.get("path", "") or "")
+                    values["camera_device_name"] = str(selected_option.get("name", "") or "")
                 continue
 
             is_nullable = bool(control.get("nullable", False))

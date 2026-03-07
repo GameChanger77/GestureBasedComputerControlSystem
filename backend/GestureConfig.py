@@ -26,6 +26,37 @@ class GestureConfig:
         "Confidence thresholds",
         "Debug",
     ]
+    FIELD_PAGE_ORDER = [
+        "Controls",
+        "Camera",
+        "Performance",
+        "Debug",
+    ]
+    GROUP_TO_PAGE = {
+        "Finger detection": "Controls",
+        "Scroll": "Controls",
+        "Click/pinch": "Controls",
+        "Debouncing": "Controls",
+        "Mouse movement": "Controls",
+        "Screen margins": "Controls",
+        "Camera runtime tuning": "Camera",
+        "Confidence thresholds": "Camera",
+        "Performance tuning": "Performance",
+        "Debug": "Debug",
+    }
+    PROD_VISIBLE_KEYS = {
+        "finger_extension_angle",
+        "scroll_sensitivity",
+        "pinch_threshold",
+        "screen_safe_margin",
+        "target_max_fps",
+        "max_tracked_hands",
+        "camera_index",
+        "camera_target_fps",
+        "camera_auto_exposure",
+        "camera_dynamic_exposure",
+        "right_hand_only_processing",
+    }
 
     # Default configuration values
     DEFAULT_CONFIG = {
@@ -60,6 +91,10 @@ class GestureConfig:
         "max_tracked_hands": 1,  # Use one hand for lower inference cost (right-hand control path)
 
         # Camera runtime tuning (best-effort; backend/camera dependent)
+        "camera_index": 0,
+        "camera_backend": 0,
+        "camera_device_path": "",
+        "camera_device_name": "",
         "camera_target_fps": 30,
         "camera_auto_exposure": True,
         "camera_dynamic_exposure": True,  # Manual fallback adaptation when auto exposure is disabled
@@ -200,6 +235,30 @@ class GestureConfig:
             "type": "int",
             "min": 1,
             "max": 2,
+        },
+        "camera_index": {
+            "group": "Camera runtime tuning",
+            "label": "Camera",
+            "type": "choice",
+            "options_provider": "camera_options",
+        },
+        "camera_backend": {
+            "group": "Camera runtime tuning",
+            "label": "Camera Backend",
+            "type": "int",
+            "hidden": True,
+        },
+        "camera_device_path": {
+            "group": "Camera runtime tuning",
+            "label": "Camera Device Path",
+            "type": "string",
+            "hidden": True,
+        },
+        "camera_device_name": {
+            "group": "Camera runtime tuning",
+            "label": "Camera Device Name",
+            "type": "string",
+            "hidden": True,
         },
         "camera_target_fps": {
             "group": "Camera runtime tuning",
@@ -455,12 +514,39 @@ class GestureConfig:
         grouped = {group: [] for group in cls.FIELD_GROUP_ORDER}
 
         for key in cls.DEFAULT_CONFIG:
-            group_name = cls.get_field_metadata(key)["group"]
+            metadata = cls.get_field_metadata(key)
+            if metadata.get("hidden"):
+                continue
+            group_name = metadata["group"]
             grouped.setdefault(group_name, [])
             grouped[group_name].append(key)
 
         # Drop empty groups so UI does not render empty sections.
         return {group: keys for group, keys in grouped.items() if keys}
+
+    @classmethod
+    def is_field_visible(cls, key, ui_mode="dev"):
+        """Return True if a config key should be shown in the selected UI mode."""
+        if ui_mode == "dev":
+            return True
+        return key in cls.PROD_VISIBLE_KEYS
+
+    @classmethod
+    def get_page_definitions(cls, ui_mode="dev"):
+        """Return ordered page -> group -> keys mapping for the settings UI."""
+        grouped_keys = cls.get_grouped_keys()
+        pages = {page: {} for page in cls.FIELD_PAGE_ORDER}
+
+        for group_name, keys in grouped_keys.items():
+            visible_keys = [key for key in keys if cls.is_field_visible(key, ui_mode=ui_mode)]
+            if not visible_keys:
+                continue
+
+            page_name = cls.GROUP_TO_PAGE.get(group_name, "Debug")
+            pages.setdefault(page_name, {})
+            pages[page_name][group_name] = visible_keys
+
+        return {page: groups for page, groups in pages.items() if groups}
 
     def load(self):
         """Load configuration from JSON file, merging with defaults."""
@@ -474,6 +560,7 @@ class GestureConfig:
 
                 # Merge user config with defaults (user values override defaults)
                 self.config.update(user_config)
+                self._migrate_legacy_camera_selection()
                 print(f"Loaded gesture config from {self.config_path}")
 
             except Exception as e:
@@ -483,6 +570,28 @@ class GestureConfig:
             print(f"Config file not found at {self.config_path}")
             print("Using default configuration")
             print(f"Run with defaults or create {self.config_path} to customize")
+
+    def _migrate_legacy_camera_selection(self):
+        """Decode older encoded camera indices into explicit backend/index fields."""
+        if self.config.get("camera_backend", 0):
+            return
+
+        legacy_value = self.config.get("camera_index", 0)
+        try:
+            legacy_int = int(legacy_value)
+        except Exception:
+            return
+
+        try:
+            from backend.camera_devices import decode_legacy_camera_selection
+
+            decoded_index, decoded_backend = decode_legacy_camera_selection(legacy_int)
+        except Exception:
+            return
+
+        if decoded_backend and (decoded_index != legacy_int):
+            self.config["camera_index"] = decoded_index
+            self.config["camera_backend"] = decoded_backend
 
     def save(self):
         """Save current configuration to JSON file."""

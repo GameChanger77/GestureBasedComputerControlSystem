@@ -9,6 +9,7 @@ from PySide6.QtCore import Slot, Signal
 from frontend.video_widget import VideoWidget
 from frontend.widgets.stats_widget import PerformanceStatsWidget
 from frontend.widgets.settings_panel import SettingsPanel
+from backend.camera_devices import resolve_camera_selection
 
 
 class MainWindow(QMainWindow):
@@ -89,7 +90,7 @@ class MainWindow(QMainWindow):
         self._set_start_button_running(False)
 
         # Settings panel
-        self.settings_panel = SettingsPanel()
+        self.settings_panel = SettingsPanel(ui_mode=self.ui_mode)
         self.settings_panel.settings_saved.connect(self.on_settings_saved)
 
         if self.is_dev_mode:
@@ -337,7 +338,8 @@ class MainWindow(QMainWindow):
                 self.stats_widget.reset()
         else:
             # Start tracking
-            if self.hand_tracker.start_tracking(camera_index=0):
+            camera_index, camera_backend = self._get_selected_camera_selection()
+            if self.hand_tracker.start_tracking(camera_index=camera_index, camera_backend=camera_backend):
                 self._set_start_button_running(True)
                 self._set_status_text("Status: Starting...")
             else:
@@ -392,6 +394,19 @@ class MainWindow(QMainWindow):
             self._preview_interval_ns = 0
         else:
             self._preview_interval_ns = int(1_000_000_000 / max_fps)
+
+    def _get_selected_camera_selection(self):
+        """Resolve saved camera config to the best current device selection."""
+        if not self.config:
+            return 0, 0
+
+        selected_camera = resolve_camera_selection(
+            camera_index=self.config.get("camera_index", 0),
+            camera_backend=self.config.get("camera_backend", 0),
+            camera_path=self.config.get("camera_device_path", ""),
+            camera_name=self.config.get("camera_device_name", ""),
+        )
+        return selected_camera.index, selected_camera.backend
 
     @Slot(dict, object)
     def on_landmarks_detected(self, landmarks_data, frame):
@@ -513,7 +528,8 @@ class MainWindow(QMainWindow):
             return False
 
         if restart_tracking:
-            if self.hand_tracker.start_tracking(camera_index=0):
+            camera_index, camera_backend = self._get_selected_camera_selection()
+            if self.hand_tracker.start_tracking(camera_index=camera_index, camera_backend=camera_backend):
                 self._set_start_button_running(True)
                 return True
 
