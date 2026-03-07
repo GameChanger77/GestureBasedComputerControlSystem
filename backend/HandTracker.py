@@ -46,6 +46,7 @@ class HandTracker(QThread):
 
         # Camera configuration (set when tracking starts)
         self.camera_index = 0
+        self.camera_backend = 0
         self.camera_width = 640
         self.camera_height = 480
 
@@ -150,7 +151,7 @@ class HandTracker(QThread):
             print(f'Error initializing MediaPipe: {e}')
             raise
 
-    def _initialize_camera(self, camera_index=0, width=640, height=480):
+    def _initialize_camera(self, camera_index=0, width=640, height=480, camera_backend=0):
         """Initialize the camera."""
         try:
             is_windows = platform.system() == "Windows"
@@ -158,8 +159,12 @@ class HandTracker(QThread):
             using_dshow = False
             using_v4l2 = False
 
-            # On Windows prefer DirectShow to avoid MSMF instability/overhead where possible.
-            if is_windows and hasattr(cv2, 'CAP_DSHOW'):
+            if camera_backend:
+                self.cap = cv2.VideoCapture(camera_index, camera_backend)
+                using_dshow = bool(camera_backend == getattr(cv2, 'CAP_DSHOW', None))
+                using_v4l2 = bool(camera_backend == getattr(cv2, 'CAP_V4L2', None))
+            elif is_windows and hasattr(cv2, 'CAP_DSHOW'):
+                # On Windows prefer DirectShow to avoid MSMF instability/overhead where possible.
                 self.cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
                 using_dshow = bool(self.cap and self.cap.isOpened())
             elif is_linux and hasattr(cv2, 'CAP_V4L2'):
@@ -170,9 +175,12 @@ class HandTracker(QThread):
                 self.cap = cv2.VideoCapture(camera_index)
 
             if (not self.cap) or (not self.cap.isOpened()):
-                self.cap = cv2.VideoCapture(camera_index)
+                # Only use a generic backend fallback when there was no explicit
+                # user-selected backend to preserve device-to-stream mapping.
+                if not camera_backend:
+                    self.cap = cv2.VideoCapture(camera_index)
 
-            if not self.cap.isOpened():
+            if (not self.cap) or (not self.cap.isOpened()):
                 raise Exception('Could not open webcam')
 
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
@@ -517,7 +525,7 @@ class HandTracker(QThread):
         self._set_camera_prop(cv2.CAP_PROP_EXPOSURE, candidate)
         self._camera_readback['exposure'] = candidate
 
-    def start_tracking(self, camera_index=0, width=640, height=480):
+    def start_tracking(self, camera_index=0, width=640, height=480, camera_backend=0):
         """
         Start hand tracking in background thread.
 
@@ -525,6 +533,7 @@ class HandTracker(QThread):
             camera_index: Camera index (0 for default camera)
             width: Camera width resolution
             height: Camera height resolution
+            camera_backend: OpenCV backend constant or 0 for default
 
         Returns:
             bool: True if tracking started successfully
@@ -534,6 +543,7 @@ class HandTracker(QThread):
             return False
 
         self.camera_index = camera_index
+        self.camera_backend = camera_backend
         self.camera_width = width
         self.camera_height = height
         self.start()
@@ -542,7 +552,7 @@ class HandTracker(QThread):
     def run(self):
         """Main tracking loop (runs in background thread)."""
         try:
-            self._initialize_camera(self.camera_index, self.camera_width, self.camera_height)
+            self._initialize_camera(self.camera_index, self.camera_width, self.camera_height, self.camera_backend)
 
             self._pipeline_frame_times_ms.clear()
             self._callback_intervals_ns.clear()
