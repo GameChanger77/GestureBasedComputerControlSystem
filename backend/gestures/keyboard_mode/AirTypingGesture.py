@@ -7,6 +7,7 @@ from backend.HandsData import HandsData
 from backend.gestures.GestureRecognizer import GestureRecognizer
 from backend.gestures.GestureUtils import are_fingers_pinched, get_pinch_distance
 from backend.gestures.keyboard_mode.DevOverlayKeyboardSurface import DevOverlayKeyboardSurface
+from backend.gestures.keyboard_mode.KeyboardLayoutHelper import KeyboardLayoutHelper
 from backend.gestures.keyboard_mode.KeyboardSurfaceBase import HandFrame, KeyboardSurfaceBase
 from backend.gestures.keyboard_mode.ProdWindowKeyboardSurface import ProdWindowKeyboardSurface
 from backend.gestures.keyboard_mode.SwipeDecoder import SwipeDecoder
@@ -21,70 +22,13 @@ class AirTypingGesture(GestureRecognizer):
     - highlights hovered keys
     - supports right-hand swipe typing with click-style pinch clutch
     """
-    _MODIFIER_SLOT_TO_FAMILY = {
-        "left_shift": "shift",
-        "right_shift": "shift",
-        "left_ctrl": "ctrl",
-        "right_ctrl": "ctrl",
-        "left_alt": "alt",
-        "right_alt": "alt",
-        "left_win": "win",
-        "right_win": "win",
-        "fn": "fn",
-    }
-    _MODIFIER_FAMILY_TO_KEY = {
-        "shift": "left_shift",
-        "ctrl": "left_ctrl",
-        "alt": "left_alt",
-        "win": "left_win",
-        "fn": None,
-    }
-    _MODIFIER_FAMILY_TO_SLOTS = {
-        "shift": ("left_shift", "right_shift"),
-        "ctrl": ("left_ctrl", "right_ctrl"),
-        "alt": ("left_alt", "right_alt"),
-        "win": ("left_win", "right_win"),
-        "fn": ("fn",),
-    }
-    _MODIFIER_PRESS_ORDER = ("win", "ctrl", "alt", "fn", "shift")
-    _FN_KEY_TO_FUNCTION = {
-        "1": "f1",
-        "2": "f2",
-        "3": "f3",
-        "4": "f4",
-        "5": "f5",
-        "6": "f6",
-        "7": "f7",
-        "8": "f8",
-        "9": "f9",
-        "0": "f10",
-        "minus": "f11",
-        "equals": "f12",
-    }
-    _SHIFT_LABEL_BY_SLOT = {
-        "backtick": "~",
-        "1": "!",
-        "2": "@",
-        "3": "#",
-        "4": "$",
-        "5": "%",
-        "6": "^",
-        "7": "&",
-        "8": "*",
-        "9": "(",
-        "0": ")",
-        "minus": "_",
-        "equals": "+",
-        "left_bracket": "{",
-        "right_bracket": "}",
-        "backslash": "|",
-        "semicolon": ":",
-        "quote": "\"",
-        "comma": "<",
-        "period": ">",
-        "slash": "?",
-    }
-    _SUGGESTION_CHIP_COUNT = 3
+    _MODIFIER_SLOT_TO_FAMILY = KeyboardLayoutHelper.MODIFIER_SLOT_TO_FAMILY
+    _MODIFIER_FAMILY_TO_KEY = KeyboardLayoutHelper.MODIFIER_FAMILY_TO_KEY
+    _MODIFIER_FAMILY_TO_SLOTS = KeyboardLayoutHelper.MODIFIER_FAMILY_TO_SLOTS
+    _MODIFIER_PRESS_ORDER = KeyboardLayoutHelper.MODIFIER_PRESS_ORDER
+    _FN_KEY_TO_FUNCTION = KeyboardLayoutHelper.FN_KEY_TO_FUNCTION
+    _SHIFT_LABEL_BY_SLOT = KeyboardLayoutHelper.SHIFT_LABEL_BY_SLOT
+    _SUGGESTION_CHIP_COUNT = KeyboardLayoutHelper.SUGGESTION_CHIP_COUNT
 
     def __init__(
         self,
@@ -189,8 +133,8 @@ class AirTypingGesture(GestureRecognizer):
         self._caps_lock_active = False
         self._overlay_bounds: Optional[Tuple[float, float, float, float]] = None
 
-        self._rows_unified = self._build_unified_rows()
-        self._slot_to_key = self._build_slot_key_map()
+        self._rows_unified = KeyboardLayoutHelper.build_unified_rows(self._meta_key_label)
+        self._slot_to_key = KeyboardLayoutHelper.build_slot_key_map(self._rows_unified)
 
         if keyboard_surface is not None:
             self._surface = keyboard_surface
@@ -211,92 +155,6 @@ class AirTypingGesture(GestureRecognizer):
 
         lexicon_path = Path(__file__).resolve().parent / "data" / "swipe-words.txt"
         self._swipe_decoder = SwipeDecoder(lexicon_path, max_words=None)
-
-    def _slot(self, slot_id: str, label: str, key: str, width: float = 1.0) -> Dict[str, object]:
-        return {"id": slot_id, "label": label, "key": key, "w": width}
-
-    def _build_unified_rows(self) -> List[List[Dict[str, object]]]:
-        return [
-            [
-                self._slot("backtick", "`", "backtick"),
-                self._slot("1", "1", "1"),
-                self._slot("2", "2", "2"),
-                self._slot("3", "3", "3"),
-                self._slot("4", "4", "4"),
-                self._slot("5", "5", "5"),
-                self._slot("6", "6", "6"),
-                self._slot("7", "7", "7"),
-                self._slot("8", "8", "8"),
-                self._slot("9", "9", "9"),
-                self._slot("0", "0", "0"),
-                self._slot("minus", "-", "minus"),
-                self._slot("equals", "=", "equals"),
-                self._slot("backspace", "Back", "backspace", 1.8),
-            ],
-            [
-                self._slot("tab", "Tab", "tab", 1.4),
-                self._slot("q", "Q", "q"),
-                self._slot("w", "W", "w"),
-                self._slot("e", "E", "e"),
-                self._slot("r", "R", "r"),
-                self._slot("t", "T", "t"),
-                self._slot("y", "Y", "y"),
-                self._slot("u", "U", "u"),
-                self._slot("i", "I", "i"),
-                self._slot("o", "O", "o"),
-                self._slot("p", "P", "p"),
-                self._slot("left_bracket", "[", "left_bracket"),
-                self._slot("right_bracket", "]", "right_bracket"),
-                self._slot("backslash", "\\", "backslash"),
-            ],
-            [
-                self._slot("caps_lock", "Caps", "caps_lock", 1.7),
-                self._slot("a", "A", "a"),
-                self._slot("s", "S", "s"),
-                self._slot("d", "D", "d"),
-                self._slot("f", "F", "f"),
-                self._slot("g", "G", "g"),
-                self._slot("h", "H", "h"),
-                self._slot("j", "J", "j"),
-                self._slot("k", "K", "k"),
-                self._slot("l", "L", "l"),
-                self._slot("semicolon", ";", "semicolon"),
-                self._slot("quote", "'", "quote"),
-                self._slot("enter", "Enter", "enter", 1.8),
-            ],
-            [
-                self._slot("left_shift", "Shift", "left_shift", 2.0),
-                self._slot("z", "Z", "z"),
-                self._slot("x", "X", "x"),
-                self._slot("c", "C", "c"),
-                self._slot("v", "V", "v"),
-                self._slot("b", "B", "b"),
-                self._slot("n", "N", "n"),
-                self._slot("m", "M", "m"),
-                self._slot("comma", ",", "comma"),
-                self._slot("period", ".", "period"),
-                self._slot("slash", "/", "slash"),
-                self._slot("right_shift", "Shift", "right_shift", 1.8),
-            ],
-            [
-                self._slot("left_ctrl", "Ctrl", "left_ctrl", 1.2),
-                self._slot("left_win", self._meta_key_label, "left_win", 1.1),
-                self._slot("left_alt", "Alt", "left_alt", 1.1),
-                self._slot("fn", "Fn", "fn", 1.0),
-                self._slot("space", "Space", "space", 6.5),
-                self._slot("right_alt", "Alt", "right_alt", 1.1),
-                self._slot("right_win", self._meta_key_label, "right_win", 1.1),
-                self._slot("right_ctrl", "Ctrl", "right_ctrl", 1.2),
-            ],
-        ]
-
-    def _build_slot_key_map(self) -> Dict[str, str]:
-        mapping: Dict[str, str] = {}
-        for row in self._rows_unified:
-            for slot in row:
-                slot_id = str(slot["id"])
-                mapping[slot_id] = str(slot["key"])
-        return mapping
 
     def _normalized_point(self, point: Optional[Tuple[float, float, float]]) -> Optional[Tuple[float, float, float]]:
         if point is None:
