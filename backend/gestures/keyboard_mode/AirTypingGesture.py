@@ -1,21 +1,15 @@
 import math
 import platform
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from backend.HandsData import HandsData
 from backend.gestures.GestureRecognizer import GestureRecognizer
 from backend.gestures.GestureUtils import are_fingers_pinched, get_pinch_distance
+from backend.gestures.keyboard_mode.DevOverlayKeyboardSurface import DevOverlayKeyboardSurface
+from backend.gestures.keyboard_mode.KeyboardSurfaceBase import HandFrame, KeyboardSurfaceBase
+from backend.gestures.keyboard_mode.ProdWindowKeyboardSurface import ProdWindowKeyboardSurface
 from backend.gestures.keyboard_mode.SwipeDecoder import SwipeDecoder
-
-
-@dataclass
-class HandFrame:
-    left: float
-    top: float
-    width: float
-    height: float
 
 
 class AirTypingGesture(GestureRecognizer):
@@ -67,11 +61,47 @@ class AirTypingGesture(GestureRecognizer):
         "minus": "f11",
         "equals": "f12",
     }
+    _SHIFT_LABEL_BY_SLOT = {
+        "backtick": "~",
+        "1": "!",
+        "2": "@",
+        "3": "#",
+        "4": "$",
+        "5": "%",
+        "6": "^",
+        "7": "&",
+        "8": "*",
+        "9": "(",
+        "0": ")",
+        "minus": "_",
+        "equals": "+",
+        "left_bracket": "{",
+        "right_bracket": "}",
+        "backslash": "|",
+        "semicolon": ":",
+        "quote": "\"",
+        "comma": "<",
+        "period": ">",
+        "slash": "?",
+    }
     _SUGGESTION_CHIP_COUNT = 3
 
-    def __init__(self, action, config, priority=15):
+    def __init__(
+        self,
+        action,
+        config,
+        priority=15,
+        *,
+        ui_mode: str = "dev",
+        screen_width: int = 1920,
+        screen_height: int = 1080,
+        keyboard_surface: Optional[KeyboardSurfaceBase] = None,
+    ):
         super().__init__(action, priority=priority)
         self.config = config
+        self.ui_mode = str(ui_mode)
+        self.screen_width = int(screen_width)
+        self.screen_height = int(screen_height)
         os_name = platform.system()
         if os_name == "Darwin":
             self._meta_key_label = "Cmd"
@@ -94,28 +124,6 @@ class AirTypingGesture(GestureRecognizer):
                 self.config.get("preview_flip_horizontal", True),
             )
         )
-
-        # Hand-following keyboard geometry
-        self.wrist_ema_alpha = float(self.config.get("keyboard_wrist_ema_alpha", 0.28))
-        self.half_width_scale = float(self.config.get("keyboard_hand_half_width_scale", 3.2))
-        self.half_width_min = float(self.config.get("keyboard_hand_half_width_min", 0.22))
-        self.half_width_max = float(self.config.get("keyboard_hand_half_width_max", 0.40))
-        self.half_height_ratio = float(self.config.get("keyboard_hand_height_ratio", 0.72))
-        self.half_vertical_offset = float(self.config.get("keyboard_hand_vertical_offset", -0.015))
-        self.half_horizontal_offset_left = float(self.config.get("keyboard_hand_horizontal_offset_left", 0.0))
-        self.half_horizontal_offset_right = float(self.config.get("keyboard_hand_horizontal_offset_right", 0.0))
-        self.half_vertical_offset_left = float(
-            self.config.get("keyboard_hand_vertical_offset_left", self.half_vertical_offset)
-        )
-        self.half_vertical_offset_right = float(
-            self.config.get("keyboard_hand_vertical_offset_right", self.half_vertical_offset)
-        )
-        self.finger_anchor_row = float(self.config.get("keyboard_finger_anchor_row", 0.20))
-        self.finger_anchor_mix_x = float(self.config.get("keyboard_finger_anchor_mix_x", 0.92))
-        self.finger_anchor_mix_y = float(self.config.get("keyboard_finger_anchor_mix_y", 0.90))
-        self.drag_deadzone_margin_x = float(self.config.get("keyboard_drag_deadzone_margin_x", 0.14))
-        self.drag_deadzone_margin_y = float(self.config.get("keyboard_drag_deadzone_margin_y", 0.18))
-        self.size_ema_alpha = float(self.config.get("keyboard_hand_size_ema_alpha", 0.22))
         self.pinch_threshold = float(self.config.get("pinch_threshold", 0.15))
 
         # Swipe typing configuration
@@ -138,7 +146,6 @@ class AirTypingGesture(GestureRecognizer):
         )
         if self.keyboard_swipe_tracking_grace_frames < 0:
             self.keyboard_swipe_tracking_grace_frames = 0
-        self.keyboard_swipe_lexicon_max_words = 12000
         self.keyboard_swipe_auto_space = True
         self._swipe_point_min_distance = 0.0035
         self._swipe_point_min_distance_sq = self._swipe_point_min_distance * self._swipe_point_min_distance
@@ -150,13 +157,15 @@ class AirTypingGesture(GestureRecognizer):
         self._last_event = ""
         self._last_confidence = 0.0
 
-        self._anchor_avg: Dict[str, Optional[Tuple[float, float]]] = {"left": None, "right": None}
-        self._size_avg: Dict[str, Optional[Tuple[float, float]]] = {"left": None, "right": None}
         self._overlay_keys: List[Dict[str, object]] = []
         self._overlay_by_id: Dict[str, Dict[str, object]] = {}
         self._active_frames: Dict[str, Optional[HandFrame]] = {"left": None, "right": None}
         self._drag_bounds_by_side: Dict[str, HandFrame] = {}
+        self._anchor_avg: Dict[str, Optional[Tuple[float, float]]] = {"left": None, "right": None}
+        self._size_avg: Dict[str, Optional[Tuple[float, float]]] = {"left": None, "right": None}
+        self._surface_extra_overlay: Dict[str, object] = {}
         self._hovered_slots = set()
+        self._right_index_hover_point: Optional[Tuple[float, float]] = None
         self._right_frame_for_swipe: Optional[HandFrame] = None
 
         self._swipe_active = False
@@ -183,8 +192,25 @@ class AirTypingGesture(GestureRecognizer):
         self._rows_unified = self._build_unified_rows()
         self._slot_to_key = self._build_slot_key_map()
 
-        lexicon_path = Path(__file__).resolve().parent / "data" / "swipe_words_12000.txt"
-        self._swipe_decoder = SwipeDecoder(lexicon_path, max_words=self.keyboard_swipe_lexicon_max_words)
+        if keyboard_surface is not None:
+            self._surface = keyboard_surface
+        elif self.ui_mode == "prod":
+            self._surface = ProdWindowKeyboardSurface(
+                self.config,
+                flip_x_for_mapping=self.flip_x_for_mapping,
+                screen_width=self.screen_width,
+                screen_height=self.screen_height,
+            )
+        else:
+            self._surface = DevOverlayKeyboardSurface(
+                self.config,
+                flip_x_for_mapping=self.flip_x_for_mapping,
+                screen_width=self.screen_width,
+                screen_height=self.screen_height,
+            )
+
+        lexicon_path = Path(__file__).resolve().parent / "data" / "swipe-words.txt"
+        self._swipe_decoder = SwipeDecoder(lexicon_path, max_words=None)
 
     def _slot(self, slot_id: str, label: str, key: str, width: float = 1.0) -> Dict[str, object]:
         return {"id": slot_id, "label": label, "key": key, "w": width}
@@ -316,87 +342,6 @@ class AirTypingGesture(GestureRecognizer):
             return None
         return self._normalized_point(finger.tip)
 
-    def _compute_hand_frame(self, side: str, hand) -> Optional[HandFrame]:
-        if hand is None or not hand.exists or hand.wrist is None:
-            return None
-
-        wrist = self._normalized_point(hand.wrist)
-        if wrist is None:
-            return None
-
-        fingertip_points = []
-        for finger_name in ("index", "middle", "ring", "pinky"):
-            tip = self._get_tip(hand, finger_name)
-            if tip is not None:
-                fingertip_points.append(tip)
-
-        if fingertip_points:
-            avg_tip_x = sum(p[0] for p in fingertip_points) / len(fingertip_points)
-            avg_tip_y = sum(p[1] for p in fingertip_points) / len(fingertip_points)
-            anchor_x_raw = (self.finger_anchor_mix_x * avg_tip_x) + ((1.0 - self.finger_anchor_mix_x) * wrist[0])
-            anchor_y_raw = (self.finger_anchor_mix_y * avg_tip_y) + ((1.0 - self.finger_anchor_mix_y) * wrist[1])
-        else:
-            anchor_x_raw = wrist[0]
-            anchor_y_raw = wrist[1]
-
-        prev_anchor = self._anchor_avg.get(side)
-        if prev_anchor is None:
-            anchor_x = anchor_x_raw
-            anchor_y = anchor_y_raw
-        else:
-            a = self.wrist_ema_alpha
-            anchor_x = (prev_anchor[0] * (1.0 - a)) + (anchor_x_raw * a)
-            anchor_y = (prev_anchor[1] * (1.0 - a)) + (anchor_y_raw * a)
-        self._anchor_avg[side] = (anchor_x, anchor_y)
-
-        index_base = self._normalized_point(hand.index.base)
-        pinky_base = self._normalized_point(hand.pinky.base)
-        span = 0.14
-        if index_base is not None and pinky_base is not None:
-            span = max(self._distance(index_base, pinky_base), 0.08)
-
-        tip_span_x = 0.10
-        if len(fingertip_points) >= 2:
-            min_tip_x = min(p[0] for p in fingertip_points)
-            max_tip_x = max(p[0] for p in fingertip_points)
-            tip_span_x = max(0.06, max_tip_x - min_tip_x)
-
-        finger_reach = 0.18
-        if fingertip_points:
-            finger_reach = max(
-                0.12,
-                sum(self._distance(tip, wrist) for tip in fingertip_points) / len(fingertip_points),
-            )
-
-        width_raw = max(
-            span * self.half_width_scale,
-            tip_span_x * 2.8,
-            finger_reach * 1.35,
-        )
-        width = self._clamp(width_raw, self.half_width_min, self.half_width_max)
-        height = self._clamp(width * self.half_height_ratio, 0.15, 0.55)
-
-        prev_size = self._size_avg.get(side)
-        if prev_size is not None:
-            sa = self.size_ema_alpha
-            width = (prev_size[0] * (1.0 - sa)) + (width * sa)
-            height = (prev_size[1] * (1.0 - sa)) + (height * sa)
-        self._size_avg[side] = (width, height)
-
-        vertical_offset = self.half_vertical_offset_left if side == "left" else self.half_vertical_offset_right
-        horizontal_offset = self.half_horizontal_offset_left if side == "left" else self.half_horizontal_offset_right
-
-        top_raw = anchor_y - (height * self.finger_anchor_row) + vertical_offset
-        center_x = self._clamp(anchor_x + horizontal_offset, width / 2.0, 1.0 - (width / 2.0))
-        center_y = self._clamp(top_raw + (height / 2.0), height / 2.0, 1.0 - (height / 2.0))
-
-        return HandFrame(
-            left=center_x - (width / 2.0),
-            top=center_y - (height / 2.0),
-            width=width,
-            height=height,
-        )
-
     def _slot_from_uv(self, side: str, u: float, v: float) -> Optional[Dict[str, object]]:
         if u < 0.0 or u > 1.0 or v < 0.0 or v > 1.0:
             return None
@@ -427,82 +372,6 @@ class AirTypingGesture(GestureRecognizer):
         v = (tip[1] - frame.top) / frame.height
         return self._slot_from_uv(side, u, v)
 
-    def _build_overlay_keys(self, frames: Dict[str, Optional[HandFrame]]) -> List[Dict[str, object]]:
-        frame = self._resolve_unified_frame(frames)
-        if frame is None:
-            return []
-
-        rows = self._rows_unified
-        if not rows:
-            return []
-
-        key_rects = []
-        row_h = frame.height / len(rows)
-        for row_idx, row in enumerate(rows):
-            row_top = frame.top + (row_h * row_idx)
-            row_total = sum(float(slot["w"]) for slot in row)
-            if row_total <= 1e-6:
-                continue
-
-            accum = 0.0
-            for slot in row:
-                slot_w = float(slot["w"]) / row_total
-                x = frame.left + (frame.width * accum)
-                w = frame.width * slot_w
-                key_rects.append(
-                    {
-                        "id": str(slot["id"]),
-                        "side": "full",
-                        "label": str(slot["label"]),
-                        "x": x,
-                        "y": row_top,
-                        "w": w,
-                        "h": row_h,
-                    }
-                )
-                accum += slot_w
-        return key_rects
-
-    def _resolve_unified_frame(self, frames: Dict[str, Optional[HandFrame]]) -> Optional[HandFrame]:
-        left = frames.get("left")
-        right = frames.get("right")
-
-        if left is None and right is None:
-            return None
-
-        if left is not None and right is not None:
-            left_edge = min(left.left, right.left)
-            right_edge = max(left.left + left.width, right.left + right.width)
-            width = self._clamp(right_edge - left_edge, 0.30, 0.95)
-            center_x = self._clamp((left_edge + right_edge) / 2.0, width / 2.0, 1.0 - (width / 2.0))
-
-            left_center_y = left.top + (left.height / 2.0)
-            right_center_y = right.top + (right.height / 2.0)
-            center_y = (left_center_y + right_center_y) / 2.0
-            height = self._clamp(max(left.height, right.height), 0.15, 0.55)
-            center_y = self._clamp(center_y, height / 2.0, 1.0 - (height / 2.0))
-
-            return HandFrame(
-                left=center_x - (width / 2.0),
-                top=center_y - (height / 2.0),
-                width=width,
-                height=height,
-            )
-
-        source = left if left is not None else right
-        source_center_x = source.left + (source.width / 2.0)
-        source_center_y = source.top + (source.height / 2.0)
-        width = self._clamp(source.width * 2.05, 0.30, 0.95)
-        height = self._clamp(max(source.height, width * 0.34), 0.15, 0.55)
-        center_x = self._clamp(source_center_x, width / 2.0, 1.0 - (width / 2.0))
-        center_y = self._clamp(source_center_y, height / 2.0, 1.0 - (height / 2.0))
-        return HandFrame(
-            left=center_x - (width / 2.0),
-            top=center_y - (height / 2.0),
-            width=width,
-            height=height,
-        )
-
     def _set_overlay_keys(self, key_rects: List[Dict[str, object]]):
         self._overlay_keys = key_rects
         self._overlay_by_id = {str(key["id"]): key for key in key_rects}
@@ -524,10 +393,10 @@ class AirTypingGesture(GestureRecognizer):
         min_x, min_y, max_x, max_y = self._overlay_bounds
         keyboard_w = max(0.05, max_x - min_x)
         keyboard_h = max(0.05, max_y - min_y)
-        chip_gap = 0.006
+        chip_gap = keyboard_w * 0.012
         chip_count = self._SUGGESTION_CHIP_COUNT
-        chip_h = self._clamp(keyboard_h * 0.20, 0.038, 0.060)
-        chip_y = max(0.008, min_y - chip_h - 0.010)
+        chip_h = self._clamp(keyboard_h * 0.16, keyboard_h * 0.10, keyboard_h * 0.22)
+        chip_y = max(0.004, min_y - chip_h - (keyboard_h * 0.03))
         total_gap = chip_gap * (chip_count - 1)
         chip_w = max(0.05, (keyboard_w - total_gap) / chip_count)
 
@@ -600,127 +469,6 @@ class AirTypingGesture(GestureRecognizer):
         self._suggestion_words = alternatives[: self._SUGGESTION_CHIP_COUNT]
         self._layout_suggestion_chips()
 
-    @staticmethod
-    def _copy_frame(frame: Optional[HandFrame]) -> Optional[HandFrame]:
-        if frame is None:
-            return None
-        return HandFrame(left=frame.left, top=frame.top, width=frame.width, height=frame.height)
-
-    @staticmethod
-    def _frame_center(frame: HandFrame) -> Tuple[float, float]:
-        return (frame.left + (frame.width / 2.0), frame.top + (frame.height / 2.0))
-
-    def _compute_deadzone_frame(self, frame: HandFrame) -> HandFrame:
-        margin_x = max(0.0, frame.width * self.drag_deadzone_margin_x)
-        margin_y = max(0.0, frame.height * self.drag_deadzone_margin_y)
-        width = min(1.0, frame.width + (2.0 * margin_x))
-        height = min(1.0, frame.height + (2.0 * margin_y))
-
-        center_x, center_y = self._frame_center(frame)
-        center_x = self._clamp(center_x, width / 2.0, 1.0 - (width / 2.0))
-        center_y = self._clamp(center_y, height / 2.0, 1.0 - (height / 2.0))
-
-        return HandFrame(
-            left=center_x - (width / 2.0),
-            top=center_y - (height / 2.0),
-            width=width,
-            height=height,
-        )
-
-    def _update_drag_bounds(self, frames: Dict[str, Optional[HandFrame]]):
-        self._drag_bounds_by_side = {}
-        unified_frame = self._resolve_unified_frame(frames)
-        if unified_frame is not None:
-            self._drag_bounds_by_side["full"] = self._compute_deadzone_frame(unified_frame)
-
-    def _update_active_frames(
-        self,
-        candidate_frames: Dict[str, Optional[HandFrame]],
-        recenter: bool,
-    ):
-        for side in ("left", "right"):
-            candidate = candidate_frames.get(side)
-            active = self._active_frames.get(side)
-
-            if active is None and candidate is not None:
-                self._active_frames[side] = self._copy_frame(candidate)
-                continue
-
-            if recenter:
-                if candidate is not None:
-                    self._active_frames[side] = self._copy_frame(candidate)
-                continue
-
-            if candidate is None or active is None:
-                continue
-
-            candidate_center_x, candidate_center_y = self._frame_center(candidate)
-            deadzone = self._compute_deadzone_frame(active)
-            deadzone_right = deadzone.left + deadzone.width
-            deadzone_bottom = deadzone.top + deadzone.height
-
-            shift_x = 0.0
-            shift_y = 0.0
-            if candidate_center_x < deadzone.left:
-                shift_x = candidate_center_x - deadzone.left
-            elif candidate_center_x > deadzone_right:
-                shift_x = candidate_center_x - deadzone_right
-
-            if candidate_center_y < deadzone.top:
-                shift_y = candidate_center_y - deadzone.top
-            elif candidate_center_y > deadzone_bottom:
-                shift_y = candidate_center_y - deadzone_bottom
-
-            if abs(shift_x) <= 1e-6 and abs(shift_y) <= 1e-6:
-                continue
-
-            active_center_x, active_center_y = self._frame_center(active)
-            new_center_x = self._clamp(active_center_x + shift_x, active.width / 2.0, 1.0 - (active.width / 2.0))
-            new_center_y = self._clamp(active_center_y + shift_y, active.height / 2.0, 1.0 - (active.height / 2.0))
-            self._active_frames[side] = HandFrame(
-                left=new_center_x - (active.width / 2.0),
-                top=new_center_y - (active.height / 2.0),
-                width=active.width,
-                height=active.height,
-            )
-
-    def _fallback_overlay_frames(self) -> Dict[str, Optional[HandFrame]]:
-        full_center_x = float(self.config.get("keyboard_fixed_center_x", 0.5))
-        full_center_y = float(self.config.get("keyboard_fixed_center_y", 0.58))
-        full_width = float(self.config.get("keyboard_fixed_width", 0.78))
-        full_height = float(self.config.get("keyboard_fixed_height", 0.26))
-
-        full_width = self._clamp(full_width, 0.35, 0.95)
-        full_height = self._clamp(full_height, 0.12, 0.55)
-        half_gap = max(0.01, full_width * 0.025)
-        half_width = max(0.10, (full_width - half_gap) / 2.0)
-
-        center_y = self._clamp(full_center_y, full_height / 2.0, 1.0 - (full_height / 2.0))
-        left_center_x = self._clamp(
-            full_center_x - ((half_width + half_gap) / 2.0),
-            half_width / 2.0,
-            1.0 - (half_width / 2.0),
-        )
-        right_center_x = self._clamp(
-            full_center_x + ((half_width + half_gap) / 2.0),
-            half_width / 2.0,
-            1.0 - (half_width / 2.0),
-        )
-
-        return {
-            "left": HandFrame(
-                left=left_center_x - (half_width / 2.0),
-                top=center_y - (full_height / 2.0),
-                width=half_width,
-                height=full_height,
-            ),
-            "right": HandFrame(
-                left=right_center_x - (half_width / 2.0),
-                top=center_y - (full_height / 2.0),
-                width=half_width,
-                height=full_height,
-            ),
-        }
 
     def _both_hands_present(self, hands_data: HandsData) -> bool:
         return hands_data.camera.has_left and hands_data.camera.has_right
@@ -896,9 +644,6 @@ class AirTypingGesture(GestureRecognizer):
         if letter and (not self._swipe_trace or self._swipe_trace[-1] != letter):
             self._swipe_trace.append(letter)
 
-    def _fallback_word_from_trace(self) -> str:
-        return "".join(ch for ch in self._swipe_trace if isinstance(ch, str) and len(ch) == 1 and ch.isalpha())
-
     def _emit_word(self, word: str) -> str:
         text = str(word)
         if self._caps_lock_active:
@@ -977,11 +722,6 @@ class AirTypingGesture(GestureRecognizer):
             self._swipe_trace,
             top_k=self.keyboard_swipe_decode_top_k,
         )
-
-        # Prefer decoded words over raw trace gibberish; only fall back when
-        # decoder cannot produce any word at all.
-        if not best_word:
-            best_word = self._fallback_word_from_trace()
 
         if not best_word:
             self._cancel_swipe()
@@ -1115,27 +855,21 @@ class AirTypingGesture(GestureRecognizer):
 
     def _update_overlay_only(self, hands_data: HandsData):
         camera_hands = self._get_camera_hands(hands_data.camera)
-        if self.keyboard_fixed_center_mode:
-            active_frames = self._fallback_overlay_frames()
-            self._active_frames = {
-                "left": self._copy_frame(active_frames.get("left")),
-                "right": self._copy_frame(active_frames.get("right")),
-            }
-        else:
-            candidate_frames = {
-                "left": self._compute_hand_frame("left", camera_hands.get("left")),
-                "right": self._compute_hand_frame("right", camera_hands.get("right")),
-            }
-
-            self._update_active_frames(candidate_frames, recenter=self._paused)
-            active_frames = self._active_frames
-            if active_frames.get("left") is None and active_frames.get("right") is None:
-                active_frames = self._fallback_overlay_frames()
-
-        self._set_overlay_keys(self._build_overlay_keys(active_frames))
-        self._update_drag_bounds(active_frames)
-        unified_frame = self._resolve_unified_frame(active_frames)
-        self._right_frame_for_swipe = unified_frame
+        layout = self._surface.update_layout(
+            hands_data,
+            paused=self._paused,
+            rows=self._rows_unified,
+        )
+        self._active_frames = {
+            "left": layout.active_frames.get("left"),
+            "right": layout.active_frames.get("right"),
+        }
+        self._right_frame_for_swipe = layout.unified_frame
+        self._drag_bounds_by_side = dict(layout.drag_bounds_by_side)
+        self._surface_extra_overlay = dict(layout.extra_overlay)
+        self._set_overlay_keys(layout.overlay_keys)
+        unified_frame = self._right_frame_for_swipe
+        active_frames = self._active_frames
 
         if self.require_both_hands and not self._both_hands_present(hands_data):
             self._pause("Typing Paused: both hands required")
@@ -1154,6 +888,7 @@ class AirTypingGesture(GestureRecognizer):
 
         hovered_slots = set()
         self._hovered_suggestion_idx = None
+        self._right_index_hover_point = None
         for side in ("left", "right"):
             frame = unified_frame if unified_frame is not None else active_frames.get(side)
             camera_hand = camera_hands.get(side)
@@ -1164,6 +899,8 @@ class AirTypingGesture(GestureRecognizer):
                 tip = self._get_tip(camera_hand, finger_name)
                 if tip is None:
                     continue
+                if side == "right" and finger_name == "index":
+                    self._right_index_hover_point = (tip[0], tip[1])
                 slot = self._map_tip_to_slot(side, tip, frame)
                 if slot is not None:
                     hovered_slots.add(str(slot["id"]))
@@ -1197,6 +934,8 @@ class AirTypingGesture(GestureRecognizer):
         self._drag_bounds_by_side = {}
         self._anchor_avg = {"left": None, "right": None}
         self._size_avg = {"left": None, "right": None}
+        self._surface_extra_overlay = {}
+        self._right_index_hover_point = None
         self._right_frame_for_swipe = None
         self._swipe_active = False
         self._swipe_points = []
@@ -1222,6 +961,7 @@ class AirTypingGesture(GestureRecognizer):
         self._status = "Keyboard Initializing..."
         self._last_event = ""
         self._last_confidence = 0.0
+        self._surface.shutdown()
 
     @property
     def is_active(self):
@@ -1267,16 +1007,24 @@ class AirTypingGesture(GestureRecognizer):
             )
 
         fn_active = "fn" in self._active_modifiers
+        shift_active = "shift" in self._active_modifiers
         overlay_keys = []
         for key in self._overlay_keys:
             key_view = dict(key)
+            slot_id = str(key_view.get("id", ""))
             if fn_active:
-                fn_key = self._FN_KEY_TO_FUNCTION.get(str(key_view.get("id", "")))
+                fn_key = self._FN_KEY_TO_FUNCTION.get(slot_id)
                 if fn_key:
                     key_view["label"] = fn_key.upper()
+            elif shift_active:
+                shifted = self._SHIFT_LABEL_BY_SLOT.get(slot_id)
+                if shifted:
+                    key_view["label"] = shifted
+                elif len(slot_id) == 1 and slot_id.isalpha():
+                    key_view["label"] = slot_id.upper()
             overlay_keys.append(key_view)
 
-        return {
+        overlay = {
             "enabled": True,
             "calibrated": not self._paused,
             "status": self._status,
@@ -1300,3 +1048,11 @@ class AirTypingGesture(GestureRecognizer):
                 "lost_frames": self._swipe_lost_frames,
             },
         }
+        if self._surface_extra_overlay:
+            overlay.update(self._surface_extra_overlay)
+        if self._right_index_hover_point is not None:
+            overlay["hover_point"] = {
+                "x": self._right_index_hover_point[0],
+                "y": self._right_index_hover_point[1],
+            }
+        return overlay

@@ -129,6 +129,20 @@ class AirTypingSuggestionTests(unittest.TestCase):
         hud = self.gesture.get_overlay_data().get("debug_hud", {})
         self.assertEqual(set(hud.keys()), {"pinch_value", "lost_frames"})
 
+    def test_shift_updates_number_and_symbol_key_labels(self):
+        self.gesture._active_modifiers = {"shift"}
+        overlay = self.gesture.get_overlay_data()
+        labels = {str(k.get("id")): str(k.get("label")) for k in overlay.get("keys", [])}
+
+        self.assertEqual(labels.get("1"), "!")
+        self.assertEqual(labels.get("2"), "@")
+        self.assertEqual(labels.get("minus"), "_")
+        self.assertEqual(labels.get("equals"), "+")
+        self.assertEqual(labels.get("left_bracket"), "{")
+        self.assertEqual(labels.get("right_bracket"), "}")
+        self.assertEqual(labels.get("semicolon"), ":")
+        self.assertEqual(labels.get("quote"), "\"")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10509,7 +10509,6 @@ helm
 helmet
 helmets
 helms
-helo
 help
 helped
 helper

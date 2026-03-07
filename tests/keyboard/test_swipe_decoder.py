@@ -57,6 +57,21 @@ class SwipeDecoderTests(unittest.TestCase):
         self.assertEqual(best_hi, "hi")
         self.assertEqual(best_hello, "hello")
 
+    def test_noisy_word_trace_prefers_word_over_weird(self):
+        decoder = self._make_decoder(
+            [
+                "word",
+                "weird",
+                "ward",
+                "wood",
+                "world",
+                "wed",
+            ]
+        )
+        best, _, candidates = decoder.decode(list("wertyuiouytrd"), top_k=5)
+        self.assertEqual(best, "word")
+        self.assertIn("word", candidates)
+
 
 if __name__ == "__main__":
     unittest.main()

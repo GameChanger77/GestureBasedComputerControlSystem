@@ -8,6 +8,7 @@ from PySide6.QtCore import Slot, Signal
 from PySide6.QtCore import QTimer
 
 from frontend.video_widget import VideoWidget
+from frontend.production_keyboard_window import ProductionKeyboardWindow
 from frontend.widgets.stats_widget import PerformanceStatsWidget
 from frontend.widgets.settings_panel import SettingsPanel
 
@@ -32,6 +33,7 @@ class MainWindow(QMainWindow):
         self.ui_mode = ui_mode
         self.is_dev_mode = self.ui_mode == "dev"
         self.component_factory = component_factory
+        self.production_keyboard_window = ProductionKeyboardWindow() if not self.is_dev_mode else None
 
         # Component references (will be injected)
         self.hand_tracker = None
@@ -211,17 +213,27 @@ class MainWindow(QMainWindow):
             self.page_stack.setCurrentWidget(self.main_page)
             main_layout.addWidget(self.page_stack)
         else:
-            button_layout = QHBoxLayout()
-            button_layout.setSpacing(10)
-            button_layout.addWidget(self.start_button)
+            # Production settings shell (no camera preview/stats UI).
+            prod_layout = QVBoxLayout()
+            prod_layout.setContentsMargins(0, 0, 0, 0)
+            prod_layout.setSpacing(10)
+
+            header = QLabel("Production Settings")
+            header.setStyleSheet("font-size: 18px; font-weight: bold;")
+            prod_layout.addWidget(header)
+
+            controls_layout = QHBoxLayout()
+            controls_layout.setSpacing(10)
+            controls_layout.addWidget(self.start_button)
 
             self.status_label = QLabel("Status: Not started")
             self.status_label.setStyleSheet("font-weight: bold;")
-            button_layout.addWidget(self.status_label)
-            button_layout.addStretch()
+            controls_layout.addWidget(self.status_label)
+            controls_layout.addStretch()
+            prod_layout.addLayout(controls_layout)
 
-            main_layout.addLayout(button_layout)
-            main_layout.addWidget(self.settings_panel)
+            prod_layout.addWidget(self.settings_panel)
+            main_layout.addLayout(prod_layout)
 
         central_widget.setLayout(main_layout)
 
@@ -441,6 +453,9 @@ class MainWindow(QMainWindow):
             frame: Camera frame as numpy array
         """
         if not self.is_dev_mode:
+            overlay_data = self._get_keyboard_overlay_data()
+            if self.production_keyboard_window:
+                self.production_keyboard_window.set_overlay_data(overlay_data)
             return
 
         if not self.stats_widget:
@@ -586,9 +601,16 @@ class MainWindow(QMainWindow):
 
         old_tracker = self.hand_tracker
         old_action = self.action
+        old_strategizer = self.strategizer
 
         if old_tracker and old_tracker.isRunning():
             old_tracker.stop_tracking()
+
+        if old_strategizer and hasattr(old_strategizer, "shutdown"):
+            try:
+                old_strategizer.shutdown()
+            except Exception:
+                pass
 
         if old_action and hasattr(old_action, "close"):
             try:
@@ -878,6 +900,13 @@ class MainWindow(QMainWindow):
             if pts:
                 cv2.circle(image, pts[-1], 4, (0, 255, 255), -1)
 
+        hover_point = overlay_data.get("hover_point")
+        if isinstance(hover_point, dict):
+            hx = int(max(0, min(width - 1, float(hover_point.get("x", 0.0)) * width)))
+            hy = int(max(0, min(height - 1, float(hover_point.get("y", 0.0)) * height)))
+            cv2.circle(image, (hx, hy), 5, (0, 0, 0), -1, cv2.LINE_AA)
+            cv2.circle(image, (hx, hy), 4, (90, 255, 255), -1, cv2.LINE_AA)
+
         status = overlay_data.get("status", "")
         if status:
             cv2.putText(
@@ -921,6 +950,8 @@ class MainWindow(QMainWindow):
         self._set_start_button_running(False)
         if self.video_widget:
             self.video_widget.clear_frame()
+        if self.production_keyboard_window:
+            self.production_keyboard_window.set_overlay_data(None)
         self._update_mode_label()
 
     @Slot(str)
@@ -928,13 +959,22 @@ class MainWindow(QMainWindow):
         """Handle tracking error signal"""
         self._set_start_button_running(False)
         self._set_status_text(f"Status: Error - {error_message}")
+        if self.production_keyboard_window:
+            self.production_keyboard_window.set_overlay_data(None)
         self._update_mode_label()
 
     def closeEvent(self, event):
         """Handle window close event"""
         # Stop tracking when window closes
+        if self.production_keyboard_window:
+            self.production_keyboard_window.close()
         if self.hand_tracker and self.hand_tracker.isRunning():
             self.hand_tracker.stop_tracking()
+        if self.strategizer and hasattr(self.strategizer, "shutdown"):
+            try:
+                self.strategizer.shutdown()
+            except Exception:
+                pass
         if self.action and hasattr(self.action, "release_all_keys"):
             self.action.release_all_keys()
         if self.action and hasattr(self.action, 'close'):

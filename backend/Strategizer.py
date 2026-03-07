@@ -12,7 +12,7 @@ class ControlMode(Enum):
 
 class Strategizer:
 
-    def __init__(self, action, config, screen_width, screen_height):
+    def __init__(self, action, config, screen_width, screen_height, ui_mode="dev"):
         """
         Initialize the Strategizer.
 
@@ -26,6 +26,7 @@ class Strategizer:
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.config = config
+        self.ui_mode = str(ui_mode)
 
         # Default mode is mouse mode (Can be changed for easier manual testing)
         self.current_mode = ControlMode.MOUSE
@@ -147,6 +148,9 @@ class Strategizer:
                 self.action,
                 config=self.config,
                 priority=15,
+                ui_mode=self.ui_mode,
+                screen_width=self.screen_width,
+                screen_height=self.screen_height,
             )
         ]
         self._rebuild_sorted_gestures(ControlMode.KEYBOARD)
@@ -330,3 +334,13 @@ class Strategizer:
         elif mode == ControlMode.HOTKEY and gesture in self.hotkey_mode_gestures:
             self.hotkey_mode_gestures.remove(gesture)
             self._rebuild_sorted_gestures(ControlMode.HOTKEY)
+
+    def shutdown(self):
+        """Reset all gestures and release held state before process/UI shutdown."""
+        for gesture_list in (self.mouse_mode_gestures, self.keyboard_mode_gestures, self.hotkey_mode_gestures):
+            for gesture in gesture_list:
+                try:
+                    gesture.reset()
+                except Exception:
+                    # Keep shutdown robust even if a single recognizer fails reset.
+                    pass

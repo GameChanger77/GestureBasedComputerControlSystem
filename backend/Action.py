@@ -615,6 +615,17 @@ class Action:
             return logical
 
         key_lookup = {
+            "backtick": "grave",
+            "minus": "minus",
+            "equals": "equal",
+            "left_bracket": "bracketleft",
+            "right_bracket": "bracketright",
+            "backslash": "backslash",
+            "semicolon": "semicolon",
+            "quote": "apostrophe",
+            "comma": "comma",
+            "period": "period",
+            "slash": "slash",
             "left_win": "Super_L",
             "right_win": "Super_R",
             "left_shift": "Shift_L",
