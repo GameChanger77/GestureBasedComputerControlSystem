@@ -6,17 +6,52 @@
   },
   "custom_gestures": [
     {
-      "id": "g_index_middle_leftclick",
-      "name": "Index+Middle Click",
+      "id": "g_open_palm",
+      "name": "Open Palm",
       "enabled": true,
       "mode": "mouse",
       "type": "pose",
-      "priority": 10,
+      "priority": 8,
       "hand": "right",
       "conditions": [
-        { "op": "only_fingers_extended", "fingers": ["index", "middle"], "threshold_deg": 155 }
+        { "op": "only_fingers_extended", "fingers": ["index", "middle", "ring", "pinky"], "threshold_deg": 155 }
       ],
       "confirm": { "pending_frames": 3, "ending_frames": 2 },
+      "action": { "type": "mouse_move", "params": { "at": "index.tip", "space": "camera" } }
+    },
+    {
+      "id": "g_pinch_index_thumb",
+      "name": "Index+Thumb Pinch",
+      "enabled": true,
+      "mode": "mouse",
+      "type": "pose",
+      "priority": 8,
+      "hand": "right",
+      "conditions": [
+        { "op": "pinch_distance_lt", "a": "thumb.tip", "b": "index.tip", "value": 0.25, "space": "wrist" }
+      ],
+      "confirm": { "pending_frames": 1, "ending_frames": 2 },
+      "action": { "type": "left_click", "params": { "at": "index.tip", "space": "camera" } }
+    }
+  ],
+  "custom_macros": [
+    {
+      "id": "m_demo_combo",
+      "name": "Demo Combo",
+      "enabled": true,
+      "mode": "mouse",
+      "priority": 12,
+      "steps": [
+        { "gesture_id": "g_open_palm", "max_delay_ms": 2000 },
+        { "gesture_id": "g_pinch_index_thumb", "max_delay_ms": 5000 },
+        { "gesture_id": "g_open_palm", "max_delay_ms": 2000 }
+      ],
+      "sequence_rules": {
+        "strict_order": true,
+        "reset_on_wrong_gesture": false,
+        "consumes_events": true,
+        "allow_intermediate_idle_frames": 10
+      },
       "action": {
         "type": "left_click",
         "params": { "at": "index.tip", "space": "camera" }

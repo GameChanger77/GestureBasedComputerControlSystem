@@ -145,20 +145,33 @@ class Strategizer:
         # Sort gestures by priority (highest first)
         sorted_gestures = sorted(current_gestures, key=lambda g: g.priority, reverse=True)
 
-        # Track if any high-priority gesture is active
+        # Sort gestures by priority (highest first)
+        sorted_gestures = sorted(current_gestures, key=lambda g: g.priority, reverse=True)
+
+        # Once something is "consuming events" (like a macro in progress),
+        # we suppress all lower-priority gestures for determinism.
         high_priority_active = False
+        active_priority = None  # the priority threshold we're currently enforcing
 
         for gesture in sorted_gestures:
-            # Skip low-priority gestures if a high-priority one is active
-            if high_priority_active and gesture.priority < 5:
+            # If something higher priority is active/consuming, skip lower priorities
+            if high_priority_active and active_priority is not None and gesture.priority < active_priority:
                 continue
 
             # Update gesture
             action_executed = gesture.update(hands_data)
 
-            # If a high-priority gesture executed an action, prevent lower-priority gestures
+            # If a macro is in progress and marked as consuming events, suppress others
+            if getattr(gesture, "consumes_events", False) and gesture.is_active:
+                high_priority_active = True
+                active_priority = gesture.priority if active_priority is None else max(active_priority,
+                                                                                       gesture.priority)
+
+            # If a high-priority gesture executed, suppress lower ones (your original intent)
             if action_executed and gesture.priority >= 5:
                 high_priority_active = True
+                active_priority = gesture.priority if active_priority is None else max(active_priority,
+                                                                                       gesture.priority)
 
     def add_custom_gesture(self, gesture, mode: ControlMode = None):
         """
@@ -247,3 +260,28 @@ class Strategizer:
                 print(f"✓ Loaded custom gesture: {rule.get('id')} ({mode_str})")
             except Exception as e:
                 print(f"⚠ Skipped custom gesture {rule.get('id')}: {e}")
+
+        gesture_rule_by_id = {
+            g["id"]: g for g in rules.get("custom_gestures", [])
+            if g.get("enabled", False)
+        }
+
+        for macro in rules.get("custom_macros", []):
+            if not macro.get("enabled", False):
+                continue
+
+            mode_str = macro.get("mode", "mouse")
+            if mode_str == "mouse":
+                mode = ControlMode.MOUSE
+            elif mode_str == "keyboard":
+                mode = ControlMode.KEYBOARD
+            else:
+                mode = ControlMode.HOTKEY
+
+            try:
+                macro_rec = compiler.compile_macro(self.action, macro, gesture_rule_by_id, global_cfg)
+                self.add_custom_gesture(macro_rec, mode=mode)
+                self._custom_gesture_instances.append(macro_rec)
+                print(f"✓ Loaded custom macro: {macro.get('id')} ({mode_str})")
+            except Exception as e:
+                print(f"⚠ Skipped custom macro {macro.get('id')}: {e}")
