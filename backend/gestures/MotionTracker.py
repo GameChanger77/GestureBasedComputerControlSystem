@@ -33,16 +33,22 @@ class MotionTracker:
         # Current frame counter
         self._frame_count = 0
 
-    def add_frame(self, position):
+    def add_frame(self, position, timestamp_s=None):
         """
         Add a new position to the motion buffer.
 
         Args:
             position: Tuple (x, y, z) representing hand position (or specific landmark)
+            timestamp_s: Optional timestamp in seconds. If not provided,
+                frame-time-derived timestamps are used.
         """
         if position is not None:
             self.position_buffer.append(np.array(position))
-            self.timestamp_buffer.append(self._frame_count * self.frame_time)
+            if timestamp_s is None:
+                timestamp = self._frame_count * self.frame_time
+            else:
+                timestamp = float(timestamp_s)
+            self.timestamp_buffer.append(timestamp)
             self._frame_count += 1
 
     def clear(self):
@@ -69,10 +75,14 @@ class MotionTracker:
         # Use recent window for velocity calculation
         window = min(window_frames, len(self.position_buffer))
         recent_positions = list(self.position_buffer)[-window:]
+        recent_timestamps = list(self.timestamp_buffer)[-window:]
 
         # Calculate displacement from first to last in window
         displacement = recent_positions[-1] - recent_positions[0]
-        time_delta = (window - 1) * self.frame_time
+        time_delta = recent_timestamps[-1] - recent_timestamps[0]
+        if time_delta <= 0:
+            # Backward-compatible fallback for invalid/duplicate timestamps.
+            time_delta = (window - 1) * self.frame_time
 
         if time_delta > 0:
             velocity = displacement / time_delta
