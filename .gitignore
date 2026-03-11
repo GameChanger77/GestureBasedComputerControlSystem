@@ -2,7 +2,15 @@
 venv/
 .venv/
 __pycache__/
+/build/
+/dist/
+/installers/windows/installer_out/
+/installers/linux/AppDir
+/installers/linux/out
+/installers/linux/tools
+installers/mac/installer_out/
 # Byte-compiled / optimized / DLL files
+*.spec
 *.py[cod]
 *.pyo
 *.pyd
@@ -12,3 +20,7 @@ __pycache__/
 gesture_config.json
 
 **/gesture-test/
+plans/
+/videos
+/tools
+gesture_config.json

@@ -87,7 +87,7 @@ class MacroChainRecognizer(GestureRecognizer):
         """
         pass
 
-    def update(self, hands_data: HandsData) -> bool:
+    def update(self, hands_data: HandsData, frame_capture_ts_ns=None) -> bool:
         """
         Update macro sequence state.
 
