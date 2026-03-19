@@ -3,6 +3,9 @@ import os
 import sys
 from pathlib import Path
 
+from backend.gestures.keyboard_mode.KeyboardLayouts import KeyboardLayoutRegistry
+from backend.gestures.keyboard_mode.KeyboardThemes import KeyboardThemeRegistry
+
 
 class GestureConfig:
     """
@@ -15,6 +18,7 @@ class GestureConfig:
     APP_NAME = "gbccs"
     CONFIG_FILENAME = "gesture_config.json"
     FIELD_GROUP_ORDER = [
+        "Keyboard",
         "Finger detection",
         "Scroll",
         "Click/pinch",
@@ -27,12 +31,14 @@ class GestureConfig:
         "Debug",
     ]
     FIELD_PAGE_ORDER = [
+        "Keyboard",
         "Controls",
         "Camera",
         "Performance",
         "Debug",
     ]
     GROUP_TO_PAGE = {
+        "Keyboard": "Keyboard",
         "Finger detection": "Controls",
         "Scroll": "Controls",
         "Click/pinch": "Controls",
@@ -45,6 +51,8 @@ class GestureConfig:
         "Debug": "Debug",
     }
     PROD_VISIBLE_KEYS = {
+        "keyboard_layout",
+        "keyboard_theme",
         "finger_extension_angle",
         "scroll_sensitivity",
         "pinch_threshold",
@@ -84,6 +92,8 @@ class GestureConfig:
         "keyboard_mode_exit_max_avg_finger_angle": 145.0,
 
         # Keyboard overlay and movement (display-only)
+        "keyboard_layout": "qwerty",
+        "keyboard_theme": "dark",
         "keyboard_flip_x_for_mapping": True,
         "keyboard_fixed_center_x": 0.5,
         "keyboard_fixed_center_y": 0.58,
@@ -162,6 +172,18 @@ class GestureConfig:
 
     # UI metadata for generated settings controls.
     FIELD_METADATA = {
+        "keyboard_layout": {
+            "group": "Keyboard",
+            "label": "Keyboard Layout",
+            "type": "choice",
+            "options": KeyboardLayoutRegistry.list_options(),
+        },
+        "keyboard_theme": {
+            "group": "Keyboard",
+            "label": "Keyboard Color Scheme",
+            "type": "choice",
+            "options": KeyboardThemeRegistry.list_options(),
+        },
         "finger_extension_angle": {
             "group": "Finger detection",
             "label": "Finger Extension Angle",
@@ -543,7 +565,10 @@ class GestureConfig:
             else:
                 metadata["type"] = "float"
 
-        metadata.setdefault("group", "Debug")
+        if key.startswith("keyboard_"):
+            metadata.setdefault("group", "Keyboard")
+        else:
+            metadata.setdefault("group", "Debug")
         metadata.setdefault("label", key.replace("_", " ").title())
         metadata.setdefault("nullable", default_value is None)
         return metadata

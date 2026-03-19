@@ -6,6 +6,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush
 from PySide6.QtWidgets import QWidget
 
+from backend.gestures.keyboard_mode.KeyboardThemes import KeyboardThemeRegistry
+
 
 class ProductionKeyboardWindow(QWidget):
     def __init__(self):
@@ -69,6 +71,7 @@ class ProductionKeyboardWindow(QWidget):
         return (pad_left, pad_top, width, height)
 
     def _draw_lock_icon(self, painter: QPainter, locked: bool):
+        palette = KeyboardThemeRegistry.get(self._overlay_data.get("theme_id", "dark"))
         badge_d = 32.0
         radius = badge_d / 2.0
         body_x, body_y, body_w, _ = self._content_rect
@@ -83,11 +86,11 @@ class ProductionKeyboardWindow(QWidget):
 
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(QColor(0, 0, 0, 82)))
+        painter.setBrush(QBrush(QColor(*palette.badge_shadow)))
         painter.drawEllipse(int(bx) + 1, int(by) + 2, int(badge_d), int(badge_d))
 
-        painter.setPen(QPen(QColor(105, 118, 137, 230), 1.4))
-        painter.setBrush(QBrush(QColor(218, 225, 236, 242)))
+        painter.setPen(QPen(QColor(*palette.badge_edge), 1.4))
+        painter.setBrush(QBrush(QColor(*palette.badge_fill)))
         painter.drawEllipse(int(bx), int(by), int(badge_d), int(badge_d))
 
         body_w = int(badge_d * 0.42)
@@ -99,8 +102,8 @@ class ProductionKeyboardWindow(QWidget):
         shackle_x = int(cx - (shackle_w / 2.0))
         shackle_y = int(body_y - (body_h * 0.92))
 
-        shackle_color = QColor(72, 83, 98, 255) if locked else QColor(56, 130, 182, 255)
-        body_color = QColor(74, 84, 100, 248) if locked else QColor(54, 120, 170, 248)
+        shackle_color = QColor(*(palette.lock_shackle_locked if locked else palette.lock_shackle_unlocked))
+        body_color = QColor(*(palette.lock_body_locked if locked else palette.lock_body_unlocked))
         painter.setPen(QPen(shackle_color, 2.0))
         painter.setBrush(Qt.NoBrush)
         if locked:
@@ -121,10 +124,11 @@ class ProductionKeyboardWindow(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         self._content_rect = self._compute_content_rect()
         body_x, body_y, body_w, body_h = self._content_rect
+        palette = KeyboardThemeRegistry.get(self._overlay_data.get("theme_id", "dark"))
 
         # Keyboard body
-        bg = QColor(24, 28, 34, 220)
-        border = QColor(150, 160, 175, 190)
+        bg = QColor(*palette.keyboard_body_fill)
+        border = QColor(*palette.keyboard_body_edge)
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(border, 1.5))
         painter.drawRoundedRect(int(body_x), int(body_y), int(body_w), int(body_h), 14, 14)
@@ -147,14 +151,14 @@ class ProductionKeyboardWindow(QWidget):
 
             key_id = str(key.get("id", ""))
             if key_id in pressed:
-                fill = QColor(45, 142, 64, 210)
-                edge = QColor(155, 255, 170, 230)
+                fill = QColor(*palette.key_pressed_fill)
+                edge = QColor(*palette.key_pressed_edge)
             elif key_id in hovered:
-                fill = QColor(45, 116, 168, 220)
-                edge = QColor(120, 240, 255, 230)
+                fill = QColor(*palette.key_hover_fill)
+                edge = QColor(*palette.key_hover_edge)
             else:
-                fill = QColor(57, 63, 76, 210)
-                edge = QColor(190, 198, 212, 170)
+                fill = QColor(*palette.key_fill)
+                edge = QColor(*palette.key_edge)
 
             painter.setBrush(QBrush(fill))
             painter.setPen(QPen(edge, 1.3))
@@ -162,7 +166,7 @@ class ProductionKeyboardWindow(QWidget):
 
             label = str(key.get("label", ""))
             if label:
-                painter.setPen(QPen(QColor(240, 244, 250), 1))
+                painter.setPen(QPen(QColor(*palette.key_label), 1))
                 painter.drawText(
                     int(x1),
                     int(y1),
@@ -189,12 +193,12 @@ class ProductionKeyboardWindow(QWidget):
                 continue
 
             hovered_chip = bool(chip.get("hovered", False))
-            fill = QColor(58, 94, 147, 220) if hovered_chip else QColor(64, 69, 84, 220)
-            edge = QColor(98, 247, 255, 220) if hovered_chip else QColor(190, 198, 212, 170)
+            fill = QColor(*(palette.suggestion_hover_fill if hovered_chip else palette.suggestion_fill))
+            edge = QColor(*(palette.suggestion_hover_edge if hovered_chip else palette.suggestion_edge))
             painter.setBrush(QBrush(fill))
             painter.setPen(QPen(edge, 1.2))
             painter.drawRoundedRect(int(x1), int(y1), int(x2 - x1), int(y2 - y1), 7, 7)
-            painter.setPen(QPen(QColor(245, 248, 255), 1))
+            painter.setPen(QPen(QColor(*palette.suggestion_label), 1))
             painter.drawText(int(x1), int(y1), int(x2 - x1), int(y2 - y1), int(Qt.AlignCenter), text)
 
         swipe_points = self._overlay_data.get("swipe_path_points", [])
@@ -206,7 +210,7 @@ class ProductionKeyboardWindow(QWidget):
             local_pts.append(lp)
 
         if len(local_pts) >= 2:
-            painter.setPen(QPen(QColor(0, 230, 255, 220), 2.2))
+            painter.setPen(QPen(QColor(*palette.swipe_path), 2.2))
             for idx in range(1, len(local_pts)):
                 x1, y1 = local_pts[idx - 1]
                 x2, y2 = local_pts[idx]
@@ -216,8 +220,8 @@ class ProductionKeyboardWindow(QWidget):
         if isinstance(hover_point, dict):
             hp = self._to_local(float(hover_point.get("x", 0.0)), float(hover_point.get("y", 0.0)))
             if hp is not None:
-                painter.setBrush(QBrush(QColor(255, 236, 84, 240)))
-                painter.setPen(QPen(QColor(30, 30, 30, 220), 1.2))
+                painter.setBrush(QBrush(QColor(*palette.hover_point_fill)))
+                painter.setPen(QPen(QColor(*palette.hover_point_edge), 1.2))
                 painter.drawEllipse(int(hp[0]) - 4, int(hp[1]) - 4, 8, 8)
 
         self._draw_lock_icon(painter, bool(self._overlay_data.get("prod_window_locked", True)))
