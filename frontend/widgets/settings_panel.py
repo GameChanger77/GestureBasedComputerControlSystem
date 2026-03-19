@@ -203,10 +203,14 @@ class SettingsPanel(QWidget):
         options = []
         if provider_name == "camera_options":
             options = build_camera_options()
+        else:
+            options = list(metadata.get("options", []) or [])
         control["options"] = options
 
         for option in options:
-            combo.addItem(option["label"], option["index"])
+            option_label = str(option.get("label", option.get("value", "")))
+            option_value = option.get("index") if provider_name == "camera_options" else option.get("value")
+            combo.addItem(option_label, option_value)
             item_index = combo.count() - 1
             combo.setItemData(item_index, option, self.CAMERA_OPTION_ROLE)
 
@@ -225,6 +229,16 @@ class SettingsPanel(QWidget):
             return -1
 
         if not saved_values:
+            return 0
+
+        provider_name = control["metadata"].get("options_provider")
+        if provider_name != "camera_options":
+            key = control["key"]
+            saved_value = saved_values.get(key)
+            for item_index in range(combo.count()):
+                option_value = combo.itemData(item_index)
+                if option_value == saved_value:
+                    return item_index
             return 0
 
         key = control["key"]
@@ -301,10 +315,14 @@ class SettingsPanel(QWidget):
 
             if control_type == "choice":
                 combo_value = control["combo"].currentData()
-                values[key] = int(combo_value) if combo_value is not None else 0
+                provider_name = control["metadata"].get("options_provider")
+                if provider_name == "camera_options":
+                    values[key] = int(combo_value) if combo_value is not None else 0
+                else:
+                    values[key] = combo_value
 
                 selected_option = control["combo"].currentData(self.CAMERA_OPTION_ROLE) or {}
-                if key == "camera_index":
+                if provider_name == "camera_options" and key == "camera_index":
                     values["camera_backend"] = int(selected_option.get("backend", 0) or 0)
                     values["camera_device_path"] = str(selected_option.get("path", "") or "")
                     values["camera_device_name"] = str(selected_option.get("name", "") or "")
