@@ -12,6 +12,7 @@ from frontend.production_keyboard_window import ProductionKeyboardWindow
 from frontend.widgets.stats_widget import PerformanceStatsWidget
 from frontend.widgets.settings_panel import SettingsPanel
 from backend.camera_devices import resolve_camera_selection
+from backend.gestures.keyboard_mode.KeyboardThemes import KeyboardThemeRegistry
 
 
 class MainWindow(QMainWindow):
@@ -260,6 +261,11 @@ class MainWindow(QMainWindow):
                 signal.disconnect(slot)
             except (TypeError, RuntimeError):
                 pass
+
+    def _is_current_tracker_signal(self):
+        """Ignore queued signals from trackers that have already been replaced."""
+        sender = self.sender()
+        return sender is None or sender is self.hand_tracker
 
     def _set_start_button_running(self, running: bool):
         """Update start/stop button text and color."""
@@ -623,6 +629,9 @@ class MainWindow(QMainWindow):
         old_action = self.action
         old_strategizer = self.strategizer
 
+        if old_tracker:
+            self._disconnect_tracker_signals(old_tracker)
+
         if old_tracker and old_tracker.isRunning():
             old_tracker.stop_tracking()
 
@@ -747,6 +756,12 @@ class MainWindow(QMainWindow):
         if overlay_data is None:
             return image
 
+        palette = KeyboardThemeRegistry.get(overlay_data.get("theme_id", "dark"))
+
+        def cv_color(color):
+            r, g, b = color[:3]
+            return (int(b), int(g), int(r))
+
         height, width, _ = image.shape
         hovered = set(overlay_data.get("hovered_keys", []))
         pressed = set(overlay_data.get("pressed_keys", []))
@@ -759,16 +774,16 @@ class MainWindow(QMainWindow):
             x2 = int(max(0, min(width - 1, (key["x"] + key["w"]) * width)))
             y2 = int(max(0, min(height - 1, (key["y"] + key["h"]) * height)))
 
-            border_color = (230, 230, 230)
-            fill_color = (80, 80, 80)
+            border_color = cv_color(palette.key_edge)
+            fill_color = cv_color(palette.key_fill)
             thickness = 2
             if key["id"] in hovered:
-                border_color = (10, 245, 255)
-                fill_color = (40, 140, 210)
+                border_color = cv_color(palette.key_hover_edge)
+                fill_color = cv_color(palette.key_hover_fill)
                 thickness = 3
             if key["id"] in pressed:
-                border_color = (110, 255, 110)
-                fill_color = (35, 170, 35)
+                border_color = cv_color(palette.key_pressed_edge)
+                fill_color = cv_color(palette.key_pressed_fill)
                 thickness = 3
 
             if x2 > x1 and y2 > y1:
@@ -799,7 +814,7 @@ class MainWindow(QMainWindow):
                 (tx, ty),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 font_scale,
-                (0, 0, 0),
+                cv_color(palette.key_label_shadow),
                 text_thickness + 1,
                 cv2.LINE_AA,
             )
@@ -809,7 +824,7 @@ class MainWindow(QMainWindow):
                 (tx, ty),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 font_scale,
-                (245, 245, 245),
+                cv_color(palette.key_label),
                 text_thickness,
                 cv2.LINE_AA,
             )
@@ -828,8 +843,8 @@ class MainWindow(QMainWindow):
                     continue
 
                 hovered_chip = bool(chip.get("hovered", False))
-                fill_color = (55, 95, 155) if hovered_chip else (60, 60, 60)
-                border_color = (80, 250, 255) if hovered_chip else (215, 215, 215)
+                fill_color = cv_color(palette.suggestion_hover_fill if hovered_chip else palette.suggestion_fill)
+                border_color = cv_color(palette.suggestion_hover_edge if hovered_chip else palette.suggestion_edge)
                 cv2.rectangle(image, (x1, y1), (x2, y2), fill_color, -1)
                 cv2.rectangle(image, (x1, y1), (x2, y2), border_color, 2)
 
@@ -846,7 +861,7 @@ class MainWindow(QMainWindow):
                     (tx, ty),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     font_scale,
-                    (0, 0, 0),
+                    cv_color(palette.suggestion_label_shadow),
                     text_thickness + 1,
                     cv2.LINE_AA,
                 )
@@ -856,7 +871,7 @@ class MainWindow(QMainWindow):
                     (tx, ty),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     font_scale,
-                    (250, 250, 250),
+                    cv_color(palette.suggestion_label),
                     text_thickness,
                     cv2.LINE_AA,
                 )
@@ -870,7 +885,7 @@ class MainWindow(QMainWindow):
                 if x2 <= x1 or y2 <= y1:
                     continue
 
-                cv2.rectangle(image, (x1, y1), (x2, y2), (255, 80, 255), 2)
+                cv2.rectangle(image, (x1, y1), (x2, y2), cv_color(palette.debug_bounds), 2)
                 label = f"{bound.get('side', '?')} drag"
                 cv2.putText(
                     image,
@@ -878,7 +893,7 @@ class MainWindow(QMainWindow):
                     (x1 + 3, max(12, y1 - 5)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.45,
-                    (255, 80, 255),
+                    cv_color(palette.debug_bounds),
                     1,
                     cv2.LINE_AA,
                 )
@@ -899,8 +914,20 @@ class MainWindow(QMainWindow):
                     panel_y = 58
                     panel_w = 210
                     panel_h = 28 + (20 * len(hud_lines))
-                    cv2.rectangle(image, (panel_x, panel_y), (panel_x + panel_w, panel_y + panel_h), (30, 30, 30), -1)
-                    cv2.rectangle(image, (panel_x, panel_y), (panel_x + panel_w, panel_y + panel_h), (110, 255, 255), 1)
+                    cv2.rectangle(
+                        image,
+                        (panel_x, panel_y),
+                        (panel_x + panel_w, panel_y + panel_h),
+                        cv_color(palette.debug_panel_fill),
+                        -1,
+                    )
+                    cv2.rectangle(
+                        image,
+                        (panel_x, panel_y),
+                        (panel_x + panel_w, panel_y + panel_h),
+                        cv_color(palette.debug_panel_edge),
+                        1,
+                    )
                     for idx, line in enumerate(hud_lines):
                         cv2.putText(
                             image,
@@ -908,7 +935,7 @@ class MainWindow(QMainWindow):
                             (panel_x + 8, panel_y + 22 + (idx * 20)),
                             cv2.FONT_HERSHEY_SIMPLEX,
                             0.50,
-                            (235, 235, 235),
+                            cv_color(palette.debug_panel_text),
                             1,
                             cv2.LINE_AA,
                         )
@@ -922,16 +949,16 @@ class MainWindow(QMainWindow):
                 pts.append((px, py))
             if len(pts) >= 2:
                 for i in range(1, len(pts)):
-                    cv2.line(image, pts[i - 1], pts[i], (0, 215, 255), 2, cv2.LINE_AA)
+                    cv2.line(image, pts[i - 1], pts[i], cv_color(palette.swipe_path), 2, cv2.LINE_AA)
             if pts:
-                cv2.circle(image, pts[-1], 4, (0, 255, 255), -1)
+                cv2.circle(image, pts[-1], 4, cv_color(palette.swipe_path), -1)
 
         hover_point = overlay_data.get("hover_point")
         if isinstance(hover_point, dict):
             hx = int(max(0, min(width - 1, float(hover_point.get("x", 0.0)) * width)))
             hy = int(max(0, min(height - 1, float(hover_point.get("y", 0.0)) * height)))
-            cv2.circle(image, (hx, hy), 5, (0, 0, 0), -1, cv2.LINE_AA)
-            cv2.circle(image, (hx, hy), 4, (90, 255, 255), -1, cv2.LINE_AA)
+            cv2.circle(image, (hx, hy), 5, cv_color(palette.hover_point_edge), -1, cv2.LINE_AA)
+            cv2.circle(image, (hx, hy), 4, cv_color(palette.hover_point_fill), -1, cv2.LINE_AA)
 
         status = overlay_data.get("status", "")
         if status:
@@ -966,12 +993,17 @@ class MainWindow(QMainWindow):
     @Slot()
     def on_tracking_started(self):
         """Handle tracking started signal"""
+        if not self._is_current_tracker_signal():
+            return
+        self._set_start_button_running(True)
         self._set_status_text("Status: Running")
         self._update_mode_label()
 
     @Slot()
     def on_tracking_stopped(self):
         """Handle tracking stopped signal"""
+        if not self._is_current_tracker_signal():
+            return
         self._set_status_text("Status: Stopped")
         self._set_start_button_running(False)
         if self.video_widget:
@@ -983,6 +1015,8 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def on_tracking_error(self, error_message):
         """Handle tracking error signal"""
+        if not self._is_current_tracker_signal():
+            return
         self._set_start_button_running(False)
         self._set_status_text(f"Status: Error - {error_message}")
         if self.production_keyboard_window:
