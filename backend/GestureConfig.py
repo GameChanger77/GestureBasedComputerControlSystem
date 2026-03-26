@@ -121,6 +121,10 @@ class GestureConfig:
         "keyboard_swipe_release_pinch_threshold": 0.40,
         "keyboard_swipe_release_pending_frames": 2,
         "keyboard_swipe_tracking_grace_frames": 8,
+        "keyboard_flick_selection_window_seconds": 3.0,
+        "keyboard_flick_min_displacement": 0.075,
+        "keyboard_flick_min_speed": 0.25,
+        "keyboard_flick_dominance_ratio": 1.2,
 
         # Mouse move action throttling (reduces system-call churn)
         "mouse_move_min_delta_px": 2,  # Minimum pixel delta before sending cursor update
