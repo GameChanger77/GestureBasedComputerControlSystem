@@ -9,36 +9,6 @@
 winget install --id=astral-sh.uv -e
 ```
 
-## Linux Camera Tuning (optional, for lower capture latency)
-Install camera utilities:
-```bash
-sudo apt install v4l-utils
-```
-
-Inspect camera devices and supported formats:
-```bash
-v4l2-ctl --list-devices
-v4l2-ctl -d /dev/video0 --list-formats-ext
-```
-
-Try low-latency capture settings (prefer MJPG):
-```bash
-v4l2-ctl -d /dev/video0 --set-fmt-video=width=640,height=480,pixelformat=MJPG
-v4l2-ctl -d /dev/video0 --set-parm=30
-```
-
-Optional manual exposure tuning:
-```bash
-v4l2-ctl -d /dev/video0 -c exposure_auto=1
-v4l2-ctl -d /dev/video0 -c exposure_absolute=200
-```
-
-Reset to common defaults:
-```bash
-v4l2-ctl -d /dev/video0 -c exposure_auto=3
-v4l2-ctl -d /dev/video0 --set-fmt-video=width=640,height=480,pixelformat=YUYV
-```
-
 ## Install dependencies
 Run this from the repository root:
 ```powershell
@@ -77,6 +47,18 @@ uv run python --version
 ```
 Expected output starts with `Python 3.11`.
 
+## Controls
+- **Start Tracking**: Begin hand detection and gesture recognition
+- **Stop Tracking**: Pause gesture recognition
+- **Hide Preview**: Continue tracking in background (lower CPU usage)
+
+## Tips
+- Increase `finger_extension_angle` for more relaxed detection (easier to trigger)
+- Increase `pinch_threshold` for easier click detection (may cause accidental clicks)
+- Increase `*_pending_frames` to prevent accidental gesture triggers (less responsive)
+- Increase `scroll_sensitivity` for faster scrolling
+- Increase `screen_safe_margin` to prevent cursor from sticking to edges
+
 ## Camera permission
 If prompted by your OS, allow camera access for Python/terminal.
 
@@ -85,46 +67,77 @@ If prompted by your OS, allow camera access for Python/terminal.
 2. Commit and push all related changes to that branch with clear, descriptive commit messages.
 3. Open a pull request from your task branch into `dev` (not `main`).
 4. Keep `main` for final deliverables/production. After work is merged into `dev` and validated, merge to `main` later.
-**Current Implementations**:
+## **Current Implementations**:
+
+### Mouse Mode Gestures
 
 1. **MoveMouseGesture** (`backend/gestures/mouse_mode/MoveMouseGesture.py`)
-   - Trigger: Only index finger extended (others curled)
-   - Action: Move cursor to index fingertip position every frame
-   - Priority: 1 (lowest - can be overridden by other gestures)
-   - Update rate: 30 FPS (matches camera framerate)
+   - Trigger: Only the right index finger is extended (other non-thumb fingers curled)
+   - Action: Moves the cursor to the right index fingertip position
+   - Priority: 1 (lowest, so other gestures can override it)
+   - Notes: Movement is throttled by minimum pixel delta and cadence settings
 
 2. **ScrollGesture** (`backend/gestures/mouse_mode/ScrollGesture.py`)
-   - Trigger: Index + middle fingers extended (ring + pinky curled)
-   - Action: Scroll based on vertical finger movement delta
+   - Trigger: Only the right index and middle fingers are extended (ring + pinky curled)
+   - Action: Scrolls vertically based on frame-to-frame vertical movement of the two fingertips
    - Priority: 5 (medium)
-   - Tracks frame-to-frame position changes for scroll amount
 
-**State Machine Class**: `GestureStateMachine` in `backend/gestures/GestureStateMachine.py` (lines 20-122)
+3. **LeftClickGesture** (`backend/gestures/mouse_mode/LeftClickGesture.py`)
+   - Trigger: Right thumb + middle finger pinch
+   - Action: Performs a left click at the index fingertip cursor position
+   - Priority: 10 (high)
+   - Notes: A quick pinch-release performs a single click; holding the pinch for about 1 second performs a double-click
+
+4. **RightClickGesture** (`backend/gestures/mouse_mode/RightClickGesture.py`)
+   - Trigger: Right thumb + ring finger pinch
+   - Action: Performs a right click at the index fingertip cursor position
+   - Priority: 10 (high)
+   - Notes: Debounced to trigger once per pinch
+
+### Keyboard Mode Gestures
+
+1. **AirTypingGesture** (`backend/gestures/keyboard_mode/AirTypingGesture.py`)
+   - Trigger: Active whenever the system is in keyboard mode
+   - Action: Renders the keyboard overlay and uses the right index fingertip as the hover/trace point
+   - Priority: 15
+   - Implemented interactions:
+     - Right thumb + middle finger pinch starts a swipe trace across letter keys
+     - Releasing the pinch commits the best decoded swipe word
+     - Pinching and releasing on a single key taps that key directly
+     - Pinching modifier keys toggles them for the next key/chord
+     - Pinching special keys and suggestion chips activates them
+     - After a swipe, a short flick window lets the user choose alternate suggestions with a left, up, or right flick
+
+### Mode Switching
+
+1. **KeyboardModeEntryGesture** (`backend/gestures/switch_mode/KeyboardModeEntryGesture.py`)
+   - Trigger: Fully open right hand while currently in mouse mode
+   - Action: Switches from mouse mode to keyboard mode
+   - Priority: 20 (checked before mode-specific gestures)
+
+2. **KeyboardModeExitGesture** (`backend/gestures/switch_mode/KeyboardModeExitGesture.py`)
+   - Trigger: Strict right-hand fist while currently in keyboard mode
+   - Action: Switches from keyboard mode back to mouse mode
+   - Priority: 20 (checked before mode-specific gestures)
+
+**How to switch between modes**
+- The app starts in **MOUSE** mode by default
+- Open the right hand fully to enter **KEYBOARD** mode
+- Make a strict right-hand fist to return to **MOUSE** mode
+- `Strategizer` checks switch-mode gestures before the current mode's gesture list and enforces a short cooldown between mode switches
+
+**Built-in mode summary**
+- **Mouse mode**: `MoveMouseGesture`, `ScrollGesture`, `LeftClickGesture`, `RightClickGesture`
+- **Keyboard mode**: `AirTypingGesture`
+- **Universal mode switching**: `KeyboardModeEntryGesture`, `KeyboardModeExitGesture`
 
 ---
 
-### 3. Motion Gesture Recognition
+## Motion Gesture Recognition
 
 **Location**: `backend/gestures/GestureRecognizer.py` (lines 190-297)
 
 **Purpose**: Validates complete motion trajectories before triggering (swipes, circles, complex patterns)
-
-**State Diagram**:
-```
-            start pose      continuous motion
-IDLE -------------------> MOTION_START -------------------> MOTION_IN_PROGRESS
- ^                            |                                      |
- |                            | timeout                             |
- |                            v                                      |
- |                            +                                      |
- |                            |           timeout or invalid path    |
- |<---------------------------+--------------------------------------+
- |                                                                   |
- |                        validate pattern                          |
- +<---------------------- MOTION_COMPLETE <-------------------------+
-                                |
-                          execute action
-```
 
 **Key Features**:
 - **MotionTracker** (`backend/gestures/MotionTracker.py`) buffers positions for trajectory analysis
@@ -178,15 +191,15 @@ IDLE -------------------> MOTION_START -------------------> MOTION_IN_PROGRESS
 - Central coordinator for all gesture recognizers
 - Manages control modes: IDLE, MOUSE, KEYBOARD, HOTKEY
 - Priority-based conflict resolution
-- Mode switching logic (planned at line 139)
+- Universal mode-switch gesture handling
 - Dynamic gesture addition/removal
-- Current mode: MOUSE (4 active gestures)
+- Default startup mode: MOUSE
 
 **Priority Hierarchy**:
 ```
 Priority 10: LeftClickGesture, RightClickGesture
 Priority 5:  ScrollGesture
-Priority 1:  MoveMouseGesture (baseline - always available)
+Priority 1:  MoveMouseGesture
 ```
 
 **Conflict Resolution** (lines 147-159):
@@ -326,7 +339,7 @@ HandsData
     |-- Dual coordinate systems (wrist + camera)
     v
 Strategizer
-    |-- Check mode-switching gestures first (planned)
+    |-- Check mode-switching gestures first
     |-- Get current mode gesture recognizers
     |-- Sort by priority (highest first)
     v
@@ -471,49 +484,3 @@ def _initialize_switch_mode(self):
         # ... more mode switchers
     ]
 ```
-
-## Running the Application
-
-### Installation
-```bash
-# To install you must first have uv dependency manager (pip install uv)
-uv sync # install dependencies
-```
-
-### Running
-```bash
-uv run main.py
-```
-
-### Controls
-- **Start Tracking**: Begin hand detection and gesture recognition
-- **Stop Tracking**: Pause gesture recognition
-- **Hide Preview**: Continue tracking in background (lower CPU usage)
-
----
-
-## Configuration
-
-Edit `gesture_config.json` to customize behavior:
-
-```json
-{
-    "finger_extension_angle": 155.0,
-    "scroll_sensitivity": 100,
-    "pinch_threshold": 0.15,
-    "mouse_tracking_pending_frames": 1,
-    "click_pending_frames": 3,
-    "scroll_pending_frames": 2,
-    "ending_frames": 2,
-    "screen_safe_margin": 50,
-    "debug_mode": true
-}
-```
-
-**Tips**:
-- Increase `finger_extension_angle` for more relaxed detection (easier to trigger)
-- Increase `pinch_threshold` for easier click detection (may cause accidental clicks)
-- Increase `*_pending_frames` to prevent accidental gesture triggers (less responsive)
-- Increase `scroll_sensitivity` for faster scrolling
-- Increase `screen_safe_margin` to prevent cursor from sticking to edges
-
