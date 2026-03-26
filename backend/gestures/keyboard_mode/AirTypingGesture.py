@@ -10,6 +10,7 @@ from backend.gestures.GestureRecognizer import GestureRecognizer
 from backend.gestures.GestureUtils import are_fingers_pinched, get_pinch_distance
 from backend.gestures.keyboard_mode.DevOverlayKeyboardSurface import DevOverlayKeyboardSurface
 from backend.gestures.keyboard_mode.KeyboardLayoutHelper import KeyboardLayoutHelper
+from backend.gestures.keyboard_mode.KeyboardThemes import KeyboardThemeRegistry
 from backend.gestures.keyboard_mode.KeyboardSurfaceBase import HandFrame, KeyboardSurfaceBase
 from backend.gestures.keyboard_mode.ProdWindowKeyboardSurface import ProdWindowKeyboardSurface
 from backend.gestures.keyboard_mode.SwipeDecoder import SwipeDecoder
@@ -29,7 +30,6 @@ class AirTypingGesture(GestureRecognizer):
     _MODIFIER_FAMILY_TO_SLOTS = KeyboardLayoutHelper.MODIFIER_FAMILY_TO_SLOTS
     _MODIFIER_PRESS_ORDER = KeyboardLayoutHelper.MODIFIER_PRESS_ORDER
     _FN_KEY_TO_FUNCTION = KeyboardLayoutHelper.FN_KEY_TO_FUNCTION
-    _SHIFT_LABEL_BY_SLOT = KeyboardLayoutHelper.SHIFT_LABEL_BY_SLOT
     _SUGGESTION_CHIP_COUNT = KeyboardLayoutHelper.SUGGESTION_CHIP_COUNT
 
     def __init__(
@@ -135,8 +135,17 @@ class AirTypingGesture(GestureRecognizer):
         self._caps_lock_active = False
         self._overlay_bounds: Optional[Tuple[float, float, float, float]] = None
 
-        self._rows_unified = KeyboardLayoutHelper.build_unified_rows(self._meta_key_label)
+        self._keyboard_layout_id = str(self.config.get("keyboard_layout", "qwerty") or "qwerty").strip().lower()
+        self._keyboard_theme_id = KeyboardThemeRegistry.get(
+            str(self.config.get("keyboard_theme", "dark") or "dark")
+        ).theme_id
+        self._rows_unified = KeyboardLayoutHelper.build_unified_rows(
+            self._meta_key_label,
+            layout_id=self._keyboard_layout_id,
+        )
         self._slot_to_key = KeyboardLayoutHelper.build_slot_key_map(self._rows_unified)
+        self._shift_label_by_slot = KeyboardLayoutHelper.build_slot_shift_label_map(self._rows_unified)
+        self._swipe_token_by_slot = KeyboardLayoutHelper.build_slot_swipe_token_map(self._rows_unified)
 
         if keyboard_surface is not None:
             self._surface = keyboard_surface
@@ -348,13 +357,10 @@ class AirTypingGesture(GestureRecognizer):
     def _both_hands_present(self, hands_data: HandsData) -> bool:
         return hands_data.camera.has_left and hands_data.camera.has_right
 
-    @staticmethod
-    def _slot_id_to_letter(slot_id: Optional[str]) -> Optional[str]:
+    def _slot_id_to_swipe_token(self, slot_id: Optional[str]) -> Optional[str]:
         if not slot_id:
             return None
-        if len(slot_id) == 1 and slot_id.isalpha():
-            return slot_id.lower()
-        return None
+        return self._swipe_token_by_slot.get(str(slot_id))
 
     @classmethod
     def _modifier_family_for_slot(cls, slot_id: Optional[str]) -> Optional[str]:
@@ -516,9 +522,9 @@ class AirTypingGesture(GestureRecognizer):
         if not self._swipe_trace_slots or self._swipe_trace_slots[-1] != slot_id:
             self._swipe_trace_slots.append(slot_id)
 
-        letter = self._slot_id_to_letter(slot_id)
-        if letter and (not self._swipe_trace or self._swipe_trace[-1] != letter):
-            self._swipe_trace.append(letter)
+        swipe_token = self._slot_id_to_swipe_token(slot_id)
+        if swipe_token and (not self._swipe_trace or self._swipe_trace[-1] != swipe_token):
+            self._swipe_trace.append(swipe_token)
 
     def _emit_word(self, word: str) -> str:
         text = str(word)
@@ -761,7 +767,7 @@ class AirTypingGesture(GestureRecognizer):
                     self._special_key_pinch_latched = True
                 return
 
-            if slot_id and self._slot_id_to_letter(slot_id) is None:
+            if slot_id and self._slot_id_to_swipe_token(slot_id) is None:
                 if self._tap_slot_key(slot_id):
                     self._special_key_pinch_latched = True
                 return
@@ -967,17 +973,17 @@ class AirTypingGesture(GestureRecognizer):
                 if fn_key:
                     key_view["label"] = fn_key.upper()
             elif shift_active:
-                shifted = self._SHIFT_LABEL_BY_SLOT.get(slot_id)
+                shifted = key_view.get("shift_label") or self._shift_label_by_slot.get(slot_id)
                 if shifted:
-                    key_view["label"] = shifted
-                elif len(slot_id) == 1 and slot_id.isalpha():
-                    key_view["label"] = slot_id.upper()
+                    key_view["label"] = str(shifted)
             overlay_keys.append(key_view)
 
         overlay = {
             "enabled": True,
             "calibrated": not self._paused,
             "status": self._status,
+            "layout_id": self._keyboard_layout_id,
+            "theme_id": self._keyboard_theme_id,
             "keys": overlay_keys,
             "drag_bounds": drag_bounds,
             "hovered_keys": list(self._hovered_slots),
