@@ -1,0 +1,4 @@
+This editor asset pack is derived from "Hand Rig"
+(https://sketchfab.com/3d-models/hand-rig-a348cf6087eb4fd98a83b026593823ad)
+by CreativeMachine (https://sketchfab.com/CreativeMachine), licensed under CC-BY-4.0.
+Retain attribution when redistributing this asset or derivatives of it.
