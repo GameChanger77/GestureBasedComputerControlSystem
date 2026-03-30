@@ -2,6 +2,8 @@ from enum import Enum
 import time
 
 from backend.HandsData import HandsData
+from backend.gesture_remap.builtins import BuiltInGestureRegistry
+from backend.gesture_remap.override_store import GestureOverrideStore
 
 
 class ControlMode(Enum):
@@ -42,6 +44,7 @@ class Strategizer:
         self._sorted_hotkey_mode_gestures = []
         self._custom_gesture_instances = []
         self._last_mode_switch_ts = 0.0
+        self.gesture_override_store = GestureOverrideStore.from_config(config)
 
         # Initialize built-in mode-specific gestures before loading JSON rules.
         self._initialize_mouse_mode()
@@ -51,98 +54,19 @@ class Strategizer:
 
     def _initialize_mouse_mode(self):
         """Initialize gesture recognizers for mouse mode."""
-        from backend.gestures.mouse_mode.LeftClickGesture import LeftClickGesture
-        from backend.gestures.mouse_mode.MoveMouseGesture import MoveMouseGesture
-        from backend.gestures.mouse_mode.RightClickGesture import RightClickGesture
-        from backend.gestures.mouse_mode.ScrollGesture import ScrollGesture
-
-        finger_angle = self.config["finger_extension_angle"]
-        scroll_sens = self.config["scroll_sensitivity"]
-        pinch_thresh = self.config["pinch_threshold"]
-        mouse_pending = self.config["mouse_tracking_pending_frames"]
-        click_pending = self.config["click_pending_frames"]
-        scroll_pending = self.config["scroll_pending_frames"]
-        ending = self.config["ending_frames"]
-        mouse_min_delta_px = self.config.get("mouse_move_min_delta_px", 2)
-        mouse_cadence_ms = self.config.get("mouse_move_cadence_ms", 75)
-
         self.mouse_mode_gestures = [
-            LeftClickGesture(
-                self.action,
-                self.screen_width,
-                self.screen_height,
-                priority=10,
-                pinch_threshold=pinch_thresh,
-                extension_threshold=finger_angle,
-                pending_frames=click_pending,
-                ending_frames=ending,
-            ),
-            RightClickGesture(
-                self.action,
-                self.screen_width,
-                self.screen_height,
-                priority=10,
-                pinch_threshold=pinch_thresh,
-                extension_threshold=finger_angle,
-                pending_frames=click_pending,
-                ending_frames=ending,
-            ),
-            ScrollGesture(
-                self.action,
-                priority=5,
-                scroll_sensitivity=scroll_sens,
-                extension_threshold=finger_angle,
-                pending_frames=scroll_pending,
-                ending_frames=ending,
-            ),
-            MoveMouseGesture(
-                self.action,
-                self.screen_width,
-                self.screen_height,
-                priority=1,
-                extension_threshold=finger_angle,
-                pending_frames=mouse_pending,
-                ending_frames=ending,
-                min_delta_px=mouse_min_delta_px,
-                cadence_ms=mouse_cadence_ms,
-            ),
+            BuiltInGestureRegistry.build_runtime_gesture("left_click", self, self.gesture_override_store),
+            BuiltInGestureRegistry.build_runtime_gesture("right_click", self, self.gesture_override_store),
+            BuiltInGestureRegistry.build_runtime_gesture("scroll", self, self.gesture_override_store),
+            BuiltInGestureRegistry.build_runtime_gesture("mouse_move", self, self.gesture_override_store),
         ]
         self._rebuild_sorted_gestures(ControlMode.MOUSE)
 
     def _initialize_switch_mode(self):
         """Initialize gesture recognizers for switching from one mode to another."""
-        from backend.gestures.switch_mode.KeyboardModeEntryGesture import KeyboardModeEntryGesture
-        from backend.gestures.switch_mode.KeyboardModeExitGesture import KeyboardModeExitGesture
-
-        finger_angle = self.config["finger_extension_angle"]
-        entry_pending = self.config.get("keyboard_mode_entry_pending_frames", 6)
-        exit_pending = self.config.get("keyboard_mode_exit_pending_frames", 5)
-        exit_angle = self.config.get("keyboard_mode_exit_extension_angle", 150.0)
-        exit_max_openness = self.config.get("keyboard_mode_exit_max_openness", 0.16)
-        exit_max_extension = self.config.get("keyboard_mode_exit_max_extension_ratio", 0.90)
-        exit_max_avg_angle = self.config.get("keyboard_mode_exit_max_avg_finger_angle", 145.0)
-        ending = self.config["ending_frames"]
-
         self.switch_mode_gestures = [
-            KeyboardModeEntryGesture(
-                self.action,
-                strategizer=self,
-                priority=20,
-                extension_threshold=finger_angle,
-                pending_frames=entry_pending,
-                ending_frames=ending,
-            ),
-            KeyboardModeExitGesture(
-                self.action,
-                strategizer=self,
-                priority=20,
-                pending_frames=exit_pending,
-                ending_frames=ending,
-                extension_threshold=exit_angle,
-                max_openness=exit_max_openness,
-                max_extension_ratio=exit_max_extension,
-                max_avg_finger_angle=exit_max_avg_angle,
-            ),
+            BuiltInGestureRegistry.build_runtime_gesture("switch_to_keyboard", self, self.gesture_override_store),
+            BuiltInGestureRegistry.build_runtime_gesture("switch_to_mouse", self, self.gesture_override_store),
         ]
 
     def _initialize_keyboard_mode(self):

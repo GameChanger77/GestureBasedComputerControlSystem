@@ -17,12 +17,15 @@ from PySide6.QtWidgets import (
 
 from backend.GestureConfig import GestureConfig
 from backend.camera_devices import build_camera_options
+from backend.gesture_remap.override_store import GestureOverrideStore
+from frontend.widgets.gesture_settings_page import GestureSettingsPage
 
 
 class SettingsPanel(QWidget):
     """Generated settings editor for all gesture config keys."""
 
     settings_saved = Signal(dict)
+    gesture_overrides_changed = Signal()
     CAMERA_OPTION_ROLE = Qt.UserRole + 1
 
     def __init__(self, ui_mode="dev", parent=None):
@@ -48,9 +51,22 @@ class SettingsPanel(QWidget):
         self._page_stack = QStackedWidget()
         content_row.addWidget(self._page_stack, 1)
 
+        self._gesture_settings_page = GestureSettingsPage()
+        self._gesture_settings_page.overrides_changed.connect(self.gesture_overrides_changed)
+
         page_definitions = GestureConfig.get_page_definitions(ui_mode=self.ui_mode)
-        for page_name, groups in page_definitions.items():
+        ordered_page_names = list(page_definitions.keys())
+        if "Keyboard" in ordered_page_names:
+            ordered_page_names.insert(ordered_page_names.index("Keyboard") + 1, "Gestures")
+        else:
+            ordered_page_names.insert(0, "Gestures")
+
+        for page_name in ordered_page_names:
             self._submenu_list.addItem(page_name)
+            if page_name == "Gestures":
+                self._page_stack.addWidget(self._gesture_settings_page)
+                continue
+            groups = page_definitions[page_name]
             self._page_stack.addWidget(self._build_page_widget(groups))
 
         self._submenu_list.currentRowChanged.connect(self._page_stack.setCurrentIndex)
@@ -343,6 +359,7 @@ class SettingsPanel(QWidget):
     def load_from_config(self, config: GestureConfig):
         """Populate UI from GestureConfig."""
         self.load_values(config.config)
+        self._gesture_settings_page.set_override_store(GestureOverrideStore.from_config(config))
 
     def _on_save_clicked(self):
         self.settings_saved.emit(self.get_values())

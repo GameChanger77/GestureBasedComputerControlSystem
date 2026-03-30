@@ -99,6 +99,7 @@ class MainWindow(QMainWindow):
         # Settings panel
         self.settings_panel = SettingsPanel(ui_mode=self.ui_mode)
         self.settings_panel.settings_saved.connect(self.on_settings_saved)
+        self.settings_panel.gesture_overrides_changed.connect(self.on_gesture_overrides_changed)
 
         if self.is_dev_mode:
             self.page_stack = QStackedWidget()
@@ -617,6 +618,19 @@ class MainWindow(QMainWindow):
             self._set_status_text("Status: Restarting with new settings...")
         else:
             self._set_status_text("Status: Settings saved")
+        self.show_main_page()
+
+    @Slot()
+    def on_gesture_overrides_changed(self):
+        """Persisted gesture overrides changed; rebuild runtime recognizers."""
+        was_running = bool(self.hand_tracker and self.hand_tracker.isRunning())
+        rebuilt = self._rebuild_backend_components(restart_tracking=was_running)
+        if not rebuilt:
+            return
+        if was_running:
+            self._set_status_text("Status: Restarting with updated gestures...")
+        else:
+            self._set_status_text("Status: Gesture overrides saved")
         self.show_main_page()
 
     def _rebuild_backend_components(self, restart_tracking: bool):
