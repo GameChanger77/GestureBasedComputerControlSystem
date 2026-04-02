@@ -25,3 +25,6 @@ plans/
 /tools
 gesture_config.json
 gesture_overrides.json
+
+# Generated tutorial animation exports
+/frontend/assets/tutorial/*.json
