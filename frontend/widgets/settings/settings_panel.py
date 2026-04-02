@@ -1,4 +1,5 @@
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -6,9 +7,11 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QListWidget,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QStackedWidget,
     QVBoxLayout,
@@ -18,7 +21,17 @@ from PySide6.QtWidgets import (
 from backend.GestureConfig import GestureConfig
 from backend.camera_devices import build_camera_options
 from backend.gesture_remap.override_store import GestureOverrideStore
-from frontend.widgets.gesture_settings_page import GestureSettingsPage
+from backend.macros.macro_store import MacroStore
+from frontend.widgets.settings.gesture_settings_page import GestureSettingsPage
+from frontend.widgets.settings.macro_settings_page import MacroSettingsPage
+from frontend.widgets.settings.settings_theme import (
+    SettingsCard,
+    apply_settings_theme,
+    set_button_icon,
+    set_button_role,
+    set_label_role,
+    set_label_tone,
+)
 
 
 class SettingsPanel(QWidget):
@@ -37,37 +50,52 @@ class SettingsPanel(QWidget):
     def _create_ui(self):
         root_layout = QVBoxLayout()
         root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(8)
+        root_layout.setSpacing(16)
 
         content_row = QHBoxLayout()
         content_row.setContentsMargins(0, 0, 0, 0)
-        content_row.setSpacing(10)
+        content_row.setSpacing(16)
 
+        nav_card = SettingsCard(surface="panel")
         self._submenu_list = QListWidget()
+        self._submenu_list.setObjectName("settingsNavList")
         self._submenu_list.setMinimumWidth(180)
-        self._submenu_list.setMaximumWidth(220)
-        content_row.addWidget(self._submenu_list)
+        self._submenu_list.setMaximumWidth(240)
+        nav_title = QLabel("Settings Sections")
+        set_label_role(nav_title, "section-title")
+        set_label_tone(nav_title, "muted")
+        nav_card.body_layout.addWidget(nav_title)
+        nav_card.body_layout.addWidget(self._submenu_list, 1)
+        content_row.addWidget(nav_card, 0)
 
+        stack_card = SettingsCard(surface="panel")
         self._page_stack = QStackedWidget()
-        content_row.addWidget(self._page_stack, 1)
+        stack_card.body_layout.addWidget(self._page_stack, 1)
+        content_row.addWidget(stack_card, 1)
 
         self._gesture_settings_page = GestureSettingsPage()
         self._gesture_settings_page.overrides_changed.connect(self.gesture_overrides_changed)
+        self._macro_settings_page = MacroSettingsPage()
 
         page_definitions = GestureConfig.get_page_definitions(ui_mode=self.ui_mode)
         ordered_page_names = list(page_definitions.keys())
         if "Keyboard" in ordered_page_names:
             ordered_page_names.insert(ordered_page_names.index("Keyboard") + 1, "Gestures")
+            ordered_page_names.insert(ordered_page_names.index("Gestures") + 1, "Macros")
         else:
             ordered_page_names.insert(0, "Gestures")
+            ordered_page_names.insert(1, "Macros")
 
         for page_name in ordered_page_names:
             self._submenu_list.addItem(page_name)
             if page_name == "Gestures":
                 self._page_stack.addWidget(self._gesture_settings_page)
                 continue
+            if page_name == "Macros":
+                self._page_stack.addWidget(self._macro_settings_page)
+                continue
             groups = page_definitions[page_name]
-            self._page_stack.addWidget(self._build_page_widget(groups))
+            self._page_stack.addWidget(self._build_page_widget(page_name, groups))
 
         self._submenu_list.currentRowChanged.connect(self._page_stack.setCurrentIndex)
         if self._submenu_list.count() > 0:
@@ -75,43 +103,70 @@ class SettingsPanel(QWidget):
 
         root_layout.addLayout(content_row)
 
+        footer_card = SettingsCard(surface="panel")
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 0, 0, 0)
         button_row.setSpacing(8)
+        footer_card.body_layout.addLayout(button_row)
 
         self.save_button = QPushButton("Save Settings")
         self.save_button.clicked.connect(self._on_save_clicked)
+        set_button_role(self.save_button, "primary")
+        set_button_icon(self.save_button, "save")
         button_row.addWidget(self.save_button)
 
         self.reset_button = QPushButton("Reset to Defaults")
         self.reset_button.clicked.connect(self._on_reset_clicked)
+        set_button_role(self.reset_button, "secondary")
+        set_button_icon(self.reset_button, "reset")
         button_row.addWidget(self.reset_button)
 
         button_row.addStretch()
-        root_layout.addLayout(button_row)
+        root_layout.addWidget(footer_card)
         self.setLayout(root_layout)
+        apply_settings_theme(self)
 
-    def _build_page_widget(self, groups):
+    def _build_page_widget(self, page_name, groups):
         """Build a scrollable settings page with grouped controls."""
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
 
         container = QWidget()
         container_layout = QVBoxLayout()
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(10)
+        container_layout.setContentsMargins(2, 2, 2, 2)
+        container_layout.setSpacing(14)
+
+        header_card = SettingsCard(surface="subtle-card")
+        title_label = QLabel(page_name)
+        set_label_role(title_label, "page-title")
+        description_label = QLabel(f"Adjust {page_name.lower()} configuration for the current profile.")
+        set_label_tone(description_label, "muted")
+        description_label.setWordWrap(True)
+        header_card.body_layout.addWidget(title_label)
+        header_card.body_layout.addWidget(description_label)
+        container_layout.addWidget(header_card)
 
         for group_name, keys in groups.items():
             group_box = QGroupBox(group_name)
             group_layout = QFormLayout()
-            group_layout.setContentsMargins(8, 8, 8, 8)
-            group_layout.setSpacing(6)
+            group_layout.setContentsMargins(12, 12, 12, 12)
+            group_layout.setSpacing(10)
+            group_layout.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            group_layout.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+            group_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+            group_layout.setHorizontalSpacing(18)
+
+            label_width = self._label_column_width(keys)
 
             for key in keys:
                 metadata = GestureConfig.get_field_metadata(key)
                 control = self._build_control(key, metadata)
                 self._field_controls[key] = control
-                group_layout.addRow(metadata["label"], control["widget"])
+                label = QLabel(metadata["label"])
+                label.setProperty("settingsFormLabel", True)
+                label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                label.setFixedWidth(label_width)
+                group_layout.addRow(label, control["widget"])
 
             group_box.setLayout(group_layout)
             container_layout.addWidget(group_box)
@@ -121,12 +176,21 @@ class SettingsPanel(QWidget):
         scroll_area.setWidget(container)
         return scroll_area
 
+    def _label_column_width(self, keys):
+        metrics = QFontMetrics(self.font())
+        max_width = 0
+        for key in keys:
+            label = str(GestureConfig.get_field_metadata(key).get("label", ""))
+            max_width = max(max_width, metrics.horizontalAdvance(label))
+        return max(170, max_width + 14)
+
     def _build_control(self, key, metadata):
         control_type = metadata.get("type")
         nullable = bool(metadata.get("nullable", False))
 
         if control_type == "choice":
             combo = QComboBox()
+            combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             control = {
                 "widget": combo,
                 "type": "choice",
@@ -140,6 +204,7 @@ class SettingsPanel(QWidget):
 
         if control_type == "bool":
             checkbox = QCheckBox()
+            checkbox.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             return {
                 "widget": checkbox,
                 "type": "bool",
@@ -174,6 +239,7 @@ class SettingsPanel(QWidget):
         spinbox = QSpinBox()
         spinbox.setRange(int(metadata.get("min", -1_000_000)), int(metadata.get("max", 1_000_000)))
         spinbox.setSingleStep(int(metadata.get("step", 1)))
+        spinbox.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return spinbox
 
     def _create_float_spinbox(self, metadata):
@@ -181,10 +247,12 @@ class SettingsPanel(QWidget):
         spinbox.setRange(float(metadata.get("min", -1_000_000.0)), float(metadata.get("max", 1_000_000.0)))
         spinbox.setSingleStep(float(metadata.get("step", 0.1)))
         spinbox.setDecimals(int(metadata.get("decimals", 3)))
+        spinbox.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return spinbox
 
     def _wrap_nullable_numeric(self, spinbox, key, value_type):
         wrapper = QWidget()
+        wrapper.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
@@ -195,7 +263,7 @@ class SettingsPanel(QWidget):
         enabled_checkbox.toggled.connect(spinbox.setEnabled)
 
         layout.addWidget(enabled_checkbox)
-        layout.addWidget(spinbox)
+        layout.addWidget(spinbox, 1)
         wrapper.setLayout(layout)
 
         return {
@@ -359,7 +427,10 @@ class SettingsPanel(QWidget):
     def load_from_config(self, config: GestureConfig):
         """Populate UI from GestureConfig."""
         self.load_values(config.config)
+        self._gesture_settings_page.set_config(config)
         self._gesture_settings_page.set_override_store(GestureOverrideStore.from_config(config))
+        self._macro_settings_page.set_config(config)
+        self._macro_settings_page.set_macro_store(MacroStore.from_config(config))
 
     def _on_save_clicked(self):
         self.settings_saved.emit(self.get_values())

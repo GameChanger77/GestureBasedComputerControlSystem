@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 from backend.GestureConfig import GestureConfig
-from frontend.widgets.settings_panel import SettingsPanel
+from frontend.widgets.settings.settings_panel import SettingsPanel
 
 
 class SettingsPanelKeyboardOptionsTests(unittest.TestCase):

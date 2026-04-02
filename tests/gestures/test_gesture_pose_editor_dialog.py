@@ -7,7 +7,7 @@ import numpy as np
 from PySide6.QtWidgets import QApplication
 
 from backend.gesture_remap.builtins import BuiltInGestureRegistry
-from frontend.widgets.gesture_pose_editor_dialog import GesturePoseEditorDialog
+from frontend.widgets.editors.gesture_pose_editor_dialog import GesturePoseEditorDialog
 
 
 class GesturePoseEditorDialogTests(unittest.TestCase):

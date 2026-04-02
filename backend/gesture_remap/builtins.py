@@ -14,6 +14,15 @@ from backend.gesture_remap.recognizers import (
     TemplateRightClickGesture,
     TemplateScrollGesture,
 )
+from backend.gesture_remap.rule_overrides import GestureRuleOverride
+from backend.gesture_remap.rule_recognizers import (
+    RuleKeyboardModeEntryGesture,
+    RuleKeyboardModeExitGesture,
+    RuleLeftClickGesture,
+    RuleMoveMouseGesture,
+    RuleRightClickGesture,
+    RuleScrollGesture,
+)
 from backend.gestures.mouse_mode.LeftClickGesture import LeftClickGesture
 from backend.gestures.mouse_mode.MoveMouseGesture import MoveMouseGesture
 from backend.gestures.mouse_mode.RightClickGesture import RightClickGesture
@@ -32,13 +41,18 @@ class BuiltInGestureDefinition:
     default_description: str
     preview_pose_template: HandPoseTemplate
     saved_pose_template: HandPoseTemplate
+    default_rule_factory: Callable
     default_factory: Callable
     override_factory: Callable
+    rule_override_factory: Callable
     section: str
 
     @property
     def default_pose_template(self) -> HandPoseTemplate:
         return self.saved_pose_template
+
+    def build_default_rule_override(self, config_source) -> GestureRuleOverride:
+        return self.default_rule_factory(config_source)
 
 
 class BuiltInGestureRegistry:
@@ -99,6 +113,21 @@ class BuiltInGestureRegistry:
                 matcher_config=record.matcher_config,
             )
 
+        def mouse_move_rule_override(action, strategizer, record):
+            p = _mouse_common(strategizer)
+            return RuleMoveMouseGesture(
+                action,
+                p["screen_width"],
+                p["screen_height"],
+                priority=1,
+                extension_threshold=p["finger_angle"],
+                pending_frames=record.rule_override.pending_frames,
+                ending_frames=record.rule_override.ending_frames,
+                min_delta_px=p["mouse_min_delta_px"],
+                cadence_ms=p["mouse_cadence_ms"],
+                rule_override=record.rule_override,
+            )
+
         def left_click_default(action, strategizer):
             p = _mouse_common(strategizer)
             return LeftClickGesture(
@@ -125,6 +154,20 @@ class BuiltInGestureRegistry:
                 ending_frames=p["ending"],
                 pose_template=record.pose_template,
                 matcher_config=record.matcher_config,
+            )
+
+        def left_click_rule_override(action, strategizer, record):
+            p = _mouse_common(strategizer)
+            return RuleLeftClickGesture(
+                action,
+                p["screen_width"],
+                p["screen_height"],
+                priority=10,
+                pinch_threshold=p["pinch_thresh"],
+                extension_threshold=p["finger_angle"],
+                pending_frames=record.rule_override.pending_frames,
+                ending_frames=record.rule_override.ending_frames,
+                rule_override=record.rule_override,
             )
 
         def right_click_default(action, strategizer):
@@ -155,6 +198,20 @@ class BuiltInGestureRegistry:
                 matcher_config=record.matcher_config,
             )
 
+        def right_click_rule_override(action, strategizer, record):
+            p = _mouse_common(strategizer)
+            return RuleRightClickGesture(
+                action,
+                p["screen_width"],
+                p["screen_height"],
+                priority=10,
+                pinch_threshold=p["pinch_thresh"],
+                extension_threshold=p["finger_angle"],
+                pending_frames=record.rule_override.pending_frames,
+                ending_frames=record.rule_override.ending_frames,
+                rule_override=record.rule_override,
+            )
+
         def scroll_default(action, strategizer):
             p = _mouse_common(strategizer)
             return ScrollGesture(
@@ -177,6 +234,18 @@ class BuiltInGestureRegistry:
                 ending_frames=p["ending"],
                 pose_template=record.pose_template,
                 matcher_config=record.matcher_config,
+            )
+
+        def scroll_rule_override(action, strategizer, record):
+            p = _mouse_common(strategizer)
+            return RuleScrollGesture(
+                action,
+                priority=5,
+                scroll_sensitivity=p["scroll_sens"],
+                extension_threshold=p["finger_angle"],
+                pending_frames=record.rule_override.pending_frames,
+                ending_frames=record.rule_override.ending_frames,
+                rule_override=record.rule_override,
             )
 
         def switch_common(strategizer):
@@ -216,6 +285,18 @@ class BuiltInGestureRegistry:
                 matcher_config=record.matcher_config,
             )
 
+        def switch_to_keyboard_rule_override(action, strategizer, record):
+            p = switch_common(strategizer)
+            return RuleKeyboardModeEntryGesture(
+                action,
+                strategizer=strategizer,
+                priority=20,
+                extension_threshold=p["finger_angle"],
+                pending_frames=record.rule_override.pending_frames,
+                ending_frames=record.rule_override.ending_frames,
+                rule_override=record.rule_override,
+            )
+
         def switch_to_mouse_default(action, strategizer):
             p = switch_common(strategizer)
             return KeyboardModeExitGesture(
@@ -246,6 +327,105 @@ class BuiltInGestureRegistry:
                 matcher_config=record.matcher_config,
             )
 
+        def switch_to_mouse_rule_override(action, strategizer, record):
+            p = switch_common(strategizer)
+            return RuleKeyboardModeExitGesture(
+                action,
+                strategizer=strategizer,
+                priority=20,
+                pending_frames=record.rule_override.pending_frames,
+                ending_frames=record.rule_override.ending_frames,
+                extension_threshold=p["exit_angle"],
+                max_openness=p["exit_max_openness"],
+                max_extension_ratio=p["exit_max_extension"],
+                max_avg_finger_angle=p["exit_max_avg_angle"],
+                rule_override=record.rule_override,
+            )
+
+        def mouse_move_rule_defaults(config_source):
+            return GestureRuleOverride(
+                conditions=[
+                    {
+                        "op": "only_fingers_extended",
+                        "fingers": ["index"],
+                        "threshold_deg": float(config_source.get("finger_extension_angle", 155.0)),
+                    }
+                ],
+                pending_frames=int(config_source.get("mouse_tracking_pending_frames", 1)),
+                ending_frames=int(config_source.get("ending_frames", 2)),
+            )
+
+        def left_click_rule_defaults(config_source):
+            return GestureRuleOverride(
+                conditions=[
+                    {
+                        "op": "pinch_distance_lt",
+                        "a": "thumb.tip",
+                        "b": "middle.tip",
+                        "value": float(config_source.get("pinch_threshold", 0.30)),
+                        "space": "wrist",
+                    }
+                ],
+                pending_frames=int(config_source.get("click_pending_frames", 3)),
+                ending_frames=int(config_source.get("ending_frames", 2)),
+            )
+
+        def right_click_rule_defaults(config_source):
+            return GestureRuleOverride(
+                conditions=[
+                    {
+                        "op": "pinch_distance_lt",
+                        "a": "thumb.tip",
+                        "b": "ring.tip",
+                        "value": float(config_source.get("pinch_threshold", 0.30)),
+                        "space": "wrist",
+                    }
+                ],
+                pending_frames=int(config_source.get("click_pending_frames", 3)),
+                ending_frames=int(config_source.get("ending_frames", 2)),
+            )
+
+        def scroll_rule_defaults(config_source):
+            return GestureRuleOverride(
+                conditions=[
+                    {
+                        "op": "only_fingers_extended",
+                        "fingers": ["index", "middle"],
+                        "threshold_deg": float(config_source.get("finger_extension_angle", 155.0)),
+                    }
+                ],
+                pending_frames=int(config_source.get("scroll_pending_frames", 2)),
+                ending_frames=int(config_source.get("ending_frames", 2)),
+            )
+
+        def switch_to_keyboard_rule_defaults(config_source):
+            return GestureRuleOverride(
+                conditions=[
+                    {
+                        "op": "hand_fully_open",
+                        "extension_threshold": float(config_source.get("finger_extension_angle", 155.0)),
+                        "min_extended_fingers": 4,
+                        "openness_threshold": 0.08,
+                    }
+                ],
+                pending_frames=int(config_source.get("keyboard_mode_entry_pending_frames", 6)),
+                ending_frames=int(config_source.get("ending_frames", 2)),
+            )
+
+        def switch_to_mouse_rule_defaults(config_source):
+            return GestureRuleOverride(
+                conditions=[
+                    {
+                        "op": "strict_fist",
+                        "max_openness": float(config_source.get("keyboard_mode_exit_max_openness", 0.16)),
+                        "max_extension_ratio": float(config_source.get("keyboard_mode_exit_max_extension_ratio", 0.90)),
+                        "max_avg_finger_angle": float(config_source.get("keyboard_mode_exit_max_avg_finger_angle", 145.0)),
+                    }
+                ],
+                pending_frames=int(config_source.get("keyboard_mode_exit_pending_frames", 5)),
+                ending_frames=int(config_source.get("ending_frames", 2)),
+            )
+
         definitions = [
             BuiltInGestureDefinition(
                 id="mouse_move",
@@ -256,8 +436,10 @@ class BuiltInGestureRegistry:
                 default_description="Move the cursor while holding the mouse-move pose.",
                 preview_pose_template=preview_templates["mouse_move"],
                 saved_pose_template=templates["mouse_move"],
+                default_rule_factory=mouse_move_rule_defaults,
                 default_factory=mouse_move_default,
                 override_factory=mouse_move_override,
+                rule_override_factory=mouse_move_rule_override,
                 section="mouse",
             ),
             BuiltInGestureDefinition(
@@ -269,8 +451,10 @@ class BuiltInGestureRegistry:
                 default_description="Single click on pose enter, hold to trigger a double click.",
                 preview_pose_template=preview_templates["left_click"],
                 saved_pose_template=templates["left_click"],
+                default_rule_factory=left_click_rule_defaults,
                 default_factory=left_click_default,
                 override_factory=left_click_override,
+                rule_override_factory=left_click_rule_override,
                 section="mouse",
             ),
             BuiltInGestureDefinition(
@@ -282,8 +466,10 @@ class BuiltInGestureRegistry:
                 default_description="Right click once per pose enter.",
                 preview_pose_template=preview_templates["right_click"],
                 saved_pose_template=templates["right_click"],
+                default_rule_factory=right_click_rule_defaults,
                 default_factory=right_click_default,
                 override_factory=right_click_override,
+                rule_override_factory=right_click_rule_override,
                 section="mouse",
             ),
             BuiltInGestureDefinition(
@@ -295,8 +481,10 @@ class BuiltInGestureRegistry:
                 default_description="Scroll while holding the scroll pose and moving the hand vertically.",
                 preview_pose_template=preview_templates["scroll"],
                 saved_pose_template=templates["scroll"],
+                default_rule_factory=scroll_rule_defaults,
                 default_factory=scroll_default,
                 override_factory=scroll_override,
+                rule_override_factory=scroll_rule_override,
                 section="mouse",
             ),
             BuiltInGestureDefinition(
@@ -308,8 +496,10 @@ class BuiltInGestureRegistry:
                 default_description="Enter keyboard mode from mouse mode.",
                 preview_pose_template=preview_templates["switch_to_keyboard"],
                 saved_pose_template=templates["switch_to_keyboard"],
+                default_rule_factory=switch_to_keyboard_rule_defaults,
                 default_factory=switch_to_keyboard_default,
                 override_factory=switch_to_keyboard_override,
+                rule_override_factory=switch_to_keyboard_rule_override,
                 section="switch",
             ),
             BuiltInGestureDefinition(
@@ -321,8 +511,10 @@ class BuiltInGestureRegistry:
                 default_description="Exit keyboard mode back to mouse mode.",
                 preview_pose_template=preview_templates["switch_to_mouse"],
                 saved_pose_template=templates["switch_to_mouse"],
+                default_rule_factory=switch_to_mouse_rule_defaults,
                 default_factory=switch_to_mouse_default,
                 override_factory=switch_to_mouse_override,
+                rule_override_factory=switch_to_mouse_rule_override,
                 section="switch",
             ),
         ]
@@ -360,5 +552,8 @@ class BuiltInGestureRegistry:
         definition = cls.get(gesture_id)
         record = override_store.get(gesture_id) if override_store else None
         if record and record.enabled:
-            return definition.override_factory(strategizer.action, strategizer, record)
+            if record.is_rule_override and record.rule_override is not None:
+                return definition.rule_override_factory(strategizer.action, strategizer, record)
+            if record.is_point_override:
+                return definition.override_factory(strategizer.action, strategizer, record)
         return definition.default_factory(strategizer.action, strategizer)

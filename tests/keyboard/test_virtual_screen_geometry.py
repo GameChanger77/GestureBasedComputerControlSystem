@@ -61,7 +61,7 @@ class VirtualScreenGeometryTests(unittest.TestCase):
     def test_get_screen_geometry_uses_virtual_desktop_bounds(self):
         fake_screen = _FakeScreen(_FakeGeometry(-1920, 0, 3840, 1080))
 
-        with patch("main.QGuiApplication.primaryScreen", return_value=fake_screen):
+        with patch("PySide6.QtGui.QGuiApplication.primaryScreen", return_value=fake_screen):
             self.assertEqual(get_screen_geometry(), (-1920, 0, 3840, 1080))
 
     def test_action_offsets_mouse_position_by_virtual_origin(self):

@@ -1,14 +1,15 @@
 import argparse
+import os
 import signal
 import sys
-from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtCore import QTimer
+from pathlib import Path
 from paths import resource
 from backend.GestureConfig import GestureConfig
 
 
 def get_screen_geometry():
+    from PySide6.QtGui import QGuiApplication
+
     screen = QGuiApplication.primaryScreen()
     if screen:
         geometry = screen.virtualGeometry()
@@ -93,8 +94,23 @@ def create_backend_components(screen_width, screen_height, config_path, ui_mode,
     }
 
 
+def configure_qt_font_dir():
+    """Point Qt at the bundled font directory before QApplication starts."""
+    font_dir = Path(__file__).resolve().parent / "frontend" / "assets" / "fonts"
+    if font_dir.exists():
+        os.environ.setdefault("QT_QPA_FONTDIR", str(font_dir))
+
+
 def main():
     """Main application entry point"""
+    # Preload Action before importing PySide6. Action depends on pynput, and
+    # importing it after PySide6 can trigger startup-time import hook failures.
+    from backend.Action import Action as _ActionPreload
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
+    _ = _ActionPreload
+    configure_qt_font_dir()
     args = parse_args(sys.argv)
     effective_ui_mode = resolve_ui_mode(args)
 

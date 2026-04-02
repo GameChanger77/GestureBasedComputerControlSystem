@@ -5,6 +5,7 @@ from typing import Any, Dict
 from backend.custom_rules.ConditionEvaluator import ConditionEvaluator
 from backend.custom_rules.RuleGestures import RuleSnapshotGesture, RuleContinuousGesture
 from backend.custom_rules.MacroChainRecognizer import MacroChainRecognizer
+from backend.macros.macro_recognizers import PointMacroTriggerRecognizer, RuleMacroTriggerRecognizer
 
 
 class RuleCompiler:
@@ -122,4 +123,22 @@ class RuleCompiler:
             cooldown_ms=cooldown_ms,
             sequence_rules=macro_rule.get("sequence_rules", {}),
             name=macro_rule.get("name", macro_rule.get("id", "Macro")),
+        )
+
+    def compile_ui_macro(self, action, macro_record):
+        if macro_record.is_rule_trigger:
+            return RuleMacroTriggerRecognizer(
+                action,
+                name=macro_record.name,
+                trigger=macro_record.rule_trigger,
+                action_steps=macro_record.action_steps,
+            )
+
+        return PointMacroTriggerRecognizer(
+            action,
+            name=macro_record.name,
+            trigger=macro_record.point_trigger,
+            action_steps=macro_record.action_steps,
+            pending_frames=int(self.config.get("click_pending_frames", 3)),
+            ending_frames=int(self.config.get("ending_frames", 2)),
         )

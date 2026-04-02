@@ -2,6 +2,7 @@ from enum import Enum
 import time
 
 from backend.HandsData import HandsData
+from backend.macros.macro_store import MacroStore
 from backend.gesture_remap.builtins import BuiltInGestureRegistry
 from backend.gesture_remap.override_store import GestureOverrideStore
 
@@ -45,6 +46,7 @@ class Strategizer:
         self._custom_gesture_instances = []
         self._last_mode_switch_ts = 0.0
         self.gesture_override_store = GestureOverrideStore.from_config(config)
+        self.macro_store = MacroStore.from_config(config)
 
         # Initialize built-in mode-specific gestures before loading JSON rules.
         self._initialize_mouse_mode()
@@ -347,6 +349,25 @@ class Strategizer:
                 print(f"[OK] Loaded custom macro: {macro.get('id')} ({mode_str})")
             except Exception as exc:
                 print(f"[WARN] Skipped custom macro {macro.get('id')}: {exc}")
+
+        for macro_record in self.macro_store.list_records():
+            if not macro_record.enabled:
+                continue
+
+            if macro_record.mode == "mouse":
+                mode = ControlMode.MOUSE
+            elif macro_record.mode == "keyboard":
+                mode = ControlMode.KEYBOARD
+            else:
+                mode = ControlMode.HOTKEY
+
+            try:
+                recognizer = compiler.compile_ui_macro(self.action, macro_record)
+                self.add_custom_gesture(recognizer, mode=mode)
+                self._custom_gesture_instances.append(recognizer)
+                print(f"[OK] Loaded UI macro: {macro_record.name} ({macro_record.mode})")
+            except Exception as exc:
+                print(f"[WARN] Skipped UI macro {macro_record.name}: {exc}")
 
     def shutdown(self):
         """Reset all gestures and release held state before process/UI shutdown."""

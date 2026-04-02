@@ -7,6 +7,7 @@ import threading
 import time
 from collections import deque
 
+from backend.macros.macro_models import MacroActionStep
 from backend.gestures.keyboard_mode.KeyCodes import get_windows_vk, normalize_key
 from pynput.mouse import Controller as Mouse, Button
 from pynput.keyboard import Controller as Keyboard, Key
@@ -548,6 +549,52 @@ class Action:
             
         for key in keys:
             self.release_key(key)
+
+    def execute_macro_steps(self, steps):
+        """Queue an ordered macro step chain for execution."""
+        normalized_steps = []
+        for step in steps or []:
+            if isinstance(step, MacroActionStep):
+                normalized_steps.append(step)
+            else:
+                normalized_steps.append(MacroActionStep.from_dict(step))
+        if not normalized_steps:
+            return
+
+        origin_ns = self._capture_latency_origin_for_action()
+        self._enqueue_action(self._execute_macro_steps_impl, (normalized_steps,), origin_ns=origin_ns)
+
+    def _execute_macro_steps_impl(self, steps):
+        for step in steps:
+            step_type = step.step_type
+            params = step.params
+
+            if step_type == "tap_key":
+                self._tap_key_impl(params["key"])
+            elif step_type == "key_down":
+                if self._key_down(params["key"]):
+                    self._held_keys.add(params["key"])
+            elif step_type == "key_up":
+                self._key_up(params["key"])
+                self._held_keys.discard(params["key"])
+            elif step_type == "tap_hotkey":
+                self._tap_hotkey_impl(params["keys"])
+            elif step_type == "left_click":
+                self._left_click_impl()
+            elif step_type == "right_click":
+                self._right_click_impl()
+            elif step_type == "left_button_down":
+                self.mouse.press(Button.left)
+            elif step_type == "left_button_up":
+                self.mouse.release(Button.left)
+            elif step_type == "right_button_down":
+                self.mouse.press(Button.right)
+            elif step_type == "right_button_up":
+                self.mouse.release(Button.right)
+            elif step_type == "scroll":
+                self._scroll_impl(params.get("delta_x", 0), params.get("delta_y", 0))
+            elif step_type == "delay_ms":
+                time.sleep(max(0, int(params.get("duration_ms", 0))) / 1000.0)
 
     def key_down(self, key_code: str):
         """Press and hold a keyboard key."""

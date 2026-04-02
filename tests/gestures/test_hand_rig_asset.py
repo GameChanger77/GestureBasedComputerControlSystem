@@ -15,7 +15,7 @@ from backend.gesture_remap.hand_rig import (
     load_hand_mesh_assets,
 )
 from backend.gesture_remap.pose_templates import build_preview_templates
-from frontend.widgets.hand_rig_scene import HandRigScene
+from frontend.widgets.editors.hand_rig_scene import HandRigScene
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
