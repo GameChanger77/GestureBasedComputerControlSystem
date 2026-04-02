@@ -174,11 +174,6 @@ class MainWindow(QMainWindow):
         title = QLabel("Hand Gesture Control")
         set_label_role(title, "hero-title")
         hero_copy.addWidget(title)
-
-        subtitle = QLabel("Monitor live tracking, inspect keyboard state, and move into settings without leaving the dashboard.")
-        subtitle.setWordWrap(True)
-        set_label_role(subtitle, "hero-subtitle")
-        hero_copy.addWidget(subtitle)
         hero_header.addLayout(hero_copy, 1)
 
         hero_badges = QHBoxLayout()
@@ -333,11 +328,6 @@ class MainWindow(QMainWindow):
         title = QLabel("Gesture Runtime Control")
         set_label_role(title, "hero-title")
         self.prod_header_card.body_layout.addWidget(title)
-
-        subtitle = QLabel("Launch or stop tracking, confirm runtime state, and adjust production settings without exposing the development dashboard.")
-        subtitle.setWordWrap(True)
-        set_label_role(subtitle, "hero-subtitle")
-        self.prod_header_card.body_layout.addWidget(subtitle)
 
         summary_row = QHBoxLayout()
         summary_row.setContentsMargins(0, 4, 0, 0)
