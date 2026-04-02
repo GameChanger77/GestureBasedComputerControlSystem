@@ -36,6 +36,14 @@ def parse_args(argv):
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--dev", action="store_true", help="Launch development UI")
     mode_group.add_argument("--prod", action="store_true", help="Launch production UI")
+    parser.add_argument(
+        "--load-legacy-custom-rules",
+        action="store_true",
+        help=(
+            "Load legacy gesture_custom_rules.json from the config directory. "
+            "Disabled by default."
+        ),
+    )
     return parser.parse_args(argv[1:])
 
 
@@ -56,7 +64,15 @@ def resolve_ui_mode(args):
     return requested_mode or "dev"
 
 
-def create_backend_components(screen_width, screen_height, config_path, ui_mode, screen_origin_x=0, screen_origin_y=0):
+def create_backend_components(
+    screen_width,
+    screen_height,
+    config_path,
+    ui_mode,
+    screen_origin_x=0,
+    screen_origin_y=0,
+    load_legacy_custom_rules=False,
+):
     """Create backend component graph from current config file."""
     from backend.Action import Action
     from backend.HandTracker import HandTracker
@@ -70,6 +86,7 @@ def create_backend_components(screen_width, screen_height, config_path, ui_mode,
         screen_width=screen_width,
         screen_height=screen_height,
         ui_mode=ui_mode,
+        load_legacy_custom_rules=load_legacy_custom_rules,
     )
 
     max_tracked_hands = int(config.get('max_tracked_hands', 1))
@@ -137,6 +154,7 @@ def main():
         ui_mode=effective_ui_mode,
         screen_origin_x=screen_origin_x,
         screen_origin_y=screen_origin_y,
+        load_legacy_custom_rules=args.load_legacy_custom_rules,
     )
     components = component_factory()
 

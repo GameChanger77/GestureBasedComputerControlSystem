@@ -10,6 +10,7 @@ import numpy as np
 from backend.HandsData import HandsData
 from backend.Strategizer import Strategizer, ControlMode
 from backend.custom_rules.RuleCompiler import RuleCompiler
+from backend.custom_rules.MacroChainRecognizer import MacroChainRecognizer
 from backend.gesture_remap.pose_templates import PoseMatcherConfig, build_pose_template
 from backend.gesture_remap.rule_overrides import GestureRuleOverride, POINT_OVERRIDE_KIND, RULE_OVERRIDE_KIND
 from backend.macros.macro_models import MacroActionStep, MacroPointTrigger, MacroRecord, MacroRuleTrigger
@@ -63,6 +64,7 @@ class _ConfigStub(dict):
             finger_extension_angle=155.0,
             scroll_sensitivity=100,
             pinch_threshold=0.30,
+            left_click_hold_time_sec=1.0,
             mouse_tracking_pending_frames=1,
             click_pending_frames=1,
             scroll_pending_frames=1,
@@ -181,6 +183,7 @@ finally:
         self.assertTrue(recognizer.update(hands))
         self.assertFalse(recognizer.update(hands))
         self.assertEqual(action_calls, [["left_click"]])
+        self.assertFalse(recognizer.consumes_events)
 
     def test_point_macro_trigger_executes_once(self):
         template = build_pose_template(
@@ -218,6 +221,37 @@ finally:
         self.assertTrue(recognizer.update(hands))
         self.assertFalse(recognizer.update(hands))
         self.assertEqual(action_calls, [["right_click"]])
+        self.assertFalse(recognizer.consumes_events)
+
+    def test_legacy_macro_chain_does_not_consume_events_while_progressing(self):
+        class _StepRecognizer:
+            def __init__(self):
+                self.is_active = False
+
+            def detect_gesture(self, _hands):
+                return False, None
+
+            def update(self, _hands):
+                self.is_active = True
+                return False
+
+            def reset(self):
+                self.is_active = False
+
+        chain = MacroChainRecognizer(
+            action=object(),
+            priority=12,
+            steps=[
+                {"gesture_id": "step_one", "recognizer": _StepRecognizer(), "max_delay_ms": 1000},
+                {"gesture_id": "step_two", "recognizer": _StepRecognizer(), "max_delay_ms": 1000},
+            ],
+            macro_action={"type": "scroll", "params": {"delta_x": 0, "delta_y": 1}},
+            config={"debug_mode": False},
+            screen_width=1920,
+            screen_height=1080,
+        )
+
+        self.assertFalse(chain.consumes_events)
 
     def test_strategizer_loads_ui_macros_in_selected_mode_and_keeps_legacy_rules(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -295,6 +329,35 @@ finally:
             strategizer.load_custom_rules(str(legacy_rules_path))
             self.assertTrue(any(getattr(recognizer, "name", "") == "Keyboard Macro" for recognizer in strategizer.keyboard_mode_gestures))
             self.assertGreaterEqual(len(strategizer._custom_gesture_instances), 2)
+
+    def test_strategizer_does_not_auto_load_repo_root_legacy_rules(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config = _ConfigStub(Path(tmp_dir) / "gesture_config.json")
+
+            class _ActionStub:
+                def left_click(self, *_args):
+                    pass
+
+                def right_click(self, *_args):
+                    pass
+
+                def move_cursor(self, *_args):
+                    pass
+
+                def scroll(self, *_args, **_kwargs):
+                    pass
+
+                def execute_macro_steps(self, _steps):
+                    pass
+
+                def set_pending_latency_origin_ts_ns(self, _ts):
+                    pass
+
+                def release_all_keys(self):
+                    pass
+
+            strategizer = Strategizer(_ActionStub(), config, 1920, 1080)
+            self.assertEqual(strategizer._custom_gesture_instances, [])
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtGui import QFont, QFontDatabase, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -238,6 +238,21 @@ def _stylesheet() -> str:
         background-color: #0d1624;
         border-color: #1c2a3b;
         color: #5e7088;
+    }
+    QWidget[settingsThemeRoot="true"] QPushButton[tutorialContinueLocked="true"] {
+        background-color: #111924;
+        border-color: #243344;
+        color: #7a8798;
+    }
+    QWidget[settingsThemeRoot="true"] QPushButton[tutorialContinueLocked="true"]:hover {
+        background-color: #111924;
+        border-color: #2b3b4f;
+        color: #8694a5;
+    }
+    QWidget[settingsThemeRoot="true"] QPushButton[tutorialContinueLocked="true"]:pressed {
+        background-color: #111924;
+        border-color: #243344;
+        color: #7a8798;
     }
     QWidget[settingsThemeRoot="true"] QPushButton[role="primary"] {
         background-color: #0ea5c6;
@@ -478,6 +493,10 @@ def set_label_role(label: QLabel, role: str):
 
 
 def standard_icon(widget: QWidget, name: str):
+    custom_icon = _icon_path(f"{name}.svg")
+    if custom_icon.exists():
+        return QIcon(str(custom_icon))
+
     style = widget.style()
     mapping = {
         "create": QStyle.StandardPixmap.SP_FileDialogNewFolder,
@@ -492,6 +511,7 @@ def standard_icon(widget: QWidget, name: str):
         "stop": QStyle.StandardPixmap.SP_MediaStop,
         "settings": QStyle.StandardPixmap.SP_FileDialogDetailedView,
         "visibility": QStyle.StandardPixmap.SP_DialogOpenButton,
+        "tutorial": QStyle.StandardPixmap.SP_DialogHelpButton,
     }
     pixmap = mapping.get(name)
     if pixmap is None:
