@@ -192,12 +192,11 @@ class StrategizerDebugSnapshotTests(unittest.TestCase):
         self.assertTrue(mode_entries["Mouse Move"]["suppressed"])
         self.assertEqual(mode_entries["Mouse Move"]["state"], "suppressed")
 
-    def test_keyboard_exit_switch_is_blocked_while_keyboard_interaction_is_active(self):
+    def test_keyboard_exit_switch_is_blocked_while_key_selection_pinch_is_latched(self):
         hands = _right_hand_hands()
         self.strategizer.set_mode(ControlMode.KEYBOARD)
         air_typing = next(gesture for gesture in self.strategizer.keyboard_mode_gestures if getattr(gesture, "debug_name", "") == "Air Typing")
-        air_typing._flick_window_active = True
-        air_typing._flick_window_deadline = air_typing._now_seconds() + 1.0
+        air_typing._special_key_pinch_latched = True
 
         exit_gesture = next(
             gesture for gesture in self.strategizer.switch_mode_gestures if getattr(gesture, "debug_gesture_id", "") == "switch_to_mouse"
@@ -212,7 +211,7 @@ class StrategizerDebugSnapshotTests(unittest.TestCase):
             entry["name"]: entry for entry in self.strategizer.get_debug_snapshot()["mode_switch_candidates"]
         }
         self.assertTrue(switch_entries["Switch To Mouse Mode"]["suppressed"])
-        self.assertIn("Suggestion selection window", switch_entries["Switch To Mouse Mode"]["note"])
+        self.assertIn("Key selection pinch is still latched", switch_entries["Switch To Mouse Mode"]["note"])
 
 
 if __name__ == "__main__":
