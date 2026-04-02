@@ -205,8 +205,6 @@ class MacroChainRecognizer(GestureRecognizer):
         a_type = action_spec.get("type")
         params = action_spec.get("params", {})
 
-        safe_margin = int(self.config.get("screen_safe_margin", 50))
-
         if a_type in ("left_click", "right_click", "mouse_move"):
             at = params.get("at", "index.tip")
             space = params.get("space", "camera")
@@ -232,7 +230,7 @@ class MacroChainRecognizer(GestureRecognizer):
             if pt is None:
                 return
 
-            x, y = camera_to_screen(pt, self.screen_width, self.screen_height, safe_margin=safe_margin)
+            x, y = camera_to_screen(pt, self.screen_width, self.screen_height)
 
             if a_type == "left_click":
                 self.action.left_click(x, y)

@@ -8,19 +8,25 @@ from paths import resource
 from backend.GestureConfig import GestureConfig
 
 
-def get_screen_size():
+def get_screen_geometry():
     screen = QGuiApplication.primaryScreen()
     if screen:
-        size = screen.size()
-        return size.width(), size.height()
+        geometry = screen.virtualGeometry()
+        return geometry.x(), geometry.y(), geometry.width(), geometry.height()
 
     # Fallback: pyautogui (lazy import so it can't kill startup)
     try:
         import pyautogui
-        return pyautogui.size()
+        width, height = pyautogui.size()
+        return 0, 0, width, height
     except Exception as e:
         print(f"[WARN] Could not get screen size via pyautogui: {e}")
-        return 1920, 1080  # safe default
+        return 0, 0, 1920, 1080  # safe default
+
+
+def get_screen_size():
+    _origin_x, _origin_y, width, height = get_screen_geometry()
+    return width, height
 
 
 def parse_args(argv):
@@ -49,13 +55,13 @@ def resolve_ui_mode(args):
     return requested_mode or "dev"
 
 
-def create_backend_components(screen_width, screen_height, config_path, ui_mode):
+def create_backend_components(screen_width, screen_height, config_path, ui_mode, screen_origin_x=0, screen_origin_y=0):
     """Create backend component graph from current config file."""
     from backend.Action import Action
     from backend.HandTracker import HandTracker
     from backend.Strategizer import Strategizer
 
-    action = Action()
+    action = Action(screen_origin_x=screen_origin_x, screen_origin_y=screen_origin_y)
     config = GestureConfig(config_path=config_path)
     strategizer = Strategizer(
         action=action,
@@ -100,8 +106,11 @@ def main():
     app.setStyle("Fusion")  # Use Fusion style for consistent look across platforms
 
     # Dynamically get screen resolution (works on Windows and macOS)
-    screen_width, screen_height = get_screen_size()
-    print(f"Detected screen resolution: {screen_width}x{screen_height}")
+    screen_origin_x, screen_origin_y, screen_width, screen_height = get_screen_geometry()
+    print(
+        "Detected virtual screen geometry: "
+        f"origin=({screen_origin_x}, {screen_origin_y}) size={screen_width}x{screen_height}"
+    )
     print(f"UI mode: {effective_ui_mode}")
 
     config_path = GestureConfig.resolve_config_path()
@@ -110,6 +119,8 @@ def main():
         screen_height=screen_height,
         config_path=config_path,
         ui_mode=effective_ui_mode,
+        screen_origin_x=screen_origin_x,
+        screen_origin_y=screen_origin_y,
     )
     components = component_factory()
 

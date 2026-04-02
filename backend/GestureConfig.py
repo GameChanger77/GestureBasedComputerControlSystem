@@ -24,7 +24,6 @@ class GestureConfig:
         "Click/pinch",
         "Debouncing",
         "Mouse movement",
-        "Screen margins",
         "Performance tuning",
         "Camera runtime tuning",
         "Confidence thresholds",
@@ -44,7 +43,6 @@ class GestureConfig:
         "Click/pinch": "Controls",
         "Debouncing": "Controls",
         "Mouse movement": "Controls",
-        "Screen margins": "Controls",
         "Camera runtime tuning": "Camera",
         "Confidence thresholds": "Camera",
         "Performance tuning": "Performance",
@@ -56,7 +54,6 @@ class GestureConfig:
         "finger_extension_angle",
         "scroll_sensitivity",
         "pinch_threshold",
-        "screen_safe_margin",
         "target_max_fps",
         "max_tracked_hands",
         "camera_index",
@@ -75,7 +72,7 @@ class GestureConfig:
         "scroll_sensitivity": 100,  # Multiplier for scroll speed (higher = faster)
 
         # Click/Pinch detection
-        "pinch_threshold": 0.30,  # Maximum distance for pinch detection (wrist-relative units)
+        "pinch_threshold": 0.45,  # Maximum distance for pinch detection (wrist-relative units)
 
         # Debouncing (gesture confirmation)
         "mouse_tracking_pending_frames": 1,  # Frames to confirm mouse tracking
@@ -129,9 +126,6 @@ class GestureConfig:
         # Mouse move action throttling (reduces system-call churn)
         "mouse_move_min_delta_px": 2,  # Minimum pixel delta before sending cursor update
         "mouse_move_cadence_ms": 75,  # Force update cadence even for tiny motion
-
-        # Screen margins
-        "screen_safe_margin": 50,  # Pixels from screen edge to prevent hot corners
 
         # Performance tuning
         "target_max_fps": 60,  # Cap capture/inference submission loop at this FPS
@@ -254,13 +248,6 @@ class GestureConfig:
             "type": "int",
             "min": 1,
             "max": 1000,
-        },
-        "screen_safe_margin": {
-            "group": "Screen margins",
-            "label": "Screen Safe Margin (px)",
-            "type": "int",
-            "min": 0,
-            "max": 500,
         },
         "target_max_fps": {
             "group": "Performance tuning",
@@ -628,7 +615,9 @@ class GestureConfig:
                     raise ValueError("Config file must contain a JSON object")
 
                 # Merge user config with defaults (user values override defaults)
-                self.config.update(user_config)
+                self.config.update(
+                    {key: value for key, value in user_config.items() if key in self.DEFAULT_CONFIG}
+                )
                 self._migrate_legacy_camera_selection()
                 print(f"Loaded gesture config from {self.config_path}")
 
@@ -665,6 +654,10 @@ class GestureConfig:
     def save(self):
         """Save current configuration to JSON file."""
         try:
+            self.config = {
+                key: self.config.get(key, default_value)
+                for key, default_value in self.DEFAULT_CONFIG.items()
+            }
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
             with self.config_path.open("w", encoding="utf-8") as config_file:
                 json.dump(self.config, config_file, indent=4)
@@ -694,6 +687,9 @@ class GestureConfig:
             key: Configuration key
             value: New value
         """
+        if key not in self.DEFAULT_CONFIG:
+            self.config.pop(key, None)
+            return
         self.config[key] = value
 
     def __getitem__(self, key):
@@ -702,6 +698,9 @@ class GestureConfig:
 
     def __setitem__(self, key, value):
         """Allow dict-style setting: config['key'] = value"""
+        if key not in self.DEFAULT_CONFIG:
+            self.config.pop(key, None)
+            return
         self.config[key] = value
 
     def __repr__(self):
