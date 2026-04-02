@@ -68,6 +68,7 @@ class Strategizer:
         """Initialize gesture recognizers for switching from one mode to another."""
         self.switch_mode_gestures = [
             BuiltInGestureRegistry.build_runtime_gesture("switch_to_keyboard", self, self.gesture_override_store),
+            BuiltInGestureRegistry.build_runtime_gesture("switch_to_hotkey", self, self.gesture_override_store),
             BuiltInGestureRegistry.build_runtime_gesture("switch_to_mouse", self, self.gesture_override_store),
         ]
 
