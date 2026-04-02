@@ -25,7 +25,7 @@ class RuleCompiler:
     def __init__(self, config, screen_width: int, screen_height: int):
         """
         Args:
-            config: GestureConfig (used for screen_safe_margin, thresholds, etc.)
+            config: GestureConfig (used for thresholds and runtime settings)
             screen_width/screen_height: Needed to map camera coordinates to screen pixels
         """
         self.config = config

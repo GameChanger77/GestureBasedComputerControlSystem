@@ -57,7 +57,6 @@ Expected output starts with `Python 3.11`.
 - Increase `pinch_threshold` for easier click detection (may cause accidental clicks)
 - Increase `*_pending_frames` to prevent accidental gesture triggers (less responsive)
 - Increase `scroll_sensitivity` for faster scrolling
-- Increase `screen_safe_margin` to prevent cursor from sticking to edges
 
 ## Camera permission
 If prompted by your OS, allow camera access for Python/terminal.
@@ -248,7 +247,6 @@ Priority 1:  MoveMouseGesture
     "click_pending_frames": 3,              # Click gesture confirmation (prevents accidents)
     "scroll_pending_frames": 2,             # Scroll gesture confirmation (balanced)
     "ending_frames": 2,                     # Cooldown before gesture reset
-    "screen_safe_margin": 50,               # Pixels from edge (prevents hot corners)
     "debug_mode": true                      # Enable debug logging
 }
 ```

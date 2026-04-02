@@ -59,10 +59,19 @@ class KeyboardTest(ABC):
 
 class Action:
 
-    def __init__(self, mouse: MouseTest = None, keyboard_test: KeyboardTest = None, osType=None):
+    def __init__(
+        self,
+        mouse: MouseTest = None,
+        keyboard_test: KeyboardTest = None,
+        osType=None,
+        screen_origin_x: int = 0,
+        screen_origin_y: int = 0,
+    ):
         self.mouse = mouse if mouse is not None else Mouse()
         self.keyboard = keyboard_test if keyboard_test is not None else Keyboard()
         self.osType = osType if osType is not None else OS_TYPE
+        self.screen_origin_x = int(screen_origin_x)
+        self.screen_origin_y = int(screen_origin_y)
         self.detected_os = self.osType
         self._held_keys = set()
         self._keyboard_send_failures = 0
@@ -289,7 +298,10 @@ class Action:
             }
 
     def _set_mouse_position(self, x: int, y: int):
-        self.mouse.position = (int(x), int(y))
+        self.mouse.position = (
+            self.screen_origin_x + int(x),
+            self.screen_origin_y + int(y),
+        )
 
     def _left_click_impl(self, x=None, y=None):
         if x is not None and y is not None:

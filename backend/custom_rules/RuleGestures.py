@@ -23,7 +23,7 @@ class _RuleGestureBase:
         """
         Args:
             screen_width/screen_height: Needed for camera_to_screen conversion
-            config: GestureConfig (used for screen_safe_margin)
+            config: GestureConfig
             evaluator: ConditionEvaluator instance
             rule: The JSON rule dict for this gesture
         """
@@ -69,8 +69,6 @@ class _RuleGestureBase:
         a_type = action_spec["type"]
         params = action_spec.get("params", {})
 
-        safe_margin = int(self.config.get("screen_safe_margin", 50))
-
         # Mouse actions that need a screen coordinate target
         if a_type in ("left_click", "right_click", "mouse_move"):
             at = params.get("at", "index.tip")       # e.g., "index.tip"
@@ -90,7 +88,7 @@ class _RuleGestureBase:
             if pt is None:
                 return None
 
-            sx, sy = camera_to_screen(pt, self.screen_width, self.screen_height, safe_margin=safe_margin)
+            sx, sy = camera_to_screen(pt, self.screen_width, self.screen_height)
             return (a_type, sx, sy)
 
         # Scroll uses integer deltas, no landmark needed
