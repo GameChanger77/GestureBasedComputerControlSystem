@@ -7,7 +7,7 @@ from unittest.mock import patch
 import numpy as np
 
 from backend.HandsData import HandsData
-from backend.Strategizer import Strategizer
+from backend.Strategizer import Strategizer, ControlMode
 
 
 class _ActionStub:
@@ -30,6 +30,9 @@ class _ActionStub:
         pass
 
     def type_text(self, *_args, **_kwargs):
+        pass
+
+    def release_all_keys(self):
         pass
 
     def set_pending_latency_origin_ts_ns(self, _ts):
@@ -188,6 +191,28 @@ class StrategizerDebugSnapshotTests(unittest.TestCase):
         self.assertTrue(mode_entries["Right Click"]["executed"])
         self.assertTrue(mode_entries["Mouse Move"]["suppressed"])
         self.assertEqual(mode_entries["Mouse Move"]["state"], "suppressed")
+
+    def test_keyboard_exit_switch_is_blocked_while_keyboard_interaction_is_active(self):
+        hands = _right_hand_hands()
+        self.strategizer.set_mode(ControlMode.KEYBOARD)
+        air_typing = next(gesture for gesture in self.strategizer.keyboard_mode_gestures if getattr(gesture, "debug_name", "") == "Air Typing")
+        air_typing._flick_window_active = True
+        air_typing._flick_window_deadline = air_typing._now_seconds() + 1.0
+
+        exit_gesture = next(
+            gesture for gesture in self.strategizer.switch_mode_gestures if getattr(gesture, "debug_gesture_id", "") == "switch_to_mouse"
+        )
+
+        with patch.object(exit_gesture, "update", return_value=True) as exit_update:
+            self.strategizer.strategize(hands)
+
+        self.assertFalse(exit_update.called)
+        self.assertEqual(self.strategizer.current_mode, ControlMode.KEYBOARD)
+        switch_entries = {
+            entry["name"]: entry for entry in self.strategizer.get_debug_snapshot()["mode_switch_candidates"]
+        }
+        self.assertTrue(switch_entries["Switch To Mouse Mode"]["suppressed"])
+        self.assertIn("Suggestion selection window", switch_entries["Switch To Mouse Mode"]["note"])
 
 
 if __name__ == "__main__":

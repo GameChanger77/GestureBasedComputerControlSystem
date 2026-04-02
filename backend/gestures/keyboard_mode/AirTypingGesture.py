@@ -92,6 +92,11 @@ class AirTypingGesture(GestureRecognizer):
         )
         if self.keyboard_swipe_tracking_grace_frames < 0:
             self.keyboard_swipe_tracking_grace_frames = 0
+        self.keyboard_post_input_mode_exit_guard_sec = float(
+            self.config.get("keyboard_post_input_mode_exit_guard_sec", 0.8)
+        )
+        if self.keyboard_post_input_mode_exit_guard_sec < 0.0:
+            self.keyboard_post_input_mode_exit_guard_sec = 0.0
         self.keyboard_swipe_auto_space = True
         self._swipe_point_min_distance = 0.0035
         self._swipe_point_min_distance_sq = self._swipe_point_min_distance * self._swipe_point_min_distance
@@ -172,6 +177,7 @@ class AirTypingGesture(GestureRecognizer):
         self._flick_window_active = False
         self._flick_window_deadline = 0.0
         self._flick_right_missing = False
+        self._mode_exit_guard_deadline = 0.0
         flick_min_displacement = float(self.config.get("keyboard_flick_min_displacement", 0.075))
         flick_min_speed = float(self.config.get("keyboard_flick_min_speed", 0.25))
         flick_dominance_ratio = float(self.config.get("keyboard_flick_dominance_ratio", 1.2))
@@ -401,6 +407,7 @@ class AirTypingGesture(GestureRecognizer):
 
     def _toggle_caps_lock(self):
         self._caps_lock_active = not self._caps_lock_active
+        self._arm_mode_exit_guard()
         self._last_event = "caps_on" if self._caps_lock_active else "caps_off"
         self._last_confidence = 1.0
 
@@ -411,6 +418,7 @@ class AirTypingGesture(GestureRecognizer):
         else:
             self._active_modifiers.add(family)
             self._last_event = f"modifier_on:{family}"
+        self._arm_mode_exit_guard()
         self._last_confidence = 1.0
 
     def _tap_with_active_modifiers(self, key_code: str):
@@ -441,6 +449,7 @@ class AirTypingGesture(GestureRecognizer):
 
         if not modifier_key_codes:
             self.action.tap_key(key_to_tap)
+            self._arm_mode_exit_guard()
             self._last_event = f"tap:{key_to_tap}"
             self._last_confidence = 1.0
             if "fn" in oneshot_families:
@@ -448,6 +457,7 @@ class AirTypingGesture(GestureRecognizer):
             return
 
         self.action.tap_hotkey(modifier_key_codes + [key_to_tap])
+        self._arm_mode_exit_guard()
 
         combo_tokens: List[str] = []
         if is_alpha_key and self._caps_lock_active:
@@ -533,7 +543,27 @@ class AirTypingGesture(GestureRecognizer):
         if self.keyboard_swipe_auto_space:
             text += " "
         self.action.type_text(text)
+        self._arm_mode_exit_guard()
         return text
+
+    def _arm_mode_exit_guard(self):
+        if self.keyboard_post_input_mode_exit_guard_sec <= 0.0:
+            return
+        self._mode_exit_guard_deadline = max(
+            self._mode_exit_guard_deadline,
+            self._now_seconds() + self.keyboard_post_input_mode_exit_guard_sec,
+        )
+
+    def blocks_keyboard_mode_exit(self) -> str:
+        if self._swipe_active:
+            return "Swipe gesture in progress"
+        if self._flick_window_active:
+            return "Suggestion selection window is active"
+        if self._special_key_pinch_latched:
+            return "Key selection pinch is still latched"
+        if self._now_seconds() < self._mode_exit_guard_deadline:
+            return "Recent keyboard input is still settling"
+        return ""
 
     def _current_right_slot_id(self, hands_data: HandsData) -> Optional[str]:
         right_hand = hands_data.camera.right if hands_data.camera.has_right else None
@@ -577,6 +607,7 @@ class AirTypingGesture(GestureRecognizer):
         self._last_event = f"suggest:{replacement}"
         self._last_confidence = 1.0
         self._set_suggestions_from_candidates(replacement, self._last_swipe_candidates)
+        self._arm_mode_exit_guard()
         return True
 
     def _commit_swipe(self, release_slot_id: Optional[str]):
@@ -636,6 +667,7 @@ class AirTypingGesture(GestureRecognizer):
         self._flick_window_active = False
         self._flick_window_deadline = 0.0
         self._flick_right_missing = False
+        self._mode_exit_guard_deadline = 0.0
         self._flick_detector.reset()
 
     def _replace_last_swipe_word_by_flick(self, direction: str) -> bool:

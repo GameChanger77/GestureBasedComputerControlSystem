@@ -119,6 +119,7 @@ class GestureConfig:
         "keyboard_swipe_release_pinch_threshold": 0.40,
         "keyboard_swipe_release_pending_frames": 2,
         "keyboard_swipe_tracking_grace_frames": 8,
+        "keyboard_post_input_mode_exit_guard_sec": 0.8,
         "keyboard_flick_selection_window_seconds": 3.0,
         "keyboard_flick_min_displacement": 0.075,
         "keyboard_flick_min_speed": 0.25,

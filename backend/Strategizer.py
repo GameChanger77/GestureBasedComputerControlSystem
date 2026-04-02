@@ -192,7 +192,21 @@ class Strategizer:
                 self.switch_mode_gestures, key=lambda g: g.priority, reverse=True
             )
             switch_entries = []
+            keyboard_exit_block_note = self._keyboard_mode_exit_block_note()
             for switch_gesture in sorted_switch_gestures:
+                if (
+                    keyboard_exit_block_note
+                    and getattr(switch_gesture, "debug_gesture_id", "") == "switch_to_mouse"
+                ):
+                    switch_entries.append(
+                        self._gesture_debug_entry(
+                            switch_gesture,
+                            suppressed=True,
+                            note=keyboard_exit_block_note,
+                            evaluated=False,
+                        )
+                    )
+                    continue
                 action_executed = switch_gesture.update(hands_data)
                 switch_entries.append(self._gesture_debug_entry(switch_gesture))
                 if action_executed:
@@ -264,6 +278,18 @@ class Strategizer:
             mode_entries=mode_entries,
             winning_action=winning_action,
         )
+
+    def _keyboard_mode_exit_block_note(self) -> str:
+        if self.current_mode != ControlMode.KEYBOARD:
+            return ""
+        for gesture in self.keyboard_mode_gestures:
+            block_method = getattr(gesture, "blocks_keyboard_mode_exit", None)
+            if not callable(block_method):
+                continue
+            note = str(block_method() or "").strip()
+            if note:
+                return note
+        return ""
 
     def get_mode_name(self):
         return self.current_mode.value.upper()
