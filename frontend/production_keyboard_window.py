@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush
 from PySide6.QtWidgets import QWidget
 
@@ -22,12 +22,27 @@ class ProductionKeyboardWindow(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setFocusPolicy(Qt.NoFocus)
-        self.setWindowOpacity(0.92)
+        self.setWindowOpacity(0.0)
+        self._opacity_animation: Optional[QPropertyAnimation] = None
+
+    def _fade_to(self, opacity: float, duration: int = 180):
+        if self._opacity_animation is not None:
+            self._opacity_animation.stop()
+        animation = QPropertyAnimation(self, b"windowOpacity", self)
+        animation.setDuration(duration)
+        animation.setStartValue(self.windowOpacity())
+        animation.setEndValue(opacity)
+        animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._opacity_animation = animation
+        animation.start()
 
     def set_overlay_data(self, overlay_data: Optional[Dict[str, object]]):
         if not overlay_data or not overlay_data.get("enabled") or overlay_data.get("surface") != "prod":
             self._overlay_data = {}
             self._window_rect_norm = None
+            if self._opacity_animation is not None:
+                self._opacity_animation.stop()
+            self.setWindowOpacity(0.0)
             self.hide()
             return
 
@@ -48,7 +63,9 @@ class ProductionKeyboardWindow(QWidget):
 
         self._overlay_data = overlay_data
         if not self.isVisible():
+            self.setWindowOpacity(0.0)
             self.show()
+            self._fade_to(0.96, duration=190)
         self.update()
 
     def _to_local(self, nx: float, ny: float) -> Optional[Tuple[float, float]]:
@@ -125,6 +142,10 @@ class ProductionKeyboardWindow(QWidget):
         self._content_rect = self._compute_content_rect()
         body_x, body_y, body_w, body_h = self._content_rect
         palette = KeyboardThemeRegistry.get(self._overlay_data.get("theme_id", "dark"))
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(5, 10, 18, 86)))
+        painter.drawRoundedRect(int(body_x + 6.0), int(body_y + 8.0), int(body_w), int(body_h), 16, 16)
 
         # Keyboard body
         bg = QColor(*palette.keyboard_body_fill)
