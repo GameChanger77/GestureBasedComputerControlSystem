@@ -5,6 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
+from backend.GestureConfig import GestureConfig
 from frontend.widgets.settings_panel import SettingsPanel
 
 
@@ -52,6 +53,18 @@ class SettingsPanelKeyboardOptionsTests(unittest.TestCase):
         values = panel.get_values()
         self.assertEqual(values["keyboard_layout"], "colemak")
         self.assertEqual(values["keyboard_theme"], "light")
+
+    def test_removed_screen_safe_margin_setting_is_not_exposed(self):
+        self.assertNotIn("screen_safe_margin", GestureConfig.DEFAULT_CONFIG)
+
+        for ui_mode in ("dev", "prod"):
+            panel = SettingsPanel(ui_mode=ui_mode)
+            self.assertNotIn("screen_safe_margin", panel._field_controls)
+
+            page_definitions = GestureConfig.get_page_definitions(ui_mode=ui_mode)
+            for groups in page_definitions.values():
+                for keys in groups.values():
+                    self.assertNotIn("screen_safe_margin", keys)
 
 
 if __name__ == "__main__":
