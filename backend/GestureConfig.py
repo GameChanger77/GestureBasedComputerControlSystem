@@ -73,6 +73,7 @@ class GestureConfig:
 
         # Click/Pinch detection
         "pinch_threshold": 0.45,  # Maximum distance for pinch detection (wrist-relative units)
+        "left_click_hold_time_sec": 1.0,  # Hold duration before emitting a second click
 
         # Debouncing (gesture confirmation)
         "mouse_tracking_pending_frames": 1,  # Frames to confirm mouse tracking
@@ -124,8 +125,8 @@ class GestureConfig:
         "keyboard_flick_dominance_ratio": 1.2,
 
         # Mouse move action throttling (reduces system-call churn)
-        "mouse_move_min_delta_px": 2,  # Minimum pixel delta before sending cursor update
-        "mouse_move_cadence_ms": 75,  # Force update cadence even for tiny motion
+        "mouse_move_min_delta_px": 1,  # Minimum pixel delta before sending cursor update
+        "mouse_move_cadence_ms": 16,  # Force update cadence even for tiny motion
 
         # Performance tuning
         "target_max_fps": 60,  # Cap capture/inference submission loop at this FPS
@@ -206,6 +207,15 @@ class GestureConfig:
             "max": 1.0,
             "step": 0.01,
             "decimals": 3,
+        },
+        "left_click_hold_time_sec": {
+            "group": "Click/pinch",
+            "label": "Left Click Hold Time (sec)",
+            "type": "float",
+            "min": 0.1,
+            "max": 3.0,
+            "step": 0.05,
+            "decimals": 2,
         },
         "mouse_tracking_pending_frames": {
             "group": "Debouncing",

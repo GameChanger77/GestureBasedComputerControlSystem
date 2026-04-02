@@ -39,6 +39,19 @@ uv run python main.py --dev
 uv run python main.py --prod
 ```
 
+Legacy JSON custom rules/macros are **off by default**. To explicitly load
+`gesture_custom_rules.json` from the same directory as `gesture_config.json`,
+start the app with:
+```powershell
+uv run python main.py --load-legacy-custom-rules
+```
+
+You can combine it with either UI mode flag:
+```powershell
+uv run python main.py --dev --load-legacy-custom-rules
+uv run python main.py --prod --load-legacy-custom-rules
+```
+
 Bundled installer builds always run `prod` mode, even if `--dev` is passed.
 
 ## Verify environment
@@ -85,7 +98,7 @@ If prompted by your OS, allow camera access for Python/terminal.
    - Trigger: Right thumb + middle finger pinch
    - Action: Performs a left click at the index fingertip cursor position
    - Priority: 10 (high)
-   - Notes: A quick pinch-release performs a single click; holding the pinch for about 1 second performs a double-click
+   - Notes: A confirmed pinch performs a single click immediately; holding the pinch for about 1 second emits one additional click
 
 4. **RightClickGesture** (`backend/gestures/mouse_mode/RightClickGesture.py`)
    - Trigger: Right thumb + ring finger pinch

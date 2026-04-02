@@ -51,9 +51,9 @@ class MacroChainRecognizer(GestureRecognizer):
         self.cooldown_ms = int(cooldown_ms)
         self.sequence_rules = sequence_rules or {}
 
-        # If true, Strategizer can suppress other lower-priority recognizers
-        # while this macro is "in progress".
-        self.consumes_events = bool(self.sequence_rules.get("consumes_events", True))
+        # Macro progression should not suppress built-in gestures.
+        # The completion frame can still win via its returned action_executed signal.
+        self.consumes_events = False
 
         # Optional: allow some frames with no hands detected without resetting
         self.allow_intermediate_idle_frames = int(self.sequence_rules.get("allow_intermediate_idle_frames", 10))
@@ -99,6 +99,7 @@ class MacroChainRecognizer(GestureRecognizer):
         # Cooldown gate
         if now < self._cooldown_until:
             self._state = GestureState.IDLE
+            self._set_debug_frame(state=self._state, note="Macro cooldown")
             return False
 
         # Optional idle-frames allowance
@@ -106,6 +107,12 @@ class MacroChainRecognizer(GestureRecognizer):
             self._idle_frames += 1
             if self._idle_frames > self.allow_intermediate_idle_frames:
                 self.reset()
+            else:
+                self._set_debug_frame(
+                    detected=False,
+                    state=self._state,
+                    note=f"Waiting for step {self._step_index + 1}",
+                )
             return False
         else:
             self._idle_frames = 0
@@ -116,6 +123,7 @@ class MacroChainRecognizer(GestureRecognizer):
             if (now - self._last_step_time) * 1000.0 > max_delay_ms:
                 self._debug(f"Timeout waiting for step {self._step_index + 1}. Resetting.")
                 self.reset()
+                self._set_debug_frame(state=self._state, note="Macro timeout")
                 return False
 
         # Optional: wrong-gesture reset (basic version)
@@ -135,6 +143,7 @@ class MacroChainRecognizer(GestureRecognizer):
                 if detected:
                     self._debug(f"Wrong gesture detected ({st['gesture_id']}) while expecting {self.steps[expected_idx]['gesture_id']}. Resetting.")
                     self.reset()
+                    self._set_debug_frame(state=self._state, note="Wrong gesture reset")
                     return False
 
         # Evaluate current expected step
@@ -158,6 +167,13 @@ class MacroChainRecognizer(GestureRecognizer):
                 self._execute_macro_action(hands_data)
                 self._cooldown_until = now + (self.cooldown_ms / 1000.0)
                 self.reset()  # reset sequence state after firing
+                self._set_debug_frame(
+                    detected=True,
+                    should_trigger=True,
+                    action_executed=True,
+                    state=GestureState.IDLE,
+                    note=f"Completed macro: {self.name}",
+                )
                 return True
 
             # Reset the next step recognizer so it starts clean
@@ -165,6 +181,15 @@ class MacroChainRecognizer(GestureRecognizer):
 
         # Macro is considered "active" if it has started (step_index > 0)
         self._state = GestureState.ACTIVE if self._step_index > 0 else GestureState.IDLE
+        next_step = min(self._step_index + 1, len(self.steps))
+        note = f"Progress {self._step_index}/{len(self.steps)} - waiting for step {next_step}"
+        self._set_debug_frame(
+            detected=now_active,
+            should_trigger=False,
+            action_executed=False,
+            state=self._state,
+            note=note,
+        )
         return False
 
     def reset(self):
