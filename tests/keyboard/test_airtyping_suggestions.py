@@ -124,14 +124,11 @@ class AirTypingSuggestionTests(unittest.TestCase):
         self.assertEqual(self.action.typed_text[1], "help ")
         self.assertEqual(self.action.tapped, ["backspace"] * len("hello "))
 
-    def test_swipe_commit_blocks_keyboard_mode_exit_during_flick_window(self):
+    def test_swipe_commit_does_not_block_keyboard_mode_exit_during_flick_window(self):
         self._commit_swipe_word()
-        self.assertEqual(
-            self.gesture.blocks_keyboard_mode_exit(),
-            "Suggestion selection window is active",
-        )
+        self.assertEqual(self.gesture.blocks_keyboard_mode_exit(), "")
 
-    def test_suggestion_replacement_arms_short_exit_guard_after_flick_window(self):
+    def test_suggestion_replacement_only_blocks_until_pinch_is_released(self):
         self._commit_swipe_word()
         overlay = self.gesture.get_overlay_data()
         chip = next(c for c in overlay.get("suggestion_chips", []) if c.get("text"))
@@ -162,10 +159,7 @@ class AirTypingSuggestionTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(
-            self.gesture.blocks_keyboard_mode_exit(),
-            "Recent keyboard input is still settling",
-        )
+        self.assertEqual(self.gesture.blocks_keyboard_mode_exit(), "")
 
     def test_debug_hud_fields_are_minimal(self):
         self.gesture.update(_make_hands_data(right_present=True, right_pinch=False))
