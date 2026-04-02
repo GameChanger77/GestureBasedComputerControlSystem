@@ -21,6 +21,10 @@ class ProdWindowKeyboardSurfaceTests(unittest.TestCase):
         self.surface._right_open_for_drag = lambda hands_data: True
         self.surface._right_anchor_screen_px = lambda hands_data: (300.0, 220.0)
 
+        for _ in range(5):
+            state = self.surface.update_layout(self.empty, paused=False, rows=self.rows)
+            self.assertTrue(state.extra_overlay["prod_window_locked"])
+
         state = self.surface.update_layout(self.empty, paused=False, rows=self.rows)
         self.assertFalse(state.extra_overlay["prod_window_locked"])
 
@@ -40,7 +44,10 @@ class ProdWindowKeyboardSurfaceTests(unittest.TestCase):
     def test_closing_hand_locks_window(self):
         self.surface._right_open_for_drag = lambda hands_data: True
         self.surface._right_anchor_screen_px = lambda hands_data: (480.0, 380.0)
-        self.surface.update_layout(self.empty, paused=False, rows=self.rows)
+
+        for _ in range(6):
+            state = self.surface.update_layout(self.empty, paused=False, rows=self.rows)
+        self.assertFalse(state.extra_overlay["prod_window_locked"])
 
         self.surface._right_open_for_drag = lambda hands_data: False
         state = self.surface.update_layout(self.empty, paused=False, rows=self.rows)

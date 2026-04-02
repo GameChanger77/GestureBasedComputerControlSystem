@@ -124,6 +124,43 @@ class AirTypingSuggestionTests(unittest.TestCase):
         self.assertEqual(self.action.typed_text[1], "help ")
         self.assertEqual(self.action.tapped, ["backspace"] * len("hello "))
 
+    def test_swipe_commit_does_not_block_keyboard_mode_exit_during_flick_window(self):
+        self._commit_swipe_word()
+        self.assertEqual(self.gesture.blocks_keyboard_mode_exit(), "")
+
+    def test_suggestion_replacement_only_blocks_until_pinch_is_released(self):
+        self._commit_swipe_word()
+        overlay = self.gesture.get_overlay_data()
+        chip = next(c for c in overlay.get("suggestion_chips", []) if c.get("text"))
+        cx = chip["x"] + (chip["w"] / 2.0)
+        cy = chip["y"] + (chip["h"] / 2.0)
+
+        self.gesture._flick_window_active = False
+        self.gesture.update(
+            _make_hands_data(
+                right_present=True,
+                right_pinch=True,
+                right_index_x=cx,
+                right_index_y=cy,
+            )
+        )
+
+        self.assertEqual(
+            self.gesture.blocks_keyboard_mode_exit(),
+            "Key selection pinch is still latched",
+        )
+
+        self.gesture.update(
+            _make_hands_data(
+                right_present=True,
+                right_pinch=False,
+                right_index_x=cx,
+                right_index_y=cy,
+            )
+        )
+
+        self.assertEqual(self.gesture.blocks_keyboard_mode_exit(), "")
+
     def test_debug_hud_fields_are_minimal(self):
         self.gesture.update(_make_hands_data(right_present=True, right_pinch=False))
         hud = self.gesture.get_overlay_data().get("debug_hud", {})

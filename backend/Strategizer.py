@@ -1,10 +1,12 @@
 from enum import Enum
 import time
+from pathlib import Path
 
 from backend.HandsData import HandsData
 from backend.macros.macro_store import MacroStore
 from backend.gesture_remap.builtins import BuiltInGestureRegistry
 from backend.gesture_remap.override_store import GestureOverrideStore
+from backend.gestures.GestureUtils import are_fingers_pinched, is_finger_extended
 
 
 class ControlMode(Enum):
@@ -16,7 +18,15 @@ class ControlMode(Enum):
 
 class Strategizer:
 
-    def __init__(self, action, config, screen_width, screen_height, ui_mode="dev"):
+    def __init__(
+        self,
+        action,
+        config,
+        screen_width,
+        screen_height,
+        ui_mode="dev",
+        load_legacy_custom_rules=False,
+    ):
         """
         Initialize the Strategizer.
 
@@ -47,12 +57,14 @@ class Strategizer:
         self._last_mode_switch_ts = 0.0
         self.gesture_override_store = GestureOverrideStore.from_config(config)
         self.macro_store = MacroStore.from_config(config)
+        self._debug_snapshot = self._empty_debug_snapshot()
+        self.load_legacy_custom_rules = bool(load_legacy_custom_rules)
 
         # Initialize built-in mode-specific gestures before loading JSON rules.
         self._initialize_mouse_mode()
         self._initialize_keyboard_mode()
         self._initialize_switch_mode()
-        self.load_custom_rules("gesture_custom_rules.json")
+        self._reload_customizations(load_legacy_rules=self.load_legacy_custom_rules)
 
     def _initialize_mouse_mode(self):
         """Initialize gesture recognizers for mouse mode."""
@@ -86,6 +98,7 @@ class Strategizer:
                 screen_height=self.screen_height,
             )
         ]
+        self.keyboard_mode_gestures[0].debug_name = "Air Typing"
         self._rebuild_sorted_gestures(ControlMode.KEYBOARD)
 
     def set_mode(self, mode: ControlMode):
@@ -179,13 +192,43 @@ class Strategizer:
             sorted_switch_gestures = sorted(
                 self.switch_mode_gestures, key=lambda g: g.priority, reverse=True
             )
+            switch_entries = []
+            keyboard_exit_block_note = self._keyboard_mode_exit_block_note()
             for switch_gesture in sorted_switch_gestures:
-                if switch_gesture.update(hands_data):
+                if (
+                    keyboard_exit_block_note
+                    and getattr(switch_gesture, "debug_gesture_id", "") == "switch_to_mouse"
+                ):
+                    switch_entries.append(
+                        self._gesture_debug_entry(
+                            switch_gesture,
+                            suppressed=True,
+                            note=keyboard_exit_block_note,
+                            evaluated=False,
+                        )
+                    )
+                    continue
+                action_executed = switch_gesture.update(hands_data)
+                switch_entries.append(self._gesture_debug_entry(switch_gesture))
+                if action_executed:
+                    self._debug_snapshot = self._build_debug_snapshot(
+                        hands_data,
+                        mode_switch_entries=switch_entries,
+                        mode_entries=self._suppressed_entries(
+                            self._get_current_mode_sorted_gestures(),
+                            "Mode switch took priority",
+                        ),
+                        winning_action=self._winning_action_from_gesture(switch_gesture),
+                    )
                     return
+        else:
+            switch_entries = self._cooldown_entries(self.switch_mode_gestures, "Mode switch cooldown")
 
         sorted_gestures = self._get_current_mode_sorted_gestures()
         high_priority_active = False
         active_priority = None
+        mode_entries = []
+        winning_action = None
 
         for gesture in sorted_gestures:
             if (
@@ -193,13 +236,28 @@ class Strategizer:
                 and active_priority is not None
                 and gesture.priority < active_priority
             ):
+                mode_entries.append(
+                    self._gesture_debug_entry(
+                        gesture,
+                        suppressed=True,
+                        note="Suppressed by higher priority gesture",
+                        evaluated=False,
+                    )
+                )
                 continue
 
             action_executed = gesture.update(
                 hands_data, frame_capture_ts_ns=frame_capture_ts_ns
             )
+            mode_entries.append(self._gesture_debug_entry(gesture))
 
-            if getattr(gesture, "consumes_events", False) and gesture.is_active:
+            if (
+                (
+                    getattr(gesture, "consumes_events", False)
+                    or getattr(gesture, "suppresses_lower_priorities_while_active", False)
+                )
+                and gesture.is_active
+            ):
                 high_priority_active = True
                 if active_priority is None:
                     active_priority = gesture.priority
@@ -212,9 +270,191 @@ class Strategizer:
                     active_priority = gesture.priority
                 else:
                     active_priority = max(active_priority, gesture.priority)
+            if action_executed and winning_action is None:
+                winning_action = self._winning_action_from_gesture(gesture)
+
+        self._debug_snapshot = self._build_debug_snapshot(
+            hands_data,
+            mode_switch_entries=switch_entries,
+            mode_entries=mode_entries,
+            winning_action=winning_action,
+        )
+
+    def _keyboard_mode_exit_block_note(self) -> str:
+        if self.current_mode != ControlMode.KEYBOARD:
+            return ""
+        for gesture in self.keyboard_mode_gestures:
+            block_method = getattr(gesture, "blocks_keyboard_mode_exit", None)
+            if not callable(block_method):
+                continue
+            note = str(block_method() or "").strip()
+            if note:
+                return note
+        return ""
 
     def get_mode_name(self):
         return self.current_mode.value.upper()
+
+    def _empty_debug_snapshot(self):
+        return {
+            "mode": self.get_mode_name(),
+            "hands": [],
+            "mode_switch_candidates": [],
+            "mode_candidates": [],
+            "winning_action": None,
+            "action_debug": None,
+        }
+
+    def _resolve_legacy_rules_path(self):
+        config_path = getattr(self.config, "config_path", None)
+        if config_path is None:
+            return "gesture_custom_rules.json"
+        return str(Path(config_path).with_name("gesture_custom_rules.json"))
+
+    def _gesture_display_name(self, gesture):
+        return (
+            getattr(gesture, "debug_name", None)
+            or getattr(gesture, "name", None)
+            or getattr(gesture, "debug_gesture_id", None)
+            or gesture.__class__.__name__
+        )
+
+    def _gesture_state_value(self, gesture):
+        state = getattr(gesture, "current_state", None)
+        return getattr(state, "value", str(state)).lower() if state is not None else "unknown"
+
+    def _gesture_debug_entry(self, gesture, *, suppressed=False, note=None, evaluated=True):
+        entry_note = note if note is not None else getattr(gesture, "_debug_last_note", "")
+        state = self._gesture_state_value(gesture)
+        if suppressed:
+            state = "suppressed"
+        return {
+            "name": self._gesture_display_name(gesture),
+            "priority": int(getattr(gesture, "priority", 0)),
+            "state": state,
+            "detected": bool(getattr(gesture, "_debug_last_detected", False)) if evaluated else False,
+            "active": bool(getattr(gesture, "is_active", False)),
+            "executed": bool(getattr(gesture, "_debug_last_action_executed", False)) if evaluated else False,
+            "suppressed": bool(suppressed),
+            "note": str(entry_note or ""),
+        }
+
+    def _suppressed_entries(self, gestures, note):
+        return [
+            self._gesture_debug_entry(
+                gesture,
+                suppressed=True,
+                note=note,
+                evaluated=False,
+            )
+            for gesture in gestures
+        ]
+
+    def _cooldown_entries(self, gestures, note):
+        entries = []
+        for gesture in sorted(gestures, key=lambda g: g.priority, reverse=True):
+            entries.append(
+                {
+                    "name": self._gesture_display_name(gesture),
+                    "priority": int(getattr(gesture, "priority", 0)),
+                    "state": "cooldown",
+                    "detected": False,
+                    "active": bool(getattr(gesture, "is_active", False)),
+                    "executed": False,
+                    "suppressed": False,
+                    "note": note,
+                }
+            )
+        return entries
+
+    def _winning_action_from_gesture(self, gesture):
+        return {
+            "name": self._gesture_display_name(gesture),
+            "priority": int(getattr(gesture, "priority", 0)),
+            "note": str(getattr(gesture, "_debug_last_note", "") or ""),
+        }
+
+    def _hand_debug_entry(self, side, wrist_hand, camera_hand):
+        finger_names = ("thumb", "index", "middle", "ring", "pinky")
+        present = wrist_hand.exists and camera_hand.exists
+        if not present:
+            return {
+                "side": side,
+                "present": False,
+                "extended": {},
+                "extended_fingers": [],
+                "curled_fingers": [],
+                "pinches": {},
+                "detected_pinches": [],
+            }
+
+        extension_threshold = float(self.config["finger_extension_angle"])
+        pinch_threshold = float(self.config["pinch_threshold"])
+        extended = {
+            finger_name: bool(is_finger_extended(getattr(wrist_hand, finger_name), threshold=extension_threshold))
+            for finger_name in finger_names
+        }
+        detected_pinches = []
+        pinches = {}
+        pinch_pairs = (
+            ("thumb_index", "thumb", "index"),
+            ("thumb_middle", "thumb", "middle"),
+            ("thumb_ring", "thumb", "ring"),
+            ("thumb_pinky", "thumb", "pinky"),
+        )
+        for key, finger_a, finger_b in pinch_pairs:
+            is_pinched = bool(
+                are_fingers_pinched(
+                    getattr(wrist_hand, finger_a).tip,
+                    getattr(wrist_hand, finger_b).tip,
+                    pinch_threshold,
+                )
+            )
+            pinches[key] = is_pinched
+            if is_pinched:
+                detected_pinches.append(f"{finger_a.title()} + {finger_b.title()}")
+
+        extended_fingers = [finger_name.title() for finger_name in finger_names if extended[finger_name]]
+        curled_fingers = [finger_name.title() for finger_name in finger_names if not extended[finger_name]]
+        return {
+            "side": side,
+            "present": True,
+            "extended": extended,
+            "extended_fingers": extended_fingers,
+            "curled_fingers": curled_fingers,
+            "pinches": pinches,
+            "detected_pinches": detected_pinches,
+        }
+
+    def _build_debug_snapshot(self, hands_data: HandsData, *, mode_switch_entries, mode_entries, winning_action):
+        action_debug = None
+        if hasattr(self.action, "get_runtime_debug_snapshot"):
+            action_debug = self.action.get_runtime_debug_snapshot()
+        return {
+            "mode": self.get_mode_name(),
+            "hands": [
+                self._hand_debug_entry("Left", hands_data.wrist.left, hands_data.camera.left),
+                self._hand_debug_entry("Right", hands_data.wrist.right, hands_data.camera.right),
+            ],
+            "mode_switch_candidates": mode_switch_entries,
+            "mode_candidates": mode_entries,
+            "winning_action": winning_action,
+            "action_debug": action_debug,
+        }
+
+    def capture_debug_snapshot(self, hands_data: HandsData):
+        self._debug_snapshot = self._build_debug_snapshot(
+            hands_data,
+            mode_switch_entries=self._cooldown_entries(self.switch_mode_gestures, "Not evaluated this frame"),
+            mode_entries=[
+                self._gesture_debug_entry(gesture, evaluated=False)
+                for gesture in self._get_current_mode_sorted_gestures()
+            ],
+            winning_action=None,
+        )
+
+    def get_debug_snapshot(self):
+        return self._debug_snapshot
 
     def get_keyboard_overlay_data(self):
         """Get overlay/debug data from keyboard typing recognizer when available."""
@@ -277,7 +517,7 @@ class Strategizer:
             self.hotkey_mode_gestures.remove(gesture)
             self._rebuild_sorted_gestures(ControlMode.HOTKEY)
 
-    def load_custom_rules(self, path="gesture_custom_rules.json"):
+    def _reload_customizations(self, *, legacy_rules_path=None, load_legacy_rules=False):
         from backend.custom_rules.RuleCompiler import RuleCompiler
         from backend.custom_rules.RuleLoader import RuleLoader
 
@@ -294,62 +534,64 @@ class Strategizer:
         self._rebuild_sorted_gestures(ControlMode.KEYBOARD)
         self._rebuild_sorted_gestures(ControlMode.HOTKEY)
 
-        try:
-            rules = RuleLoader(path).load()
-        except Exception as exc:
-            print(f"[WARN] Failed to load custom rules: {exc}")
-            return
-
         compiler = RuleCompiler(self.config, self.screen_width, self.screen_height)
-        global_cfg = rules.get("global", {})
-
-        for rule in rules.get("custom_gestures", []):
-            if not rule.get("enabled", False):
-                continue
-
-            mode_str = rule.get("mode", "mouse")
-            if mode_str == "mouse":
-                mode = ControlMode.MOUSE
-            elif mode_str == "keyboard":
-                mode = ControlMode.KEYBOARD
-            else:
-                mode = ControlMode.HOTKEY
-
+        if load_legacy_rules:
+            path = legacy_rules_path or self._resolve_legacy_rules_path()
             try:
-                recognizer = compiler.compile_gesture(self.action, rule, global_cfg)
-                self.add_custom_gesture(recognizer, mode=mode)
-                self._custom_gesture_instances.append(recognizer)
-                print(f"[OK] Loaded custom gesture: {rule.get('id')} ({mode_str})")
+                rules = RuleLoader(path).load()
             except Exception as exc:
-                print(f"[WARN] Skipped custom gesture {rule.get('id')}: {exc}")
+                print(f"[WARN] Failed to load custom rules: {exc}")
+                rules = {}
 
-        gesture_rule_by_id = {
-            gesture["id"]: gesture
-            for gesture in rules.get("custom_gestures", [])
-            if gesture.get("enabled", False)
-        }
+            global_cfg = rules.get("global", {})
 
-        for macro in rules.get("custom_macros", []):
-            if not macro.get("enabled", False):
-                continue
+            for rule in rules.get("custom_gestures", []):
+                if not rule.get("enabled", False):
+                    continue
 
-            mode_str = macro.get("mode", "mouse")
-            if mode_str == "mouse":
-                mode = ControlMode.MOUSE
-            elif mode_str == "keyboard":
-                mode = ControlMode.KEYBOARD
-            else:
-                mode = ControlMode.HOTKEY
+                mode_str = rule.get("mode", "mouse")
+                if mode_str == "mouse":
+                    mode = ControlMode.MOUSE
+                elif mode_str == "keyboard":
+                    mode = ControlMode.KEYBOARD
+                else:
+                    mode = ControlMode.HOTKEY
 
-            try:
-                recognizer = compiler.compile_macro(
-                    self.action, macro, gesture_rule_by_id, global_cfg
-                )
-                self.add_custom_gesture(recognizer, mode=mode)
-                self._custom_gesture_instances.append(recognizer)
-                print(f"[OK] Loaded custom macro: {macro.get('id')} ({mode_str})")
-            except Exception as exc:
-                print(f"[WARN] Skipped custom macro {macro.get('id')}: {exc}")
+                try:
+                    recognizer = compiler.compile_gesture(self.action, rule, global_cfg)
+                    self.add_custom_gesture(recognizer, mode=mode)
+                    self._custom_gesture_instances.append(recognizer)
+                    print(f"[OK] Loaded custom gesture: {rule.get('id')} ({mode_str})")
+                except Exception as exc:
+                    print(f"[WARN] Skipped custom gesture {rule.get('id')}: {exc}")
+
+            gesture_rule_by_id = {
+                gesture["id"]: gesture
+                for gesture in rules.get("custom_gestures", [])
+                if gesture.get("enabled", False)
+            }
+
+            for macro in rules.get("custom_macros", []):
+                if not macro.get("enabled", False):
+                    continue
+
+                mode_str = macro.get("mode", "mouse")
+                if mode_str == "mouse":
+                    mode = ControlMode.MOUSE
+                elif mode_str == "keyboard":
+                    mode = ControlMode.KEYBOARD
+                else:
+                    mode = ControlMode.HOTKEY
+
+                try:
+                    recognizer = compiler.compile_macro(
+                        self.action, macro, gesture_rule_by_id, global_cfg
+                    )
+                    self.add_custom_gesture(recognizer, mode=mode)
+                    self._custom_gesture_instances.append(recognizer)
+                    print(f"[OK] Loaded custom macro: {macro.get('id')} ({mode_str})")
+                except Exception as exc:
+                    print(f"[WARN] Skipped custom macro {macro.get('id')}: {exc}")
 
         for macro_record in self.macro_store.list_records():
             if not macro_record.enabled:
@@ -369,6 +611,9 @@ class Strategizer:
                 print(f"[OK] Loaded UI macro: {macro_record.name} ({macro_record.mode})")
             except Exception as exc:
                 print(f"[WARN] Skipped UI macro {macro_record.name}: {exc}")
+
+    def load_custom_rules(self, path=None):
+        self._reload_customizations(legacy_rules_path=path, load_legacy_rules=True)
 
     def shutdown(self):
         """Reset all gestures and release held state before process/UI shutdown."""

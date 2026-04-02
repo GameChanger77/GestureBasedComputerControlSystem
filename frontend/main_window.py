@@ -15,6 +15,7 @@ from PySide6.QtCore import QTimer
 
 from frontend.widgets.display.video_widget import VideoWidget
 from frontend.production_keyboard_window import ProductionKeyboardWindow
+from frontend.widgets.display.gesture_debug_widget import GestureDebugWidget
 from frontend.widgets.display.stats_widget import PerformanceStatsWidget
 from frontend.widgets.settings.settings_panel import SettingsPanel
 from frontend.widgets.settings.settings_theme import (
@@ -29,6 +30,7 @@ from frontend.widgets.settings.settings_theme import (
     set_label_role,
     set_label_tone,
 )
+from frontend.widgets.tutorial import TutorialDialog
 from backend.camera_devices import resolve_camera_selection
 from backend.gestures.keyboard_mode.KeyboardThemes import KeyboardThemeRegistry
 
@@ -101,10 +103,12 @@ class MainWindow(QMainWindow):
         self.toggle_display_button = None
         self.toggle_landmarks_button = None
         self.settings_button = None
+        self.tutorial_button = None
         self.back_button = None
         self.status_label = None
         self.mode_label = None
         self.keyboard_status_label = None
+        self.gesture_debug_widget = None
         self.settings_status_label = None
         self.page_stack = None
         self.main_page = None
@@ -112,6 +116,7 @@ class MainWindow(QMainWindow):
         self.status_detail_label = None
         self.preview_hint_card = None
         self.prod_header_card = None
+        self.tutorial_dialog = None
 
         # Start/Stop tracking button
         self.start_button = QPushButton("Start Tracking")
@@ -169,11 +174,6 @@ class MainWindow(QMainWindow):
         title = QLabel("Hand Gesture Control")
         set_label_role(title, "hero-title")
         hero_copy.addWidget(title)
-
-        subtitle = QLabel("Monitor live tracking, inspect keyboard state, and move into settings without leaving the dashboard.")
-        subtitle.setWordWrap(True)
-        set_label_role(subtitle, "hero-subtitle")
-        hero_copy.addWidget(subtitle)
         hero_header.addLayout(hero_copy, 1)
 
         hero_badges = QHBoxLayout()
@@ -229,6 +229,13 @@ class MainWindow(QMainWindow):
         set_button_icon(self.settings_button, "settings")
         utility_layout.addWidget(self.settings_button)
 
+        self.tutorial_button = QPushButton("Tutorial")
+        self.tutorial_button.setMinimumHeight(40)
+        self.tutorial_button.clicked.connect(self.open_tutorial)
+        set_button_role(self.tutorial_button, "toolbar")
+        set_button_icon(self.tutorial_button, "tutorial")
+        utility_layout.addWidget(self.tutorial_button)
+
         toolbar_row.addWidget(utility_group, 1)
         hero_card.body_layout.addLayout(toolbar_row)
         layout.addWidget(hero_card)
@@ -257,6 +264,9 @@ class MainWindow(QMainWindow):
         set_label_role(self.keyboard_status_label, "status-detail")
         keyboard_card.body_layout.addWidget(self.keyboard_status_label)
         side_column.addWidget(keyboard_card)
+
+        self.gesture_debug_widget = GestureDebugWidget()
+        side_column.addWidget(self.gesture_debug_widget)
         side_column.addStretch()
 
         content_row.addLayout(side_column, 1)
@@ -319,11 +329,6 @@ class MainWindow(QMainWindow):
         set_label_role(title, "hero-title")
         self.prod_header_card.body_layout.addWidget(title)
 
-        subtitle = QLabel("Launch or stop tracking, confirm runtime state, and adjust production settings without exposing the development dashboard.")
-        subtitle.setWordWrap(True)
-        set_label_role(subtitle, "hero-subtitle")
-        self.prod_header_card.body_layout.addWidget(subtitle)
-
         summary_row = QHBoxLayout()
         summary_row.setContentsMargins(0, 4, 0, 0)
         summary_row.setSpacing(8)
@@ -338,6 +343,12 @@ class MainWindow(QMainWindow):
         control_row.setContentsMargins(0, 6, 0, 0)
         control_row.setSpacing(12)
         control_row.addWidget(self.start_button, 0)
+        self.tutorial_button = QPushButton("Tutorial")
+        self.tutorial_button.setMinimumHeight(40)
+        self.tutorial_button.clicked.connect(self.open_tutorial)
+        set_button_role(self.tutorial_button, "toolbar")
+        set_button_icon(self.tutorial_button, "tutorial")
+        control_row.addWidget(self.tutorial_button, 0)
         control_row.addStretch()
         self.prod_header_card.body_layout.addLayout(control_row)
 
@@ -479,11 +490,7 @@ class MainWindow(QMainWindow):
 
     def _auto_start_tracking(self):
         """Start tracking automatically once UI event loop is running."""
-        if not self.hand_tracker:
-            return
-        if self.hand_tracker.isRunning():
-            return
-        self.toggle_tracking()
+        self.ensure_tracking_running()
 
     def _get_camera_start_dimensions(self):
         """Get camera start dimensions from config, with safe defaults."""
@@ -514,19 +521,56 @@ class MainWindow(QMainWindow):
             if self.stats_widget:
                 self.stats_widget.reset()
         else:
-            # Start tracking
-            camera_index, camera_backend = self._get_selected_camera_selection()
-            cam_w, cam_h = self._get_camera_start_dimensions()
-            if self.hand_tracker.start_tracking(
-                camera_index=camera_index,
-                width=cam_w,
-                height=cam_h,
-                camera_backend=camera_backend,
-            ):
-                self._set_start_button_running(True)
-                self._set_status_text("Status: Starting...")
-            else:
-                self._set_status_text("Status: Failed to start")
+            self.ensure_tracking_running()
+
+    def ensure_tracking_running(self) -> bool:
+        """Ensure the tracker is running, starting it if needed."""
+        if not self.hand_tracker:
+            self._set_status_text("Status: Error - No tracker")
+            return False
+
+        if self.hand_tracker.isRunning():
+            return True
+
+        camera_index, camera_backend = self._get_selected_camera_selection()
+        cam_w, cam_h = self._get_camera_start_dimensions()
+        if self.hand_tracker.start_tracking(
+            camera_index=camera_index,
+            width=cam_w,
+            height=cam_h,
+            camera_backend=camera_backend,
+        ):
+            self._set_start_button_running(True)
+            self._set_status_text("Status: Starting...")
+            return True
+
+        self._set_status_text("Status: Failed to start")
+        return False
+
+    @Slot()
+    def open_tutorial(self):
+        """Open the built-in default gesture tutorial."""
+        if self.tutorial_dialog is not None and self.tutorial_dialog.isVisible():
+            self.tutorial_dialog.raise_()
+            self.tutorial_dialog.activateWindow()
+            return
+
+        self.tutorial_dialog = TutorialDialog(
+            self,
+            main_window=self,
+            action=self.action,
+            strategizer=self.strategizer,
+            ui_mode=self.ui_mode,
+            production_keyboard_window=self.production_keyboard_window,
+        )
+        try:
+            self.tutorial_dialog.finished.connect(self._on_tutorial_closed)
+        except Exception:
+            pass
+        self.tutorial_dialog.exec()
+
+    def _on_tutorial_closed(self, _result):
+        self.tutorial_dialog = None
 
     @Slot()
     def toggle_display(self):
@@ -632,6 +676,10 @@ class MainWindow(QMainWindow):
                     hands_count += 1
         self.stats_widget.update_hands_count(hands_count)
         self._update_mode_label()
+        if self.gesture_debug_widget:
+            self.gesture_debug_widget.update_debug(
+                landmarks_data.get("gesture_debug") if landmarks_data else None
+            )
 
         # Only update preview if enabled and frame data was provided.
         if self.display_enabled and self.video_widget and frame is not None and frame.size != 0:
@@ -820,6 +868,8 @@ class MainWindow(QMainWindow):
             self.video_widget.clear_frame()
         if self.stats_widget:
             self.stats_widget.reset()
+        if self.gesture_debug_widget:
+            self.gesture_debug_widget.reset()
         return True
 
     def draw_landmarks(self, image, hands_data, mirror_x=False):
@@ -1148,6 +1198,8 @@ class MainWindow(QMainWindow):
         self._set_start_button_running(False)
         if self.video_widget:
             self.video_widget.clear_frame()
+        if self.gesture_debug_widget:
+            self.gesture_debug_widget.reset()
         if self.production_keyboard_window:
             self.production_keyboard_window.set_overlay_data(None)
         self._update_mode_label()
@@ -1159,6 +1211,8 @@ class MainWindow(QMainWindow):
             return
         self._set_start_button_running(False)
         self._set_status_text(f"Status: Error - {error_message}")
+        if self.gesture_debug_widget:
+            self.gesture_debug_widget.reset()
         if self.production_keyboard_window:
             self.production_keyboard_window.set_overlay_data(None)
         self._update_mode_label()
@@ -1166,6 +1220,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Handle window close event"""
         # Stop tracking when window closes
+        if self.tutorial_dialog is not None:
+            self.tutorial_dialog.close()
         if self.production_keyboard_window:
             self.production_keyboard_window.close()
         if self.hand_tracker and self.hand_tracker.isRunning():

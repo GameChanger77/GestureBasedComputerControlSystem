@@ -78,6 +78,7 @@ class BuiltInGestureRegistry:
                 "finger_angle": config["finger_extension_angle"],
                 "scroll_sens": config["scroll_sensitivity"],
                 "pinch_thresh": config["pinch_threshold"],
+                "left_click_hold_time_sec": config.get("left_click_hold_time_sec", 1.0),
                 "mouse_pending": config["mouse_tracking_pending_frames"],
                 "click_pending": config["click_pending_frames"],
                 "scroll_pending": config["scroll_pending_frames"],
@@ -142,6 +143,7 @@ class BuiltInGestureRegistry:
                 extension_threshold=p["finger_angle"],
                 pending_frames=p["click_pending"],
                 ending_frames=p["ending"],
+                double_click_hold_time=p["left_click_hold_time_sec"],
             )
 
         def left_click_override(action, strategizer, record):
@@ -155,6 +157,7 @@ class BuiltInGestureRegistry:
                 extension_threshold=p["finger_angle"],
                 pending_frames=p["click_pending"],
                 ending_frames=p["ending"],
+                double_click_hold_time=p["left_click_hold_time_sec"],
                 pose_template=record.pose_template,
                 matcher_config=record.matcher_config,
             )
@@ -170,6 +173,7 @@ class BuiltInGestureRegistry:
                 extension_threshold=p["finger_angle"],
                 pending_frames=record.rule_override.pending_frames,
                 ending_frames=record.rule_override.ending_frames,
+                double_click_hold_time=p["left_click_hold_time_sec"],
                 rule_override=record.rule_override,
             )
 
@@ -224,6 +228,7 @@ class BuiltInGestureRegistry:
                 extension_threshold=p["finger_angle"],
                 pending_frames=p["scroll_pending"],
                 ending_frames=p["ending"],
+                pinch_threshold=p["pinch_thresh"],
             )
 
         def scroll_override(action, strategizer, record):
@@ -532,7 +537,7 @@ class BuiltInGestureRegistry:
                 mode_label="Mouse",
                 conflict_group="mouse",
                 hand="right",
-                default_description="Single click on pose enter, hold to trigger a double click.",
+                default_description="Single click on pose enter, hold to trigger one additional click.",
                 preview_pose_template=preview_templates["left_click"],
                 saved_pose_template=templates["left_click"],
                 default_rule_factory=left_click_rule_defaults,
@@ -562,7 +567,7 @@ class BuiltInGestureRegistry:
                 mode_label="Mouse",
                 conflict_group="mouse",
                 hand="right",
-                default_description="Scroll while holding the scroll pose and moving the hand vertically.",
+                default_description="Scroll while holding the scroll pose and moving the hand vertically; mouse move is suppressed while active.",
                 preview_pose_template=preview_templates["scroll"],
                 saved_pose_template=templates["scroll"],
                 default_rule_factory=scroll_rule_defaults,
@@ -650,9 +655,14 @@ class BuiltInGestureRegistry:
     def build_runtime_gesture(cls, gesture_id: str, strategizer, override_store: GestureOverrideStore):
         definition = cls.get(gesture_id)
         record = override_store.get(gesture_id) if override_store else None
+        recognizer = None
         if record and record.enabled:
             if record.is_rule_override and record.rule_override is not None:
-                return definition.rule_override_factory(strategizer.action, strategizer, record)
-            if record.is_point_override:
-                return definition.override_factory(strategizer.action, strategizer, record)
-        return definition.default_factory(strategizer.action, strategizer)
+                recognizer = definition.rule_override_factory(strategizer.action, strategizer, record)
+            elif record.is_point_override:
+                recognizer = definition.override_factory(strategizer.action, strategizer, record)
+        if recognizer is None:
+            recognizer = definition.default_factory(strategizer.action, strategizer)
+        recognizer.debug_name = definition.display_name
+        recognizer.debug_gesture_id = definition.id
+        return recognizer
