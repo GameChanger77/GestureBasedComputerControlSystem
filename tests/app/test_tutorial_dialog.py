@@ -1,4 +1,5 @@
 import os
+import time
 import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -159,6 +160,136 @@ class TutorialDialogTests(unittest.TestCase):
         unlocked_icon = dialog.continue_button.icon().cacheKey()
         self.assertTrue(dialog.continue_button.isEnabled())
         self.assertNotEqual(locked_icon, unlocked_icon)
+        dialog.close()
+
+    def test_step_completion_starts_countdown_and_confetti(self):
+        dialog = TutorialDialog(
+            QWidget(),
+            main_window=_FakeMainWindow(),
+            action=_FakeAction(),
+            strategizer=_FakeStrategizer(),
+            ui_mode="prod",
+        )
+
+        dialog._mark_current_complete("Done")
+
+        self.assertTrue(dialog._completion_countdown_active)
+        self.assertTrue(dialog.confetti_overlay.is_active)
+        self.assertTrue(dialog.continue_button.isEnabled())
+        self.assertIn("(3)", dialog.continue_button.text())
+        dialog.close()
+
+    def test_auto_advance_moves_to_next_step(self):
+        dialog = TutorialDialog(
+            QWidget(),
+            main_window=_FakeMainWindow(),
+            action=_FakeAction(),
+            strategizer=_FakeStrategizer(),
+            ui_mode="prod",
+        )
+
+        dialog._mark_current_complete("Done")
+        dialog._completion_deadline = time.monotonic() - 0.1
+        dialog._on_auto_advance_tick()
+
+        self.assertEqual(dialog.title_label.text(), "Perform a left click")
+        self.assertFalse(dialog._completion_countdown_active)
+        self.assertEqual(dialog.continue_button.text(), "Continue")
+        dialog.close()
+
+    def test_back_cancels_active_countdown(self):
+        dialog = TutorialDialog(
+            QWidget(),
+            main_window=_FakeMainWindow(),
+            action=_FakeAction(),
+            strategizer=_FakeStrategizer(),
+            ui_mode="prod",
+        )
+        dialog._controller.mark_current_complete()
+        dialog._go_next()
+        self.assertEqual(dialog.title_label.text(), "Perform a left click")
+
+        dialog._mark_current_complete("Done")
+        self.assertTrue(dialog._completion_countdown_active)
+
+        dialog._go_back()
+
+        self.assertEqual(dialog.title_label.text(), "Move the mouse")
+        self.assertFalse(dialog._completion_countdown_active)
+        self.assertEqual(dialog.continue_button.text(), "Continue")
+        dialog.close()
+
+    def test_final_step_auto_finishes_after_countdown(self):
+        dialog = TutorialDialog(
+            QWidget(),
+            main_window=_FakeMainWindow(),
+            action=_FakeAction(),
+            strategizer=_FakeStrategizer(),
+            ui_mode="prod",
+        )
+
+        for _ in range(dialog._controller.total_steps - 1):
+            dialog._controller.mark_current_complete()
+            dialog._go_next()
+
+        self.assertEqual(dialog.title_label.text(), "Switch back to mouse mode")
+        dialog._mark_current_complete("Done")
+        self.assertIn("Finish (3)", dialog.continue_button.text())
+
+        dialog._completion_deadline = time.monotonic() - 0.1
+        dialog._on_auto_advance_tick()
+
+        self.assertEqual(dialog.result(), dialog.DialogCode.Accepted)
+
+    def test_manual_continue_stops_countdown(self):
+        dialog = TutorialDialog(
+            QWidget(),
+            main_window=_FakeMainWindow(),
+            action=_FakeAction(),
+            strategizer=_FakeStrategizer(),
+            ui_mode="prod",
+        )
+
+        dialog._mark_current_complete("Done")
+        dialog._go_next()
+
+        self.assertEqual(dialog.title_label.text(), "Perform a left click")
+        self.assertFalse(dialog._completion_countdown_active)
+        dialog.close()
+
+    def test_drag_keyboard_step_latches_origin_from_first_live_rect(self):
+        strategizer = _FakeStrategizer()
+        dialog = TutorialDialog(
+            QWidget(),
+            main_window=_FakeMainWindow(),
+            action=_FakeAction(),
+            strategizer=strategizer,
+            ui_mode="prod",
+        )
+
+        for _ in range(5):
+            dialog._controller.mark_current_complete()
+            dialog._go_next()
+
+        self.assertEqual(dialog.title_label.text(), "Drag the keyboard")
+        dialog._drag_rect_origin = None
+
+        strategizer.overlay_data = {
+            "prod_window_locked": True,
+            "prod_window_rect_px": {"x": 100, "y": 200, "w": 900, "h": 300},
+        }
+        dialog._process_runtime_completion()
+        self.assertEqual(dialog._drag_rect_origin, (100, 200, 900, 300))
+        self.assertFalse(dialog.continue_button.isEnabled())
+
+        strategizer.overlay_data = {
+            "prod_window_locked": False,
+            "prod_window_rect_px": {"x": 160, "y": 220, "w": 900, "h": 300},
+        }
+        dialog._process_runtime_completion()
+
+        self.assertTrue(dialog.continue_button.isEnabled())
+        self.assertTrue(dialog._completion_countdown_active)
         dialog.close()
 
 

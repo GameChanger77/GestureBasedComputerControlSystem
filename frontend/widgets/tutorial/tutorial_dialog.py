@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+import time
+
 from PySide6.QtCore import QPoint, QSize, QTimer, Qt
 from PySide6.QtWidgets import (
     QDialog,
@@ -30,11 +33,14 @@ from frontend.widgets.settings.settings_theme import (
     set_label_tone,
 )
 from frontend.widgets.tutorial.tutorial_animation_widget import TutorialAnimationWidget
+from frontend.widgets.tutorial.tutorial_confetti_overlay import TutorialConfettiOverlay
 from frontend.widgets.tutorial.tutorial_session import TutorialSessionController
 from frontend.widgets.tutorial.tutorial_steps import build_tutorial_steps, tutorial_asset_path
 
 
 class TutorialDialog(QDialog):
+    AUTO_ADVANCE_SECONDS = 3.0
+
     def __init__(
         self,
         parent,
@@ -55,6 +61,9 @@ class TutorialDialog(QDialog):
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(100)
         self._poll_timer.timeout.connect(self._poll_runtime_state)
+        self._auto_advance_timer = QTimer(self)
+        self._auto_advance_timer.setInterval(100)
+        self._auto_advance_timer.timeout.connect(self._on_auto_advance_tick)
         self._last_action_sequence = 0
         self._tracking_start_attempted = False
         self._tracking_start_error = ""
@@ -66,6 +75,9 @@ class TutorialDialog(QDialog):
         self._typing_input = None
         self._drag_rect_origin = None
         self._locked_rect_snapshot = None
+        self._completion_deadline = 0.0
+        self._completion_countdown_active = False
+        self._completion_message = ""
 
         self.setWindowTitle("Default Gesture Tutorial")
         self.setModal(True)
@@ -153,6 +165,8 @@ class TutorialDialog(QDialog):
 
         root.addLayout(content_row, 1)
 
+        self.confetti_overlay = TutorialConfettiOverlay(self)
+
         footer = QHBoxLayout()
         footer.setContentsMargins(0, 0, 0, 0)
         footer.setSpacing(12)
@@ -196,6 +210,7 @@ class TutorialDialog(QDialog):
         return bool(tracker and tracker.isRunning())
 
     def _configure_current_step(self, *, reset_events: bool):
+        self._stop_completion_feedback(reset_confetti=True)
         step = self._controller.current_step
         self.title_label.setText(step.title)
         description = step.description
@@ -355,10 +370,12 @@ class TutorialDialog(QDialog):
         return scroll
 
     def _go_back(self):
+        self._stop_completion_feedback(reset_confetti=True)
         if self._controller.go_back():
             self._configure_current_step(reset_events=True)
 
     def _go_next(self):
+        self._stop_completion_feedback(reset_confetti=True)
         if self._controller.current_index == self._controller.total_steps - 1 and self._controller.can_continue():
             self.accept()
             return
@@ -369,15 +386,47 @@ class TutorialDialog(QDialog):
         if self._controller.can_continue():
             return
         self._controller.mark_current_complete()
+        self._completion_message = message
         self.challenge_status_label.setText(message)
         self.footer_status_label.setText(message)
+        self.confetti_overlay.burst()
+        self._completion_deadline = time.monotonic() + self.AUTO_ADVANCE_SECONDS
+        self._completion_countdown_active = True
+        self._auto_advance_timer.start()
+        self._update_navigation()
+
+    def _stop_completion_feedback(self, *, reset_confetti: bool):
+        self._auto_advance_timer.stop()
+        self._completion_deadline = 0.0
+        self._completion_countdown_active = False
+        self._completion_message = ""
+        if reset_confetti:
+            self.confetti_overlay.stop()
+
+    def _remaining_countdown_seconds(self) -> int:
+        if not self._completion_countdown_active:
+            return 0
+        return max(1, int(math.ceil(max(0.0, self._completion_deadline - time.monotonic()))))
+
+    def _on_auto_advance_tick(self):
+        if not self._completion_countdown_active:
+            self._auto_advance_timer.stop()
+            return
+        if time.monotonic() >= self._completion_deadline:
+            self._stop_completion_feedback(reset_confetti=True)
+            self._go_next()
+            return
         self._update_navigation()
 
     def _update_navigation(self):
         self.back_button.setEnabled(self._controller.can_go_back())
         can_continue = self._controller.can_continue()
         self.continue_button.setEnabled(can_continue)
-        self.continue_button.setText("Finish" if self._controller.current_index == self._controller.total_steps - 1 else "Continue")
+        base_label = "Finish" if self._controller.current_index == self._controller.total_steps - 1 else "Continue"
+        if can_continue and self._completion_countdown_active:
+            self.continue_button.setText(f"{base_label} ({self._remaining_countdown_seconds()})")
+        else:
+            self.continue_button.setText(base_label)
         self.continue_button.setProperty("tutorialContinueLocked", not can_continue)
         set_button_icon(self.continue_button, "unlock" if can_continue else "lock")
         if can_continue:
@@ -468,6 +517,8 @@ class TutorialDialog(QDialog):
         elif step.challenge_kind == "drag_keyboard":
             overlay = self._current_overlay_data()
             rect = self._current_prod_window_rect()
+            if rect and self._drag_rect_origin is None:
+                self._drag_rect_origin = rect
             if overlay and not overlay.get("prod_window_locked", True):
                 origin = self._drag_rect_origin
                 if rect and origin and self._rect_distance(origin, rect) >= 36:
@@ -480,6 +531,8 @@ class TutorialDialog(QDialog):
         elif step.challenge_kind == "unlock_keyboard":
             overlay = self._current_overlay_data()
             rect = self._current_prod_window_rect()
+            if rect and self._locked_rect_snapshot is None and overlay and overlay.get("prod_window_locked", False):
+                self._locked_rect_snapshot = rect
             if overlay and not overlay.get("prod_window_locked", True):
                 reference = self._locked_rect_snapshot or self._drag_rect_origin
                 if rect and reference and self._rect_distance(reference, rect) >= 12:
@@ -552,23 +605,31 @@ class TutorialDialog(QDialog):
         if events:
             self._last_action_sequence = max(int(event["sequence"]) for event in events)
 
+    def _layout_confetti_overlay(self):
+        self.confetti_overlay.setGeometry(self.rect())
+        self.confetti_overlay.raise_()
+
     def showEvent(self, event):
         super().showEvent(event)
         ensure_bounded_dialog_screen_tracking(self)
         apply_bounded_dialog_geometry(self, center=False)
         self._apply_scope_for_step()
+        self._layout_confetti_overlay()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_scope_for_step()
+        self._layout_confetti_overlay()
         apply_bounded_dialog_geometry(self, center=False)
 
     def moveEvent(self, event):
         super().moveEvent(event)
         self._apply_scope_for_step()
+        self._layout_confetti_overlay()
 
     def closeEvent(self, event):
         self._poll_timer.stop()
+        self._stop_completion_feedback(reset_confetti=True)
         if self.action is not None:
             self.action.clear_tutorial_scope()
         super().closeEvent(event)
