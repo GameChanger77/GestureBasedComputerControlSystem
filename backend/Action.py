@@ -7,15 +7,14 @@ import threading
 import time
 from collections import deque
 
-from backend.gestures.keyboard_mode.KeyCodes import get_windows_vk, normalize_key
+from backend.gestures.keyboard_mode.KeyCodes import normalize_key
 from pynput.mouse import Controller as Mouse, Button
 from pynput.keyboard import Controller as Keyboard, Key
 from pyparsing import ABC, abstractmethod
 
 OS_TYPE = platform.system()
 if OS_TYPE == "Windows":
-    import ctypes
-    from ctypes import wintypes
+    from backend.platforms.WindowsKeyboardBackend import WindowsKeyboardBackend
 
 
 class MouseTest(ABC):
@@ -74,8 +73,14 @@ class Action:
         self._warned_missing_xdotool = False
         self._warned_missing_ydotool = False
 
+        # Windows-specific backend
+        if self.detected_os == "Windows":
+            self._windows_backend = WindowsKeyboardBackend()
+            self._windows_backend.initialize()
+
         # Latency tracking (capture -> action completion)
         self._latency_lock = threading.Lock()
+        self._windows_backend = None
         self._latency_samples_ms = deque(maxlen=120)
         self._latest_latency_ms = None
         self._avg_latency_ms = None
@@ -89,64 +94,6 @@ class Action:
         self._worker = threading.Thread(target=self._action_worker, daemon=True)
         self._worker.start()
 
-        if self.detected_os == "Windows":
-            self._init_windows_keyboard_structs()
-
-    def _init_windows_keyboard_structs(self):
-        """Create ctypes structures for Windows SendInput keyboard injection."""
-        self.INPUT_KEYBOARD = 1
-        self.KEYEVENTF_KEYUP = 0x0002
-        self._MAX_CONSECUTIVE_SEND_FAILS = 10
-
-        ULONG_PTR = wintypes.WPARAM
-
-        class MOUSEINPUT(ctypes.Structure):
-            _fields_ = [
-                ("dx", wintypes.LONG),
-                ("dy", wintypes.LONG),
-                ("mouseData", wintypes.DWORD),
-                ("dwFlags", wintypes.DWORD),
-                ("time", wintypes.DWORD),
-                ("dwExtraInfo", ULONG_PTR),
-            ]
-
-        class KEYBDINPUT(ctypes.Structure):
-            _fields_ = [
-                ("wVk", wintypes.WORD),
-                ("wScan", wintypes.WORD),
-                ("dwFlags", wintypes.DWORD),
-                ("time", wintypes.DWORD),
-                ("dwExtraInfo", ULONG_PTR),
-            ]
-
-        class HARDWAREINPUT(ctypes.Structure):
-            _fields_ = [
-                ("uMsg", wintypes.DWORD),
-                ("wParamL", wintypes.WORD),
-                ("wParamH", wintypes.WORD),
-            ]
-
-        class _INPUTUNION(ctypes.Union):
-            _fields_ = [
-                ("mi", MOUSEINPUT),
-                ("ki", KEYBDINPUT),
-                ("hi", HARDWAREINPUT),
-            ]
-
-        class INPUT(ctypes.Structure):
-            _fields_ = [("type", wintypes.DWORD), ("union", _INPUTUNION)]
-
-        self._send_input = ctypes.windll.user32.SendInput
-        self._send_input.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
-        self._send_input.restype = wintypes.UINT
-
-        self._get_last_error = ctypes.windll.kernel32.GetLastError
-        self._get_last_error.argtypes = ()
-        self._get_last_error.restype = wintypes.DWORD
-
-        self._INPUTUNION = _INPUTUNION
-        self._KEYBDINPUT = KEYBDINPUT
-        self._INPUT = INPUT
 
     def _action_worker(self):
         """Execute queued OS actions off the tracker thread."""
@@ -465,59 +412,18 @@ class Action:
             return False
         return self._enqueue_action(self.keyboard.release, (key,))
 
-    def _send_key_event_windows(self, vk_code: int, key_up: bool = False):
-        """Send one key event via Windows SendInput."""
-        if self._keyboard_disabled:
-            return False
-
-        flags = self.KEYEVENTF_KEYUP if key_up else 0
-        input_obj = self._INPUT(
-            type=self.INPUT_KEYBOARD,
-            union=self._INPUTUNION(
-                ki=self._KEYBDINPUT(
-                    wVk=vk_code,
-                    wScan=0,
-                    dwFlags=flags,
-                    time=0,
-                    dwExtraInfo=0,
-                )
-            ),
-        )
-
-        sent = self._send_input(1, ctypes.byref(input_obj), ctypes.sizeof(self._INPUT))
-        if sent != 1:
-            self._keyboard_send_failures += 1
-            if self._keyboard_send_failures == 1:
-                err = self._get_last_error()
-                print(f"Keyboard SendInput failed (vk={vk_code}, key_up={key_up}, winerr={err})")
-            if self._keyboard_send_failures >= self._MAX_CONSECUTIVE_SEND_FAILS:
-                self._keyboard_disabled = True
-                print("Keyboard input disabled after repeated SendInput failures")
-            return False
-
-        self._keyboard_send_failures = 0
-        return True
-
-    def _key_down_windows(self, key_code: str):
-        vk_code = get_windows_vk(key_code)
-        if vk_code is None:
-            return self._key_down_via_pynput(key_code)
-        return self._send_key_event_windows(vk_code, key_up=False)
-
-    def _key_up_windows(self, key_code: str):
-        vk_code = get_windows_vk(key_code)
-        if vk_code is None:
-            return self._key_up_via_pynput(key_code)
-        return self._send_key_event_windows(vk_code, key_up=True)
-
     def _key_down(self, key_code: str):
         if self.detected_os == "Windows":
-            return self._key_down_windows(key_code)
+            if self._windows_backend:
+                return self._windows_backend.key_down(key_code)
+            return self._key_down_via_pynput(key_code)
         return self._key_down_via_pynput(key_code)
 
     def _key_up(self, key_code: str):
         if self.detected_os == "Windows":
-            return self._key_up_windows(key_code)
+            if self._windows_backend:
+                return self._windows_backend.key_up(key_code)
+            return self._key_up_via_pynput(key_code)
         return self._key_up_via_pynput(key_code)
 
     def press_key(self, key):
