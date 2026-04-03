@@ -1,16 +1,36 @@
 import cv2
 import time
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QStackedWidget
+    QFrame,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QStackedWidget,
 )
-from PySide6.QtCore import Slot, Signal
+from PySide6.QtCore import Qt, Slot, Signal
 from PySide6.QtCore import QTimer
 
-from frontend.video_widget import VideoWidget
+from frontend.widgets.display.video_widget import VideoWidget
 from frontend.production_keyboard_window import ProductionKeyboardWindow
-from frontend.widgets.stats_widget import PerformanceStatsWidget
-from frontend.widgets.settings_panel import SettingsPanel
+from frontend.widgets.display.gesture_debug_widget import GestureDebugWidget
+from frontend.widgets.display.stats_widget import PerformanceStatsWidget
+from frontend.widgets.settings.settings_panel import SettingsPanel
+from frontend.widgets.settings.settings_theme import (
+    MetricCard,
+    SettingsBadge,
+    SettingsCard,
+    animate_opacity,
+    apply_app_theme,
+    polish_widget,
+    set_button_icon,
+    set_button_role,
+    set_label_role,
+    set_label_tone,
+)
+from frontend.widgets.tutorial import TutorialDialog
 from backend.camera_devices import resolve_camera_selection
 from backend.gestures.keyboard_mode.KeyboardThemes import KeyboardThemeRegistry
 
@@ -69,31 +89,40 @@ class MainWindow(QMainWindow):
 
     def _create_ui(self):
         """Create the user interface"""
-        central_widget = QWidget()
+        central_widget = QFrame()
+        central_widget.setProperty("appRole", "shell")
         self.setCentralWidget(central_widget)
+        apply_app_theme(central_widget)
 
         main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(18, 18, 18, 18)
+        main_layout.setSpacing(16)
 
         self.video_widget = None
         self.stats_widget = None
         self.toggle_display_button = None
         self.toggle_landmarks_button = None
         self.settings_button = None
+        self.tutorial_button = None
         self.back_button = None
         self.status_label = None
         self.mode_label = None
         self.keyboard_status_label = None
+        self.gesture_debug_widget = None
         self.settings_status_label = None
         self.page_stack = None
         self.main_page = None
         self.settings_page = None
+        self.status_detail_label = None
+        self.preview_hint_card = None
+        self.prod_header_card = None
+        self.tutorial_dialog = None
 
         # Start/Stop tracking button
         self.start_button = QPushButton("Start Tracking")
-        self.start_button.setMinimumHeight(40)
+        self.start_button.setMinimumHeight(42)
         self.start_button.clicked.connect(self.toggle_tracking)
+        set_button_icon(self.start_button, "play")
         self._set_start_button_running(False)
 
         # Settings panel
@@ -103,146 +132,226 @@ class MainWindow(QMainWindow):
 
         if self.is_dev_mode:
             self.page_stack = QStackedWidget()
-
-            # Main tracking page
-            self.main_page = QWidget()
-            main_page_layout = QVBoxLayout()
-            main_page_layout.setContentsMargins(0, 0, 0, 0)
-            main_page_layout.setSpacing(10)
-
-            self.video_widget = VideoWidget()
-            main_page_layout.addWidget(self.video_widget)
-
-            self.stats_widget = PerformanceStatsWidget()
-            main_page_layout.addWidget(self.stats_widget)
-
-            button_layout = QHBoxLayout()
-            button_layout.setSpacing(10)
-            button_layout.addWidget(self.start_button)
-
-            self.toggle_display_button = QPushButton("Hide Preview")
-            self.toggle_display_button.setMinimumHeight(40)
-            self.toggle_display_button.clicked.connect(self.toggle_display)
-            self.toggle_display_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #2196F3;
-                    color: white;
-                    font-weight: bold;
-                    border-radius: 5px;
-                }
-                QPushButton:hover {
-                    background-color: #0b7dda;
-                }
-            """)
-            button_layout.addWidget(self.toggle_display_button)
-
-            self.toggle_landmarks_button = QPushButton("Show Landmarks")
-            self.toggle_landmarks_button.setMinimumHeight(40)
-            self.toggle_landmarks_button.clicked.connect(self.toggle_landmarks)
-            self.toggle_landmarks_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #607D8B;
-                    color: white;
-                    font-weight: bold;
-                    border-radius: 5px;
-                }
-                QPushButton:hover {
-                    background-color: #546E7A;
-                }
-            """)
-            button_layout.addWidget(self.toggle_landmarks_button)
-
-            self.settings_button = QPushButton("Settings")
-            self.settings_button.setMinimumHeight(40)
-            self.settings_button.clicked.connect(self.show_settings_page)
-            self.settings_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #455A64;
-                    color: white;
-                    font-weight: bold;
-                    border-radius: 5px;
-                }
-                QPushButton:hover {
-                    background-color: #37474F;
-                }
-            """)
-            button_layout.addWidget(self.settings_button)
-
-            self.status_label = QLabel("Status: Not started")
-            self.status_label.setStyleSheet("font-weight: bold;")
-            button_layout.addWidget(self.status_label)
-
-            self.mode_label = QLabel("Mode: MOUSE")
-            self.mode_label.setStyleSheet("font-weight: bold; color: #4CAF50;")
-            button_layout.addWidget(self.mode_label)
-
-            button_layout.addStretch()
-            main_page_layout.addLayout(button_layout)
-
-            self.keyboard_status_label = QLabel("Keyboard: Inactive")
-            self.keyboard_status_label.setStyleSheet("font-family: Consolas, monospace; color: #333;")
-            main_page_layout.addWidget(self.keyboard_status_label)
-
-            self.main_page.setLayout(main_page_layout)
-
-            # Settings page
-            self.settings_page = QWidget()
-            settings_page_layout = QVBoxLayout()
-            settings_page_layout.setContentsMargins(0, 0, 0, 0)
-            settings_page_layout.setSpacing(10)
-
-            settings_header = QHBoxLayout()
-            settings_header.setSpacing(10)
-            self.back_button = QPushButton("Back")
-            self.back_button.setMinimumHeight(40)
-            self.back_button.clicked.connect(self.show_main_page)
-            settings_header.addWidget(self.back_button)
-
-            settings_title = QLabel("Settings")
-            settings_title.setStyleSheet("font-size: 18px; font-weight: bold;")
-            settings_header.addWidget(settings_title)
-            settings_header.addStretch()
-            settings_page_layout.addLayout(settings_header)
-
-            self.settings_status_label = QLabel("Status: Not started")
-            self.settings_status_label.setStyleSheet("font-weight: bold;")
-            settings_page_layout.addWidget(self.settings_status_label)
-
-            settings_page_layout.addWidget(self.settings_panel)
-            self.settings_page.setLayout(settings_page_layout)
+            self.main_page = self._build_dev_main_page()
+            self.settings_page = self._build_dev_settings_page()
 
             self.page_stack.addWidget(self.main_page)
             self.page_stack.addWidget(self.settings_page)
             self.page_stack.setCurrentWidget(self.main_page)
             main_layout.addWidget(self.page_stack)
         else:
-            # Production settings shell (no camera preview/stats UI).
-            prod_layout = QVBoxLayout()
-            prod_layout.setContentsMargins(0, 0, 0, 0)
-            prod_layout.setSpacing(10)
-
-            header = QLabel("Production Settings")
-            header.setStyleSheet("font-size: 18px; font-weight: bold;")
-            prod_layout.addWidget(header)
-
-            controls_layout = QHBoxLayout()
-            controls_layout.setSpacing(10)
-            controls_layout.addWidget(self.start_button)
-
-            self.status_label = QLabel("Status: Not started")
-            self.status_label.setStyleSheet("font-weight: bold;")
-            controls_layout.addWidget(self.status_label)
-            controls_layout.addStretch()
-            prod_layout.addLayout(controls_layout)
-
-            prod_layout.addWidget(self.settings_panel)
-            main_layout.addLayout(prod_layout)
+            self.main_page = self._build_prod_page()
+            main_layout.addWidget(self.main_page)
 
         central_widget.setLayout(main_layout)
 
         # Connect internal frame signal to video widget
         if self.video_widget:
             self.frame_ready.connect(self.video_widget.update_frame)
+        self._set_status_text("Status: Not started")
+        self._update_mode_label()
+
+    def _build_dev_main_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        hero_card = SettingsCard(surface="panel")
+        hero_card.setProperty("appRole", "hero")
+        hero_header = QHBoxLayout()
+        hero_header.setContentsMargins(0, 0, 0, 0)
+        hero_header.setSpacing(14)
+
+        hero_copy = QVBoxLayout()
+        hero_copy.setContentsMargins(0, 0, 0, 0)
+        hero_copy.setSpacing(4)
+
+        eyebrow = QLabel("Development Workspace")
+        set_label_role(eyebrow, "hero-eyebrow")
+        hero_copy.addWidget(eyebrow)
+
+        title = QLabel("Hand Gesture Control")
+        set_label_role(title, "hero-title")
+        hero_copy.addWidget(title)
+        hero_header.addLayout(hero_copy, 1)
+
+        hero_badges = QHBoxLayout()
+        hero_badges.setContentsMargins(0, 0, 0, 0)
+        hero_badges.setSpacing(8)
+        self.status_label = SettingsBadge("Status: Not started", "default")
+        self.mode_label = SettingsBadge("Mode: UNKNOWN", "mode")
+        hero_badges.addWidget(self.status_label)
+        hero_badges.addWidget(self.mode_label)
+        hero_header.addLayout(hero_badges, 0)
+        hero_card.body_layout.addLayout(hero_header)
+
+        self.status_detail_label = QLabel("Tracking is idle. Start the pipeline to stream the live preview and runtime metrics.")
+        set_label_role(self.status_detail_label, "status-detail")
+        self.status_detail_label.setWordWrap(True)
+        hero_card.body_layout.addWidget(self.status_detail_label)
+
+        toolbar_row = QHBoxLayout()
+        toolbar_row.setContentsMargins(0, 4, 0, 0)
+        toolbar_row.setSpacing(12)
+
+        action_group = QFrame()
+        action_group.setProperty("appRole", "toolbar-group")
+        action_group_layout = QHBoxLayout(action_group)
+        action_group_layout.setContentsMargins(12, 12, 12, 12)
+        action_group_layout.setSpacing(10)
+        action_group_layout.addWidget(self.start_button)
+        toolbar_row.addWidget(action_group, 0)
+
+        utility_group = QFrame()
+        utility_group.setProperty("appRole", "toolbar-group")
+        utility_layout = QHBoxLayout(utility_group)
+        utility_layout.setContentsMargins(12, 12, 12, 12)
+        utility_layout.setSpacing(10)
+
+        self.toggle_display_button = QPushButton("Hide Preview")
+        self.toggle_display_button.setMinimumHeight(40)
+        self.toggle_display_button.clicked.connect(self.toggle_display)
+        set_button_role(self.toggle_display_button, "toolbar")
+        set_button_icon(self.toggle_display_button, "visibility")
+        utility_layout.addWidget(self.toggle_display_button)
+
+        self.toggle_landmarks_button = QPushButton("Show Landmarks")
+        self.toggle_landmarks_button.setMinimumHeight(40)
+        self.toggle_landmarks_button.clicked.connect(self.toggle_landmarks)
+        set_button_role(self.toggle_landmarks_button, "toolbar")
+        utility_layout.addWidget(self.toggle_landmarks_button)
+
+        self.settings_button = QPushButton("Settings")
+        self.settings_button.setMinimumHeight(40)
+        self.settings_button.clicked.connect(self.show_settings_page)
+        set_button_role(self.settings_button, "toolbar")
+        set_button_icon(self.settings_button, "settings")
+        utility_layout.addWidget(self.settings_button)
+
+        self.tutorial_button = QPushButton("Tutorial")
+        self.tutorial_button.setMinimumHeight(40)
+        self.tutorial_button.clicked.connect(self.open_tutorial)
+        set_button_role(self.tutorial_button, "toolbar")
+        set_button_icon(self.tutorial_button, "tutorial")
+        utility_layout.addWidget(self.tutorial_button)
+
+        toolbar_row.addWidget(utility_group, 1)
+        hero_card.body_layout.addLayout(toolbar_row)
+        layout.addWidget(hero_card)
+
+        content_row = QHBoxLayout()
+        content_row.setContentsMargins(0, 0, 0, 0)
+        content_row.setSpacing(16)
+
+        self.video_widget = VideoWidget()
+        content_row.addWidget(self.video_widget, 2)
+
+        side_column = QVBoxLayout()
+        side_column.setContentsMargins(0, 0, 0, 0)
+        side_column.setSpacing(16)
+
+        self.stats_widget = PerformanceStatsWidget()
+        side_column.addWidget(self.stats_widget)
+
+        keyboard_card = SettingsCard(surface="card")
+        keyboard_title = QLabel("Keyboard Surface")
+        set_label_role(keyboard_title, "section-title")
+        keyboard_card.body_layout.addWidget(keyboard_title)
+
+        self.keyboard_status_label = QLabel("Keyboard: Inactive")
+        self.keyboard_status_label.setWordWrap(True)
+        set_label_role(self.keyboard_status_label, "status-detail")
+        keyboard_card.body_layout.addWidget(self.keyboard_status_label)
+        side_column.addWidget(keyboard_card)
+
+        self.gesture_debug_widget = GestureDebugWidget()
+        side_column.addWidget(self.gesture_debug_widget)
+        side_column.addStretch()
+
+        content_row.addLayout(side_column, 1)
+        layout.addLayout(content_row, 1)
+        return page
+
+    def _build_dev_settings_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        shell = SettingsCard(surface="panel")
+        shell.setProperty("appRole", "hero")
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(12)
+
+        self.back_button = QPushButton("Back to dashboard")
+        self.back_button.setMinimumHeight(40)
+        self.back_button.clicked.connect(self.show_main_page)
+        set_button_role(self.back_button, "toolbar")
+        set_button_icon(self.back_button, "back")
+        header.addWidget(self.back_button, 0)
+
+        copy = QVBoxLayout()
+        copy.setContentsMargins(0, 0, 0, 0)
+        copy.setSpacing(4)
+        title = QLabel("Settings")
+        set_label_role(title, "hero-title")
+        copy.addWidget(title)
+        header.addLayout(copy, 1)
+
+        self.settings_status_label = SettingsBadge("Status: Not started", "default")
+        header.addWidget(self.settings_status_label, 0, Qt.AlignTop)
+        shell.body_layout.addLayout(header)
+        layout.addWidget(shell)
+        layout.addWidget(self.settings_panel, 1)
+        return page
+
+    def _build_prod_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+
+        self.prod_header_card = SettingsCard(surface="panel")
+        self.prod_header_card.setProperty("appRole", "hero")
+
+        title = QLabel("Gesture Runtime Control")
+        set_label_role(title, "hero-title")
+        self.prod_header_card.body_layout.addWidget(title)
+
+        summary_row = QHBoxLayout()
+        summary_row.setContentsMargins(0, 4, 0, 0)
+        summary_row.setSpacing(8)
+        self.status_label = SettingsBadge("Status: Not started", "default")
+        self.mode_label = SettingsBadge("Mode: UNKNOWN", "mode")
+        summary_row.addWidget(self.status_label)
+        summary_row.addWidget(self.mode_label)
+        summary_row.addStretch()
+        self.prod_header_card.body_layout.addLayout(summary_row)
+
+        control_row = QHBoxLayout()
+        control_row.setContentsMargins(0, 6, 0, 0)
+        control_row.setSpacing(12)
+        control_row.addWidget(self.start_button, 0)
+        self.tutorial_button = QPushButton("Tutorial")
+        self.tutorial_button.setMinimumHeight(40)
+        self.tutorial_button.clicked.connect(self.open_tutorial)
+        set_button_role(self.tutorial_button, "toolbar")
+        set_button_icon(self.tutorial_button, "tutorial")
+        control_row.addWidget(self.tutorial_button, 0)
+        control_row.addStretch()
+        self.prod_header_card.body_layout.addLayout(control_row)
+
+        self.status_detail_label = QLabel("The overlay remains minimal while the runtime uses the same gesture, macro, and keyboard systems configured in settings.")
+        self.status_detail_label.setWordWrap(True)
+        set_label_role(self.status_detail_label, "status-detail")
+        self.prod_header_card.body_layout.addWidget(self.status_detail_label)
+
+        layout.addWidget(self.prod_header_card)
+        layout.addWidget(self.settings_panel, 1)
+        return page
 
     def set_component_factory(self, component_factory):
         """Set backend component factory used when settings are applied."""
@@ -272,50 +381,65 @@ class MainWindow(QMainWindow):
         """Update start/stop button text and color."""
         if running:
             self.start_button.setText("Stop Tracking")
-            self.start_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #f44336;
-                    color: white;
-                    font-weight: bold;
-                    border-radius: 5px;
-                }
-                QPushButton:hover {
-                    background-color: #da190b;
-                }
-            """)
+            set_button_role(self.start_button, "danger")
+            set_button_icon(self.start_button, "stop")
             return
 
         self.start_button.setText("Start Tracking")
-        self.start_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
+        set_button_role(self.start_button, "primary")
+        set_button_icon(self.start_button, "play")
 
     def _set_status_text(self, text: str):
         """Update status labels across active pages."""
+        tone = self._status_tone_for_text(text)
         if self.status_label:
             self.status_label.setText(text)
+            if isinstance(self.status_label, SettingsBadge):
+                self.status_label.set_tone(tone)
         if self.settings_status_label:
             self.settings_status_label.setText(text)
+            if isinstance(self.settings_status_label, SettingsBadge):
+                self.settings_status_label.set_tone(tone)
+        if self.status_detail_label:
+            self.status_detail_label.setText(self._status_detail_for_text(text))
+
+    def _status_tone_for_text(self, text: str) -> str:
+        normalized = (text or "").lower()
+        if "error" in normalized or "failed" in normalized:
+            return "danger"
+        if "running" in normalized:
+            return "success"
+        if "starting" in normalized or "restarting" in normalized:
+            return "accent"
+        if "saved" in normalized or "updated" in normalized:
+            return "accent"
+        return "default"
+
+    def _status_detail_for_text(self, text: str) -> str:
+        normalized = (text or "").lower()
+        if "running" in normalized:
+            return "Pipeline active. Preview, runtime metrics, and production surfaces are receiving live tracker updates."
+        if "starting" in normalized or "restarting" in normalized:
+            return "Initializing camera, recognizers, and action surfaces with the current configuration."
+        if "saved" in normalized or "updated" in normalized:
+            return "Configuration changes were persisted successfully and are ready for the next tracking session."
+        if "error" in normalized or "failed" in normalized:
+            return "A runtime problem interrupted the pipeline. Review the message above, then retry or adjust settings."
+        return "Tracking is idle. Start the pipeline to stream the live preview and runtime metrics."
 
     @Slot()
     def show_settings_page(self):
         """Show dev settings page."""
         if self.is_dev_mode and self.page_stack and self.settings_page:
             self.page_stack.setCurrentWidget(self.settings_page)
+            animate_opacity(self.settings_page, start=0.0, end=1.0, duration=180)
 
     @Slot()
     def show_main_page(self):
         """Return to dev main tracking page."""
         if self.is_dev_mode and self.page_stack and self.main_page:
             self.page_stack.setCurrentWidget(self.main_page)
+            animate_opacity(self.main_page, start=0.0, end=1.0, duration=180)
 
     def set_components(self, hand_tracker, strategizer, action, config=None):
         """
@@ -358,11 +482,7 @@ class MainWindow(QMainWindow):
 
     def _auto_start_tracking(self):
         """Start tracking automatically once UI event loop is running."""
-        if not self.hand_tracker:
-            return
-        if self.hand_tracker.isRunning():
-            return
-        self.toggle_tracking()
+        self.ensure_tracking_running()
 
     def _get_camera_start_dimensions(self):
         """Get camera start dimensions from config, with safe defaults."""
@@ -393,19 +513,56 @@ class MainWindow(QMainWindow):
             if self.stats_widget:
                 self.stats_widget.reset()
         else:
-            # Start tracking
-            camera_index, camera_backend = self._get_selected_camera_selection()
-            cam_w, cam_h = self._get_camera_start_dimensions()
-            if self.hand_tracker.start_tracking(
-                camera_index=camera_index,
-                width=cam_w,
-                height=cam_h,
-                camera_backend=camera_backend,
-            ):
-                self._set_start_button_running(True)
-                self._set_status_text("Status: Starting...")
-            else:
-                self._set_status_text("Status: Failed to start")
+            self.ensure_tracking_running()
+
+    def ensure_tracking_running(self) -> bool:
+        """Ensure the tracker is running, starting it if needed."""
+        if not self.hand_tracker:
+            self._set_status_text("Status: Error - No tracker")
+            return False
+
+        if self.hand_tracker.isRunning():
+            return True
+
+        camera_index, camera_backend = self._get_selected_camera_selection()
+        cam_w, cam_h = self._get_camera_start_dimensions()
+        if self.hand_tracker.start_tracking(
+            camera_index=camera_index,
+            width=cam_w,
+            height=cam_h,
+            camera_backend=camera_backend,
+        ):
+            self._set_start_button_running(True)
+            self._set_status_text("Status: Starting...")
+            return True
+
+        self._set_status_text("Status: Failed to start")
+        return False
+
+    @Slot()
+    def open_tutorial(self):
+        """Open the built-in default gesture tutorial."""
+        if self.tutorial_dialog is not None and self.tutorial_dialog.isVisible():
+            self.tutorial_dialog.raise_()
+            self.tutorial_dialog.activateWindow()
+            return
+
+        self.tutorial_dialog = TutorialDialog(
+            self,
+            main_window=self,
+            action=self.action,
+            strategizer=self.strategizer,
+            ui_mode=self.ui_mode,
+            production_keyboard_window=self.production_keyboard_window,
+        )
+        try:
+            self.tutorial_dialog.finished.connect(self._on_tutorial_closed)
+        except Exception:
+            pass
+        self.tutorial_dialog.exec()
+
+    def _on_tutorial_closed(self, _result):
+        self.tutorial_dialog = None
 
     @Slot()
     def toggle_display(self):
@@ -511,6 +668,10 @@ class MainWindow(QMainWindow):
                     hands_count += 1
         self.stats_widget.update_hands_count(hands_count)
         self._update_mode_label()
+        if self.gesture_debug_widget:
+            self.gesture_debug_widget.update_debug(
+                landmarks_data.get("gesture_debug") if landmarks_data else None
+            )
 
         # Only update preview if enabled and frame data was provided.
         if self.display_enabled and self.video_widget and frame is not None and frame.size != 0:
@@ -555,9 +716,11 @@ class MainWindow(QMainWindow):
                     self.keyboard_status_label.setText(
                         f"Keyboard: {status} | Keys: {key_count} | Last: {event_text} | Conf: {conf:.2f}"
                     )
+                    set_label_tone(self.keyboard_status_label, "success" if key_count else "muted")
             else:
                 if self.keyboard_status_label:
                     self.keyboard_status_label.setText("Keyboard: Inactive")
+                    set_label_tone(self.keyboard_status_label, "muted")
 
             self.frame_ready.emit(display_frame)
 
@@ -582,12 +745,15 @@ class MainWindow(QMainWindow):
             mode_name = str(self.strategizer.current_mode).split(".")[-1].upper()
 
         self.mode_label.setText(f"Mode: {mode_name}")
-        if mode_name == "KEYBOARD":
-            self.mode_label.setStyleSheet("font-weight: bold; color: #e67e22;")
-        elif mode_name == "MOUSE":
-            self.mode_label.setStyleSheet("font-weight: bold; color: #4CAF50;")
-        else:
-            self.mode_label.setStyleSheet("font-weight: bold; color: #607D8B;")
+        if isinstance(self.mode_label, SettingsBadge):
+            if mode_name == "KEYBOARD":
+                self.mode_label.set_tone("warning")
+            elif mode_name == "MOUSE":
+                self.mode_label.set_tone("success")
+            elif mode_name == "HOTKEY":
+                self.mode_label.set_tone("accent")
+            else:
+                self.mode_label.set_tone("mode")
 
     @Slot(dict)
     def on_settings_saved(self, values):
@@ -694,6 +860,8 @@ class MainWindow(QMainWindow):
             self.video_widget.clear_frame()
         if self.stats_widget:
             self.stats_widget.reset()
+        if self.gesture_debug_widget:
+            self.gesture_debug_widget.reset()
         return True
 
     def draw_landmarks(self, image, hands_data, mirror_x=False):
@@ -982,7 +1150,7 @@ class MainWindow(QMainWindow):
                 (10, 22),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
-                (0, 255, 255),
+                cv_color(palette.suggestion_label),
                 2,
                 cv2.LINE_AA,
             )
@@ -997,7 +1165,7 @@ class MainWindow(QMainWindow):
                 (10, 46),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.55,
-                (0, 225, 255),
+                cv_color(palette.swipe_path),
                 2,
                 cv2.LINE_AA,
             )
@@ -1022,6 +1190,8 @@ class MainWindow(QMainWindow):
         self._set_start_button_running(False)
         if self.video_widget:
             self.video_widget.clear_frame()
+        if self.gesture_debug_widget:
+            self.gesture_debug_widget.reset()
         if self.production_keyboard_window:
             self.production_keyboard_window.set_overlay_data(None)
         self._update_mode_label()
@@ -1033,6 +1203,8 @@ class MainWindow(QMainWindow):
             return
         self._set_start_button_running(False)
         self._set_status_text(f"Status: Error - {error_message}")
+        if self.gesture_debug_widget:
+            self.gesture_debug_widget.reset()
         if self.production_keyboard_window:
             self.production_keyboard_window.set_overlay_data(None)
         self._update_mode_label()
@@ -1040,6 +1212,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Handle window close event"""
         # Stop tracking when window closes
+        if self.tutorial_dialog is not None:
+            self.tutorial_dialog.close()
         if self.production_keyboard_window:
             self.production_keyboard_window.close()
         if self.hand_tracker and self.hand_tracker.isRunning():

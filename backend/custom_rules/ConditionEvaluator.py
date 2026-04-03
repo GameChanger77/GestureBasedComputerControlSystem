@@ -8,6 +8,7 @@ from backend.gestures.GestureUtils import (
     are_only_fingers_extended,
     get_pinch_distance,
     get_hand_openness,
+    is_hand_fully_open,
     is_finger_extended,
 )
 
@@ -148,6 +149,30 @@ class ConditionEvaluator:
             openness = float(get_hand_openness(hand))
             return openness > val if op == "hand_openness_gt" else openness < val
 
+        if op == "hand_fully_open":
+            hand = self._get_hand(hands_data.wrist, hand_label)
+            if hand is None or not hand.exists:
+                return False
+            return is_hand_fully_open(
+                hand,
+                extension_threshold=float(cond.get("extension_threshold", 155.0)),
+                min_extended_fingers=int(cond.get("min_extended_fingers", 4)),
+                openness_threshold=float(cond.get("openness_threshold", 0.08)),
+                require_palm_facing_camera=bool(cond.get("require_palm_facing_camera", False)),
+                min_palm_normal_z=float(cond.get("min_palm_normal_z", 0.35)),
+            )
+
+        if op == "strict_fist":
+            hand = self._get_hand(hands_data.wrist, hand_label)
+            if hand is None or not hand.exists:
+                return False
+            return self._is_strict_fist(
+                hand,
+                max_openness=float(cond.get("max_openness", 0.16)),
+                max_extension_ratio=float(cond.get("max_extension_ratio", 0.90)),
+                max_avg_finger_angle=float(cond.get("max_avg_finger_angle", 145.0)),
+            )
+
         # Unknown op: fail fast with an error so JSON authors get actionable feedback.
         raise ValueError(f"Unknown condition op: {op}")
 
@@ -231,3 +256,87 @@ class ConditionEvaluator:
             return finger.base
 
         raise ValueError(f"Unknown landmark selector '{which}' in '{token}'")
+
+    def _is_strict_fist(
+        self,
+        hand,
+        *,
+        max_openness: float,
+        max_extension_ratio: float,
+        max_avg_finger_angle: float,
+    ) -> bool:
+        openness = get_hand_openness(hand)
+        if openness > max_openness:
+            return False
+
+        finger_extensions = [
+            self._finger_extension(hand.index),
+            self._finger_extension(hand.middle),
+            self._finger_extension(hand.ring),
+            self._finger_extension(hand.pinky),
+        ]
+        if max(finger_extensions) > max_extension_ratio:
+            return False
+
+        finger_angles = [
+            self._finger_angle(hand.index),
+            self._finger_angle(hand.middle),
+            self._finger_angle(hand.ring),
+            self._finger_angle(hand.pinky),
+        ]
+        avg_angle = sum(finger_angles) / len(finger_angles)
+        return avg_angle <= max_avg_finger_angle
+
+    @staticmethod
+    def _finger_extension(finger) -> float:
+        if finger is None or len(finger.joints) < 4:
+            return 0.0
+
+        total_length = 0.0
+        for idx in range(len(finger.joints) - 1):
+            first = finger.joints[idx]
+            second = finger.joints[idx + 1]
+            dx = second[0] - first[0]
+            dy = second[1] - first[1]
+            dz = second[2] - first[2]
+            total_length += (dx * dx + dy * dy + dz * dz) ** 0.5
+
+        base = finger.joints[0]
+        tip = finger.joints[-1]
+        dx = tip[0] - base[0]
+        dy = tip[1] - base[1]
+        dz = tip[2] - base[2]
+        straight_distance = (dx * dx + dy * dy + dz * dz) ** 0.5
+        if total_length <= 1e-6:
+            return 0.0
+        return straight_distance / total_length
+
+    @staticmethod
+    def _finger_angle(finger) -> float:
+        if finger is None or len(finger.joints) < 4:
+            return 0.0
+
+        import math
+
+        angles = []
+        for idx in range(1, len(finger.joints) - 1):
+            prev_joint = finger.joints[idx - 1]
+            joint = finger.joints[idx]
+            next_joint = finger.joints[idx + 1]
+            vx1 = prev_joint[0] - joint[0]
+            vy1 = prev_joint[1] - joint[1]
+            vz1 = prev_joint[2] - joint[2]
+            vx2 = next_joint[0] - joint[0]
+            vy2 = next_joint[1] - joint[1]
+            vz2 = next_joint[2] - joint[2]
+            mag1 = (vx1 * vx1 + vy1 * vy1 + vz1 * vz1) ** 0.5
+            mag2 = (vx2 * vx2 + vy2 * vy2 + vz2 * vz2) ** 0.5
+            if mag1 <= 1e-6 or mag2 <= 1e-6:
+                continue
+            cos_angle = ((vx1 * vx2) + (vy1 * vy2) + (vz1 * vz2)) / (mag1 * mag2)
+            cos_angle = max(-1.0, min(1.0, cos_angle))
+            angles.append(math.degrees(math.acos(cos_angle)))
+
+        if not angles:
+            return 0.0
+        return sum(angles) / len(angles)

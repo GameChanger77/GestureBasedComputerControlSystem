@@ -16,6 +16,7 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
     _SETTINGS_GROUP = "production_keyboard"
     _SETTINGS_X = "x"
     _SETTINGS_Y = "y"
+    _UNLOCK_PENDING_FRAMES = 6
 
     def __init__(
         self,
@@ -39,6 +40,7 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
         self.follow_alpha = 0.28
         self.open_extension_threshold = float(config.get("finger_extension_angle", 155.0))
         self._window_locked = True
+        self._unlock_pending_frames = 0
         self._screen_origin_x_px = 0.0
         self._screen_origin_y_px = 0.0
         self._screen_width_px = float(self.screen_width)
@@ -146,21 +148,30 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
         was_locked = self._window_locked
 
         if right_open and anchor is not None:
-            self._window_locked = False
-            if self._last_follow_center_px is None:
-                follow_center = anchor
-            else:
-                lx, ly = self._last_follow_center_px
-                follow_center = (
-                    (lx * (1.0 - self.follow_alpha)) + (anchor[0] * self.follow_alpha),
-                    (ly * (1.0 - self.follow_alpha)) + (anchor[1] * self.follow_alpha),
-                )
-            self._last_follow_center_px = follow_center
+            self._unlock_pending_frames = min(
+                self._unlock_pending_frames + 1,
+                self._UNLOCK_PENDING_FRAMES,
+            )
 
-            next_x = follow_center[0] - (self.window_width_px / 2.0)
-            next_y = follow_center[1] - (self.window_height_px / 2.0)
-            self._window_x_px, self._window_y_px = self._clamp_window_position(next_x, next_y)
+            if self._window_locked and self._unlock_pending_frames >= self._UNLOCK_PENDING_FRAMES:
+                self._window_locked = False
+
+            if not self._window_locked:
+                if self._last_follow_center_px is None:
+                    follow_center = anchor
+                else:
+                    lx, ly = self._last_follow_center_px
+                    follow_center = (
+                        (lx * (1.0 - self.follow_alpha)) + (anchor[0] * self.follow_alpha),
+                        (ly * (1.0 - self.follow_alpha)) + (anchor[1] * self.follow_alpha),
+                    )
+                self._last_follow_center_px = follow_center
+
+                next_x = follow_center[0] - (self.window_width_px / 2.0)
+                next_y = follow_center[1] - (self.window_height_px / 2.0)
+                self._window_x_px, self._window_y_px = self._clamp_window_position(next_x, next_y)
         else:
+            self._unlock_pending_frames = 0
             self._window_locked = True
             self._last_follow_center_px = None
 

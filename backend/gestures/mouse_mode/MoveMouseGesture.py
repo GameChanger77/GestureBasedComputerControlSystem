@@ -1,5 +1,5 @@
 from backend.gestures.GestureRecognizer import ContinuousGestureRecognizer
-from backend.gestures.GestureUtils import are_only_fingers_extended, camera_to_screen
+from backend.gestures.GestureUtils import camera_to_screen, is_finger_extended
 from backend.HandsData import HandsData
 import time
 
@@ -24,8 +24,8 @@ class MoveMouseGesture(ContinuousGestureRecognizer):
         extension_threshold,
         pending_frames,
         ending_frames,
-        min_delta_px=2,
-        cadence_ms=75,
+        min_delta_px=1,
+        cadence_ms=16,
     ):
         """
         Args:
@@ -41,6 +41,7 @@ class MoveMouseGesture(ContinuousGestureRecognizer):
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.extension_threshold = extension_threshold
+        self.non_index_extension_threshold = min(179.0, float(extension_threshold) + 12.0)
         self.min_delta_px = max(0, int(min_delta_px))
         self.cadence_ns = max(1, int(cadence_ms)) * 1_000_000
         self._frame_count = 0
@@ -61,10 +62,13 @@ class MoveMouseGesture(ContinuousGestureRecognizer):
         hand_wrist = hands_data.wrist.right
         hand_camera = hands_data.camera.right
 
-        # Check if ONLY index finger is extended (others must be curled)
-        detected = are_only_fingers_extended(hand_wrist, ['index'], self.extension_threshold)
-
-        if not detected:
+        if not is_finger_extended(hand_wrist.index, threshold=self.extension_threshold):
+            return False, None
+        if is_finger_extended(hand_wrist.middle, threshold=self.non_index_extension_threshold):
+            return False, None
+        if is_finger_extended(hand_wrist.ring, threshold=self.non_index_extension_threshold):
+            return False, None
+        if is_finger_extended(hand_wrist.pinky, threshold=self.non_index_extension_threshold):
             return False, None
 
         # Get index finger tip in camera coordinates
@@ -73,7 +77,7 @@ class MoveMouseGesture(ContinuousGestureRecognizer):
             return False, None
 
         # Convert to screen coordinates
-        screen_x, screen_y = camera_to_screen(index_tip, self.screen_width, self.screen_height)  # TODO make this use the screen_safe_margin from the settings
+        screen_x, screen_y = camera_to_screen(index_tip, self.screen_width, self.screen_height)
 
         return True, (screen_x, screen_y)
 

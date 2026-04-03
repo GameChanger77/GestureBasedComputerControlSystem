@@ -6,7 +6,9 @@ import subprocess
 import threading
 import time
 from collections import deque
+from copy import deepcopy
 
+from backend.macros.macro_models import MacroActionStep
 from backend.gestures.keyboard_mode.KeyCodes import normalize_key
 from pynput.mouse import Controller as Mouse, Button
 from pynput.keyboard import Controller as Keyboard, Key
@@ -57,10 +59,19 @@ class KeyboardTest(ABC):
 
 class Action:
 
-    def __init__(self, mouse: MouseTest = None, keyboard_test: KeyboardTest = None, osType=None):
+    def __init__(
+        self,
+        mouse: MouseTest = None,
+        keyboard_test: KeyboardTest = None,
+        osType=None,
+        screen_origin_x: int = 0,
+        screen_origin_y: int = 0,
+    ):
         self.mouse = mouse if mouse is not None else Mouse()
         self.keyboard = keyboard_test if keyboard_test is not None else Keyboard()
         self.osType = osType if osType is not None else OS_TYPE
+        self.screen_origin_x = int(screen_origin_x)
+        self.screen_origin_y = int(screen_origin_y)
         self.detected_os = self.osType
         self._held_keys = set()
         self._keyboard_send_failures = 0
@@ -87,6 +98,25 @@ class Action:
         self._p95_latency_ms = None
         self._frame_capture_ts_ns = None
         self._pending_latency_origin_ts_ns = None
+
+        # Tutorial support: bounded mouse scope and observable action events.
+        self._tutorial_scope_lock = threading.Lock()
+        self._tutorial_scope = {
+            "bounds": None,
+            "capture_text": False,
+        }
+        self._event_lock = threading.Lock()
+        self._event_sequence = 0
+        self._recent_action_events = deque(maxlen=512)
+        self._cursor_lock = threading.Lock()
+        initial_global = self._safe_mouse_position()
+        self._last_cursor_global = initial_global
+        self._last_cursor_local = (
+            int(initial_global[0] - self.screen_origin_x),
+            int(initial_global[1] - self.screen_origin_y),
+        )
+        self._move_generation_lock = threading.Lock()
+        self._move_generation = 0
 
         # Async action worker keeps OS calls off tracker thread.
         self._action_queue = queue.Queue(maxsize=256)
@@ -137,6 +167,102 @@ class Action:
             origin_ns = self._pending_latency_origin_ts_ns or self._frame_capture_ts_ns
             self._pending_latency_origin_ts_ns = None
             return origin_ns
+
+    def set_tutorial_scope(self, *, bounds=None, capture_text: bool = False):
+        """Clamp mouse actions to a tutorial rect and optionally capture typed text."""
+        normalized_bounds = None
+        if bounds is not None:
+            x, y, width, height = bounds
+            normalized_bounds = (
+                int(x),
+                int(y),
+                max(1, int(width)),
+                max(1, int(height)),
+            )
+        with self._tutorial_scope_lock:
+            self._tutorial_scope = {
+                "bounds": normalized_bounds,
+                "capture_text": bool(capture_text),
+            }
+
+    def clear_tutorial_scope(self):
+        self.set_tutorial_scope(bounds=None, capture_text=False)
+
+    def get_action_events(self, *, after_sequence: int = 0):
+        with self._event_lock:
+            return [
+                deepcopy(event)
+                for event in self._recent_action_events
+                if int(event.get("sequence", 0)) > int(after_sequence)
+            ]
+
+    def _record_action_event(self, event_type: str, **payload):
+        with self._event_lock:
+            self._event_sequence += 1
+            event = {
+                "sequence": self._event_sequence,
+                "type": str(event_type),
+                "timestamp_ns": time.perf_counter_ns(),
+            }
+            event.update(payload)
+            self._recent_action_events.append(event)
+
+    def _safe_mouse_position(self):
+        try:
+            position = tuple(self.mouse.position)
+            if len(position) == 2:
+                return int(position[0]), int(position[1])
+        except Exception:
+            pass
+        return int(self.screen_origin_x), int(self.screen_origin_y)
+
+    def _update_committed_cursor_position(self, local_x: int, local_y: int, global_x: int, global_y: int):
+        with self._cursor_lock:
+            self._last_cursor_local = (int(local_x), int(local_y))
+            self._last_cursor_global = (int(global_x), int(global_y))
+
+    def _current_cursor_snapshot(self):
+        with self._cursor_lock:
+            return {
+                "local_x": int(self._last_cursor_local[0]),
+                "local_y": int(self._last_cursor_local[1]),
+                "global_x": int(self._last_cursor_global[0]),
+                "global_y": int(self._last_cursor_global[1]),
+            }
+
+    def _invalidate_pending_move_actions(self):
+        with self._move_generation_lock:
+            self._move_generation += 1
+            return self._move_generation
+
+    def _current_move_generation(self):
+        with self._move_generation_lock:
+            return self._move_generation
+
+    def get_runtime_debug_snapshot(self):
+        latest_event = None
+        with self._event_lock:
+            if self._recent_action_events:
+                latest_event = deepcopy(self._recent_action_events[-1])
+        snapshot = {
+            "cursor": self._current_cursor_snapshot(),
+            "latest_action_event": latest_event,
+        }
+        return snapshot
+
+    def _current_tutorial_scope(self):
+        with self._tutorial_scope_lock:
+            return dict(self._tutorial_scope)
+
+    def _clamp_mouse_coordinates(self, x: int, y: int):
+        scope = self._current_tutorial_scope()
+        bounds = scope.get("bounds")
+        if bounds is None:
+            return int(x), int(y)
+        bx, by, bw, bh = bounds
+        clamped_x = max(bx, min(int(x), bx + bw - 1))
+        clamped_y = max(by, min(int(y), by + bh - 1))
+        return clamped_x, clamped_y
 
     def takeAction(self, action, data):
         """
@@ -235,25 +361,78 @@ class Action:
             }
 
     def _set_mouse_position(self, x: int, y: int):
-        self.mouse.position = (int(x), int(y))
+        local_x, local_y = self._clamp_mouse_coordinates(int(x), int(y))
+        global_x = self.screen_origin_x + local_x
+        global_y = self.screen_origin_y + local_y
+        self.mouse.position = (global_x, global_y)
+        self._update_committed_cursor_position(local_x, local_y, global_x, global_y)
+        self._record_action_event(
+            "cursor_move",
+            x=local_x,
+            y=local_y,
+            global_x=global_x,
+            global_y=global_y,
+        )
+
+    def _move_cursor_if_current(self, x: int, y: int, generation: int):
+        if int(generation) != self._current_move_generation():
+            return
+        self._set_mouse_position(x, y)
 
     def _left_click_impl(self, x=None, y=None):
         if x is not None and y is not None:
             self._set_mouse_position(x, y)
-        self.mouse.click(Button.left, 1)
+        self.mouse.press(Button.left)
+        time.sleep(0.008)
+        self.mouse.release(Button.left)
+        position = self._current_cursor_snapshot()
+        self._record_action_event(
+            "left_click",
+            global_x=int(position["global_x"]),
+            global_y=int(position["global_y"]),
+        )
 
     def _double_click_impl(self, x=None, y=None):
         if x is not None and y is not None:
             self._set_mouse_position(x, y)
-        self.mouse.click(Button.left, 2)
+        self.mouse.press(Button.left)
+        time.sleep(0.008)
+        self.mouse.release(Button.left)
+        time.sleep(0.050)
+        self.mouse.press(Button.left)
+        time.sleep(0.008)
+        self.mouse.release(Button.left)
+        position = self._current_cursor_snapshot()
+        self._record_action_event(
+            "double_click",
+            global_x=int(position["global_x"]),
+            global_y=int(position["global_y"]),
+        )
 
     def _right_click_impl(self, x=None, y=None):
         if x is not None and y is not None:
             self._set_mouse_position(x, y)
-        self.mouse.click(Button.right, 1)
+        self.mouse.press(Button.right)
+        time.sleep(0.008)
+        self.mouse.release(Button.right)
+        position = self._current_cursor_snapshot()
+        self._record_action_event(
+            "right_click",
+            global_x=int(position["global_x"]),
+            global_y=int(position["global_y"]),
+        )
 
     def _scroll_impl(self, delta_x, delta_y):
+        position = self._current_cursor_snapshot()
+        self.mouse.position = (int(position["global_x"]), int(position["global_y"]))
         self.mouse.scroll(int(delta_x), int(delta_y))
+        self._record_action_event(
+            "scroll",
+            delta_x=int(delta_x),
+            delta_y=int(delta_y),
+            global_x=int(position["global_x"]),
+            global_y=int(position["global_y"]),
+        )
 
 
     def move_cursor(self, x: int, y: int):
@@ -262,10 +441,11 @@ class Action:
         Called directly by gesture recognizers.
         """
         origin_ns = self._capture_latency_origin_for_action()
+        generation = self._current_move_generation()
         # Movement can be high-frequency; dropping stale updates avoids queue backpressure.
         self._enqueue_action(
-            self._set_mouse_position,
-            (int(x), int(y)),
+            self._move_cursor_if_current,
+            (int(x), int(y), generation),
             origin_ns=origin_ns,
             drop_if_full=True,
         )
@@ -275,6 +455,7 @@ class Action:
         Public method to perform left click.
         Called directly by gesture recognizers.
         """
+        self._invalidate_pending_move_actions()
         origin_ns = self._capture_latency_origin_for_action()
         self._enqueue_action(self._left_click_impl, (x, y), origin_ns=origin_ns)
 
@@ -283,6 +464,7 @@ class Action:
         Public method to perform double click.
         Called directly by gesture recognizers.
         """
+        self._invalidate_pending_move_actions()
         origin_ns = self._capture_latency_origin_for_action()
         self._enqueue_action(self._double_click_impl, (x, y), origin_ns=origin_ns)
 
@@ -292,6 +474,7 @@ class Action:
         Public method to perform right click.
         Called directly by gesture recognizers.
         """
+        self._invalidate_pending_move_actions()
         origin_ns = self._capture_latency_origin_for_action()
         self._enqueue_action(self._right_click_impl, (x, y), origin_ns=origin_ns)
 
@@ -304,20 +487,29 @@ class Action:
         dy = int(delta_y)
         if dx == 0 and dy == 0:
             return
+        self._invalidate_pending_move_actions()
         origin_ns = self._capture_latency_origin_for_action()
         self._enqueue_action(self._scroll_impl, (dx, dy), origin_ns=origin_ns)
 
     def hold_left_click(self):
+        self._invalidate_pending_move_actions()
         self._enqueue_action(self.mouse.press, (Button.left,))
+        self._record_action_event("left_button_down")
 
     def release_left_click(self):
+        self._invalidate_pending_move_actions()
         self._enqueue_action(self.mouse.release, (Button.left,))
+        self._record_action_event("left_button_up")
 
     def hold_right_click(self):
+        self._invalidate_pending_move_actions()
         self._enqueue_action(self.mouse.press, (Button.right,))
+        self._record_action_event("right_button_down")
 
     def release_right_click(self):
+        self._invalidate_pending_move_actions()
         self._enqueue_action(self.mouse.release, (Button.right,))
+        self._record_action_event("right_button_up")
 
     def _pynput_meta_key(self, side: str):
         """Resolve platform-appropriate meta/super/cmd key for the given side."""
@@ -443,6 +635,52 @@ class Action:
         for key in keys:
             self.release_key(key)
 
+    def execute_macro_steps(self, steps):
+        """Queue an ordered macro step chain for execution."""
+        normalized_steps = []
+        for step in steps or []:
+            if isinstance(step, MacroActionStep):
+                normalized_steps.append(step)
+            else:
+                normalized_steps.append(MacroActionStep.from_dict(step))
+        if not normalized_steps:
+            return
+
+        origin_ns = self._capture_latency_origin_for_action()
+        self._enqueue_action(self._execute_macro_steps_impl, (normalized_steps,), origin_ns=origin_ns)
+
+    def _execute_macro_steps_impl(self, steps):
+        for step in steps:
+            step_type = step.step_type
+            params = step.params
+
+            if step_type == "tap_key":
+                self._tap_key_impl(params["key"])
+            elif step_type == "key_down":
+                if self._key_down(params["key"]):
+                    self._held_keys.add(params["key"])
+            elif step_type == "key_up":
+                self._key_up(params["key"])
+                self._held_keys.discard(params["key"])
+            elif step_type == "tap_hotkey":
+                self._tap_hotkey_impl(params["keys"])
+            elif step_type == "left_click":
+                self._left_click_impl()
+            elif step_type == "right_click":
+                self._right_click_impl()
+            elif step_type == "left_button_down":
+                self.mouse.press(Button.left)
+            elif step_type == "left_button_up":
+                self.mouse.release(Button.left)
+            elif step_type == "right_button_down":
+                self.mouse.press(Button.right)
+            elif step_type == "right_button_up":
+                self.mouse.release(Button.right)
+            elif step_type == "scroll":
+                self._scroll_impl(params.get("delta_x", 0), params.get("delta_y", 0))
+            elif step_type == "delay_ms":
+                time.sleep(max(0, int(params.get("duration_ms", 0))) / 1000.0)
+
     def key_down(self, key_code: str):
         """Press and hold a keyboard key."""
         logical = normalize_key(key_code)
@@ -452,6 +690,7 @@ class Action:
         try:
             if self._key_down(logical):
                 self._held_keys.add(logical)
+                self._record_action_event("key_down", key=logical)
         except Exception as e:
             print(f"Error on key_down('{logical}'): {e}")
 
@@ -463,6 +702,7 @@ class Action:
 
         try:
             self._key_up(logical)
+            self._record_action_event("key_up", key=logical)
         except Exception as e:
             print(f"Error on key_up('{logical}'): {e}")
         finally:
@@ -513,8 +753,9 @@ class Action:
     def _tap_hotkey_impl(self, logical_keys):
         if self.detected_os == "Linux":
             self._tap_hotkey_impl_linux(logical_keys)
-            return
-        self._tap_hotkey_impl_pynput(logical_keys)
+        else:
+            self._tap_hotkey_impl_pynput(logical_keys)
+        self._record_action_event("tap_hotkey", keys=list(logical_keys))
 
     def _logical_to_xdotool_key(self, logical: str):
         if len(logical) == 1:
@@ -781,10 +1022,12 @@ class Action:
     def _tap_key_impl(self, logical):
         if self.detected_os == "Linux":
             if self._tap_key_impl_linux(logical):
+                self._record_action_event("tap_key", key=logical)
                 return
             print(f"Warning: failed to inject Linux key tap '{logical}' via xdotool/ydotool/pynput")
             return
         self._tap_key_impl_pynput(logical)
+        self._record_action_event("tap_key", key=logical)
 
     def type_text(self, text):
         """Type a text string in one action."""
@@ -797,12 +1040,18 @@ class Action:
         self._enqueue_action(self._type_text_impl, (payload,), origin_ns=origin_ns)
 
     def _type_text_impl(self, payload: str):
+        scope = self._current_tutorial_scope()
+        if scope.get("capture_text"):
+            self._record_action_event("type_text", text=payload, captured=True)
+            return
         if self.detected_os == "Linux":
             if self._type_text_impl_linux(payload):
+                self._record_action_event("type_text", text=payload, captured=False)
                 return
             print("Warning: failed to inject Linux text via xdotool/ydotool/pynput")
             return
         self._type_text_impl_pynput(payload)
+        self._record_action_event("type_text", text=payload, captured=False)
 
     def release_all_keys(self):
         """Release any currently held keys."""

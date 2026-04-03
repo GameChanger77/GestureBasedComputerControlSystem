@@ -39,6 +39,19 @@ uv run python main.py --dev
 uv run python main.py --prod
 ```
 
+Legacy JSON custom rules/macros are **off by default**. To explicitly load
+`gesture_custom_rules.json` from the same directory as `gesture_config.json`,
+start the app with:
+```powershell
+uv run python main.py --load-legacy-custom-rules
+```
+
+You can combine it with either UI mode flag:
+```powershell
+uv run python main.py --dev --load-legacy-custom-rules
+uv run python main.py --prod --load-legacy-custom-rules
+```
+
 Bundled installer builds always run `prod` mode, even if `--dev` is passed.
 
 ## Verify environment
@@ -57,7 +70,6 @@ Expected output starts with `Python 3.11`.
 - Increase `pinch_threshold` for easier click detection (may cause accidental clicks)
 - Increase `*_pending_frames` to prevent accidental gesture triggers (less responsive)
 - Increase `scroll_sensitivity` for faster scrolling
-- Increase `screen_safe_margin` to prevent cursor from sticking to edges
 
 ## Camera permission
 If prompted by your OS, allow camera access for Python/terminal.
@@ -86,7 +98,7 @@ If prompted by your OS, allow camera access for Python/terminal.
    - Trigger: Right thumb + middle finger pinch
    - Action: Performs a left click at the index fingertip cursor position
    - Priority: 10 (high)
-   - Notes: A quick pinch-release performs a single click; holding the pinch for about 1 second performs a double-click
+   - Notes: A confirmed pinch performs a single click immediately; holding the pinch for about 1 second emits one additional click
 
 4. **RightClickGesture** (`backend/gestures/mouse_mode/RightClickGesture.py`)
    - Trigger: Right thumb + ring finger pinch
@@ -248,7 +260,6 @@ Priority 1:  MoveMouseGesture
     "click_pending_frames": 3,              # Click gesture confirmation (prevents accidents)
     "scroll_pending_frames": 2,             # Scroll gesture confirmation (balanced)
     "ending_frames": 2,                     # Cooldown before gesture reset
-    "screen_safe_margin": 50,               # Pixels from edge (prevents hot corners)
     "debug_mode": true                      # Enable debug logging
 }
 ```

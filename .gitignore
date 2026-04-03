@@ -25,3 +25,7 @@ plans/
 /tools
 gesture_config.json
 gesture_overrides.json
+
+# Tutorial animation scene descriptors are source-controlled assets.
+!/frontend/assets/tutorial/
+!/frontend/assets/tutorial/*.json

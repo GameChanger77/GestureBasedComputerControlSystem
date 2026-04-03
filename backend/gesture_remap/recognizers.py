@@ -11,6 +11,7 @@ from backend.gestures.mouse_mode.LeftClickGesture import LeftClickGesture
 from backend.gestures.mouse_mode.MoveMouseGesture import MoveMouseGesture
 from backend.gestures.mouse_mode.RightClickGesture import RightClickGesture
 from backend.gestures.mouse_mode.ScrollGesture import ScrollGesture
+from backend.gestures.switch_mode.HotkeyModeEntryGesture import HotkeyModeEntryGesture
 from backend.gestures.switch_mode.KeyboardModeEntryGesture import KeyboardModeEntryGesture
 from backend.gestures.switch_mode.KeyboardModeExitGesture import KeyboardModeExitGesture
 
@@ -118,7 +119,18 @@ class TemplateKeyboardModeEntryGesture(_TemplatePoseMixin, KeyboardModeEntryGest
         self._configure_pose(pose_template, matcher_config)
 
     def detect_gesture(self, hands_data):
-        if self.strategizer.current_mode.value != "mouse":
+        if self.strategizer.current_mode.value not in ("mouse", "hotkey"):
+            return False, None
+        return self._matches_pose(hands_data), None
+
+
+class TemplateHotkeyModeEntryGesture(_TemplatePoseMixin, HotkeyModeEntryGesture):
+    def __init__(self, *args, pose_template: HandPoseTemplate, matcher_config: PoseMatcherConfig, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._configure_pose(pose_template, matcher_config)
+
+    def detect_gesture(self, hands_data):
+        if self.strategizer.current_mode.value not in ("mouse", "keyboard"):
             return False, None
         return self._matches_pose(hands_data), None
 
@@ -129,6 +141,6 @@ class TemplateKeyboardModeExitGesture(_TemplatePoseMixin, KeyboardModeExitGestur
         self._configure_pose(pose_template, matcher_config)
 
     def detect_gesture(self, hands_data):
-        if self.strategizer.current_mode.value != "keyboard":
+        if self.strategizer.current_mode.value not in ("keyboard", "hotkey"):
             return False, None
         return self._matches_pose(hands_data), None

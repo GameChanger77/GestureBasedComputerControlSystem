@@ -1,26 +1,33 @@
 import argparse
+import os
 import signal
 import sys
-from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtCore import QTimer
+from pathlib import Path
 from paths import resource
 from backend.GestureConfig import GestureConfig
 
 
-def get_screen_size():
+def get_screen_geometry():
+    from PySide6.QtGui import QGuiApplication
+
     screen = QGuiApplication.primaryScreen()
     if screen:
-        size = screen.size()
-        return size.width(), size.height()
+        geometry = screen.virtualGeometry()
+        return geometry.x(), geometry.y(), geometry.width(), geometry.height()
 
     # Fallback: pyautogui (lazy import so it can't kill startup)
     try:
         import pyautogui
-        return pyautogui.size()
+        width, height = pyautogui.size()
+        return 0, 0, width, height
     except Exception as e:
         print(f"[WARN] Could not get screen size via pyautogui: {e}")
-        return 1920, 1080  # safe default
+        return 0, 0, 1920, 1080  # safe default
+
+
+def get_screen_size():
+    _origin_x, _origin_y, width, height = get_screen_geometry()
+    return width, height
 
 
 def parse_args(argv):
@@ -29,6 +36,14 @@ def parse_args(argv):
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument("--dev", action="store_true", help="Launch development UI")
     mode_group.add_argument("--prod", action="store_true", help="Launch production UI")
+    parser.add_argument(
+        "--load-legacy-custom-rules",
+        action="store_true",
+        help=(
+            "Load legacy gesture_custom_rules.json from the config directory. "
+            "Disabled by default."
+        ),
+    )
     return parser.parse_args(argv[1:])
 
 
@@ -49,13 +64,21 @@ def resolve_ui_mode(args):
     return requested_mode or "dev"
 
 
-def create_backend_components(screen_width, screen_height, config_path, ui_mode):
+def create_backend_components(
+    screen_width,
+    screen_height,
+    config_path,
+    ui_mode,
+    screen_origin_x=0,
+    screen_origin_y=0,
+    load_legacy_custom_rules=False,
+):
     """Create backend component graph from current config file."""
     from backend.Action import Action
     from backend.HandTracker import HandTracker
     from backend.Strategizer import Strategizer
 
-    action = Action()
+    action = Action(screen_origin_x=screen_origin_x, screen_origin_y=screen_origin_y)
     config = GestureConfig(config_path=config_path)
     strategizer = Strategizer(
         action=action,
@@ -63,6 +86,7 @@ def create_backend_components(screen_width, screen_height, config_path, ui_mode)
         screen_width=screen_width,
         screen_height=screen_height,
         ui_mode=ui_mode,
+        load_legacy_custom_rules=load_legacy_custom_rules,
     )
 
     max_tracked_hands = int(config.get('max_tracked_hands', 1))
@@ -87,8 +111,23 @@ def create_backend_components(screen_width, screen_height, config_path, ui_mode)
     }
 
 
+def configure_qt_font_dir():
+    """Point Qt at the bundled font directory before QApplication starts."""
+    font_dir = Path(__file__).resolve().parent / "frontend" / "assets" / "fonts"
+    if font_dir.exists():
+        os.environ.setdefault("QT_QPA_FONTDIR", str(font_dir))
+
+
 def main():
     """Main application entry point"""
+    # Preload Action before importing PySide6. Action depends on pynput, and
+    # importing it after PySide6 can trigger startup-time import hook failures.
+    from backend.Action import Action as _ActionPreload
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
+    _ = _ActionPreload
+    configure_qt_font_dir()
     args = parse_args(sys.argv)
     effective_ui_mode = resolve_ui_mode(args)
 
@@ -100,8 +139,11 @@ def main():
     app.setStyle("Fusion")  # Use Fusion style for consistent look across platforms
 
     # Dynamically get screen resolution (works on Windows and macOS)
-    screen_width, screen_height = get_screen_size()
-    print(f"Detected screen resolution: {screen_width}x{screen_height}")
+    screen_origin_x, screen_origin_y, screen_width, screen_height = get_screen_geometry()
+    print(
+        "Detected virtual screen geometry: "
+        f"origin=({screen_origin_x}, {screen_origin_y}) size={screen_width}x{screen_height}"
+    )
     print(f"UI mode: {effective_ui_mode}")
 
     config_path = GestureConfig.resolve_config_path()
@@ -110,6 +152,9 @@ def main():
         screen_height=screen_height,
         config_path=config_path,
         ui_mode=effective_ui_mode,
+        screen_origin_x=screen_origin_x,
+        screen_origin_y=screen_origin_y,
+        load_legacy_custom_rules=args.load_legacy_custom_rules,
     )
     components = component_factory()
 

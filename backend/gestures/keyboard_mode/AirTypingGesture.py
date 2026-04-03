@@ -535,6 +535,13 @@ class AirTypingGesture(GestureRecognizer):
         self.action.type_text(text)
         return text
 
+    def blocks_keyboard_mode_exit(self) -> str:
+        if self._swipe_active:
+            return "Swipe gesture in progress"
+        if self._special_key_pinch_latched:
+            return "Key selection pinch is still latched"
+        return ""
+
     def _current_right_slot_id(self, hands_data: HandsData) -> Optional[str]:
         right_hand = hands_data.camera.right if hands_data.camera.has_right else None
         frame = self._right_frame_for_swipe

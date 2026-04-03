@@ -26,6 +26,21 @@ class GestureRecognizer(ABC):
         """
         self.action = action
         self.priority = priority
+        self.debug_name = self.__class__.__name__
+        self._debug_last_detected = False
+        self._debug_last_should_trigger = False
+        self._debug_last_action_executed = False
+        self._debug_last_state = "idle"
+        self._debug_last_note = ""
+        self.suppresses_lower_priorities_while_active = False
+
+    def _set_debug_frame(self, *, detected=False, should_trigger=False, action_executed=False, state=None, note=""):
+        self._debug_last_detected = bool(detected)
+        self._debug_last_should_trigger = bool(should_trigger)
+        self._debug_last_action_executed = bool(action_executed)
+        if state is not None:
+            self._debug_last_state = getattr(state, "value", str(state))
+        self._debug_last_note = str(note or "")
 
     @abstractmethod
     def detect_gesture(self, hands_data: HandsData):
@@ -119,16 +134,23 @@ class SnapshotGestureRecognizer(GestureRecognizer):
             self.action.set_pending_latency_origin_ts_ns(frame_capture_ts_ns)
 
         state, should_trigger, data = self.state_machine.update(detected, gesture_data)
+        action_executed = False
 
         # Only trigger on first frame of ACTIVE state
         if should_trigger and state == GestureState.ACTIVE and not self._already_triggered:
             self._already_triggered = True
             self.execute_action(data)
-            return True
+            action_executed = True
         elif state == GestureState.IDLE:
             self._already_triggered = False
 
-        return False
+        self._set_debug_frame(
+            detected=detected,
+            should_trigger=should_trigger,
+            action_executed=action_executed,
+            state=state,
+        )
+        return action_executed
 
     def reset(self):
         """Reset the gesture state machine"""
@@ -176,12 +198,19 @@ class ContinuousGestureRecognizer(GestureRecognizer):
             self.action.set_pending_latency_origin_ts_ns(frame_capture_ts_ns)
 
         state, should_trigger, data = self.state_machine.update(detected, gesture_data)
+        action_executed = False
 
         if should_trigger:
             self.execute_action(data)
-            return True
+            action_executed = True
 
-        return False
+        self._set_debug_frame(
+            detected=detected,
+            should_trigger=should_trigger,
+            action_executed=action_executed,
+            state=state,
+        )
+        return action_executed
 
     def reset(self):
         """Reset the gesture state machine"""
@@ -285,14 +314,21 @@ class MotionGestureRecognizer(GestureRecognizer):
         state, should_trigger, data = self.state_machine.update(
             start_detected, in_progress, motion_complete, motion_data
         )
+        action_executed = False
 
         # Execute action if motion completed
         if should_trigger:
             self.execute_action(data)
             self.motion_tracker.clear()  # Reset tracker after action
-            return True
+            action_executed = True
 
-        return False
+        self._set_debug_frame(
+            detected=start_detected or in_progress or motion_complete,
+            should_trigger=should_trigger,
+            action_executed=action_executed,
+            state=state,
+        )
+        return action_executed
 
     def reset(self):
         """Reset the motion gesture state machine"""

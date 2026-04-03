@@ -12,43 +12,80 @@ from backend.gesture_remap.pose_templates import (
     PoseMatcherConfig,
     compare_pose_templates,
 )
+from backend.gesture_remap.rule_overrides import (
+    GestureRuleOverride,
+    POINT_OVERRIDE_KIND,
+    RULE_OVERRIDE_KIND,
+)
 
 
 @dataclass(frozen=True)
 class GestureOverrideRecord:
     gesture_id: str
     enabled: bool
-    pose_template: HandPoseTemplate
+    override_kind: str
+    pose_template: HandPoseTemplate | None
     editor_pose_template: HandPoseTemplate | None
-    matcher_config: PoseMatcherConfig
+    matcher_config: PoseMatcherConfig | None
+    rule_override: GestureRuleOverride | None
     updated_at: str
 
     def to_dict(self) -> dict:
         payload = {
             "gesture_id": self.gesture_id,
             "enabled": bool(self.enabled),
-            "pose_template": self.pose_template.to_dict(),
-            "matcher_config": self.matcher_config.to_dict(),
+            "override_kind": self.override_kind,
             "updated_at": self.updated_at,
         }
-        if self.editor_pose_template is not None:
-            payload["editor_pose_template"] = self.editor_pose_template.to_dict()
+        if self.is_point_override and self.pose_template is not None and self.matcher_config is not None:
+            payload["pose_template"] = self.pose_template.to_dict()
+            payload["matcher_config"] = self.matcher_config.to_dict()
+            if self.editor_pose_template is not None:
+                payload["editor_pose_template"] = self.editor_pose_template.to_dict()
+        if self.is_rule_override and self.rule_override is not None:
+            payload["rule_override"] = self.rule_override.to_dict()
         return payload
 
     @classmethod
     def from_dict(cls, data: dict) -> "GestureOverrideRecord":
+        override_kind = str(data.get("override_kind", "") or "").strip()
+        if override_kind not in {POINT_OVERRIDE_KIND, RULE_OVERRIDE_KIND}:
+            override_kind = RULE_OVERRIDE_KIND if isinstance(data.get("rule_override"), dict) else POINT_OVERRIDE_KIND
+
         return cls(
             gesture_id=str(data["gesture_id"]),
             enabled=bool(data.get("enabled", True)),
-            pose_template=HandPoseTemplate.from_dict(data["pose_template"]),
+            override_kind=override_kind,
+            pose_template=(
+                HandPoseTemplate.from_dict(data["pose_template"])
+                if isinstance(data.get("pose_template"), dict)
+                else None
+            ),
             editor_pose_template=(
                 HandPoseTemplate.from_dict(data["editor_pose_template"])
                 if isinstance(data.get("editor_pose_template"), dict)
                 else None
             ),
-            matcher_config=PoseMatcherConfig.from_dict(data.get("matcher_config")),
+            matcher_config=(
+                PoseMatcherConfig.from_dict(data.get("matcher_config"))
+                if override_kind == POINT_OVERRIDE_KIND
+                else None
+            ),
+            rule_override=(
+                GestureRuleOverride.from_dict(data["rule_override"])
+                if isinstance(data.get("rule_override"), dict)
+                else None
+            ),
             updated_at=str(data.get("updated_at", "")),
         )
+
+    @property
+    def is_point_override(self) -> bool:
+        return self.override_kind == POINT_OVERRIDE_KIND
+
+    @property
+    def is_rule_override(self) -> bool:
+        return self.override_kind == RULE_OVERRIDE_KIND
 
 
 class GestureOverrideStore:
@@ -123,9 +160,31 @@ class GestureOverrideStore:
         record = GestureOverrideRecord(
             gesture_id=gesture_id,
             enabled=enabled,
+            override_kind=POINT_OVERRIDE_KIND,
             pose_template=pose_template,
             editor_pose_template=editor_pose_template,
             matcher_config=matcher_config or PoseMatcherConfig(),
+            rule_override=None,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        self.records[gesture_id] = record
+        self.save()
+        return record
+
+    def set_rule_override(
+        self,
+        gesture_id: str,
+        rule_override: GestureRuleOverride,
+        enabled: bool = True,
+    ) -> GestureOverrideRecord:
+        record = GestureOverrideRecord(
+            gesture_id=gesture_id,
+            enabled=enabled,
+            override_kind=RULE_OVERRIDE_KIND,
+            pose_template=None,
+            editor_pose_template=None,
+            matcher_config=None,
+            rule_override=rule_override,
             updated_at=datetime.now(timezone.utc).isoformat(),
         )
         self.records[gesture_id] = record
@@ -133,6 +192,8 @@ class GestureOverrideStore:
         return record
 
     def editor_template_for_record(self, record: GestureOverrideRecord) -> HandPoseTemplate:
+        if not record.is_point_override or record.pose_template is None:
+            raise ValueError("editor pose template is only available for point overrides")
         if record.editor_pose_template is not None:
             return record.editor_pose_template
         return record.pose_template
@@ -157,7 +218,7 @@ class GestureOverrideStore:
             other_record = self.get(other_def.id)
             other_template = (
                 self.editor_template_for_record(other_record)
-                if other_record and other_record.enabled
+                if other_record and other_record.enabled and other_record.is_point_override
                 else other_def.saved_pose_template
             )
             comparison = compare_pose_templates(other_template, pose_template, matcher_config)

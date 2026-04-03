@@ -655,9 +655,13 @@ class HandTracker(QThread):
                         self.strategizer.strategize(hands_data, frame_capture_ts_ns=capture_ts_ns)
                         strategize_end_ns = time.perf_counter_ns()
                         strategize_ms = (strategize_end_ns - strategize_start_ns) / 1_000_000.0
+                    elif hasattr(self.strategizer, "capture_debug_snapshot"):
+                        self.strategizer.capture_debug_snapshot(hands_data)
                 else:
                     # Reuse explicit empty state and skip strategizer when no hands are present.
                     hands_data = self._empty_hands_data
+                    if hasattr(self.strategizer, "capture_debug_snapshot"):
+                        self.strategizer.capture_debug_snapshot(hands_data)
 
                 loop_end_ns = time.perf_counter_ns()
 
@@ -688,6 +692,7 @@ class HandTracker(QThread):
 
                 landmarks_data = {
                     'smoothed_hands_data': hands_data,
+                    'gesture_debug': self.strategizer.get_debug_snapshot() if hasattr(self.strategizer, "get_debug_snapshot") else None,
                     'metrics': {
                         'pipeline_fps': pipeline_fps,
                         'action_latency_avg_ms': action_latency['avg_ms'],
