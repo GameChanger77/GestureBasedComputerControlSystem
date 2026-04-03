@@ -321,6 +321,12 @@ def _build_template_library() -> tuple[dict[str, HandPoseTemplate], dict[str, Ha
             finger_curls={"index": 0.0, "middle": 0.0, "ring": 0.0, "pinky": 0.0},
             thumb_curl=0.05,
         ),
+        "switch_to_hotkey": build_pose_template(
+            "Switch To Hotkey",
+            finger_curls={"index": 0.82, "middle": 0.0, "ring": 0.0, "pinky": 0.0},
+            thumb_curl=0.34,
+            pinch_pair=("thumb", "index"),
+        ),
         "switch_to_mouse": build_pose_template(
             "Switch To Mouse",
             finger_curls={"index": 1.0, "middle": 1.0, "ring": 1.0, "pinky": 1.0},
@@ -354,6 +360,12 @@ def _build_template_library() -> tuple[dict[str, HandPoseTemplate], dict[str, Ha
             "Switch To Keyboard Preview",
             finger_curls={"index": 0.0, "middle": 0.0, "ring": 0.0, "pinky": 0.0},
             thumb_curl=0.02,
+        ),
+        "switch_to_hotkey": build_pose_template(
+            "Switch To Hotkey Preview",
+            finger_curls={"index": 0.76, "middle": 0.0, "ring": 0.0, "pinky": 0.0},
+            thumb_curl=0.28,
+            pinch_pair=("thumb", "index"),
         ),
         "switch_to_mouse": build_pose_template(
             "Switch To Mouse Preview",

@@ -158,6 +158,8 @@ class ConditionEvaluator:
                 extension_threshold=float(cond.get("extension_threshold", 155.0)),
                 min_extended_fingers=int(cond.get("min_extended_fingers", 4)),
                 openness_threshold=float(cond.get("openness_threshold", 0.08)),
+                require_palm_facing_camera=bool(cond.get("require_palm_facing_camera", False)),
+                min_palm_normal_z=float(cond.get("min_palm_normal_z", 0.35)),
             )
 
         if op == "strict_fist":

@@ -1,5 +1,7 @@
 import os
 import unittest
+
+from types import SimpleNamespace
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -39,6 +41,16 @@ class MainWindowShellTests(unittest.TestCase):
         self.assertIsNotNone(window.settings_panel)
         self.assertIsNotNone(window.tutorial_button)
         self.assertIsNone(window.gesture_debug_widget)
+        window.close()
+
+    def test_prod_shell_shows_hotkey_mode_badge(self):
+        window = MainWindow(ui_mode="prod")
+        window.strategizer = SimpleNamespace(get_mode_name=lambda: "HOTKEY")
+
+        window._update_mode_label()
+
+        self.assertEqual(window.mode_label.text(), "Mode: HOTKEY")
+        self.assertEqual(window.mode_label.property("badgeTone"), "accent")
         window.close()
 
     def test_tutorial_button_opens_modal_dialog(self):
