@@ -299,10 +299,6 @@ class MainWindow(QMainWindow):
         title = QLabel("Settings")
         set_label_role(title, "hero-title")
         copy.addWidget(title)
-        subtitle = QLabel("Tune camera, gestures, macros, controls, and keyboard behavior from the same slate-and-cyan settings system.")
-        subtitle.setWordWrap(True)
-        set_label_role(subtitle, "hero-subtitle")
-        copy.addWidget(subtitle)
         header.addLayout(copy, 1)
 
         self.settings_status_label = SettingsBadge("Status: Not started", "default")
@@ -320,10 +316,6 @@ class MainWindow(QMainWindow):
 
         self.prod_header_card = SettingsCard(surface="panel")
         self.prod_header_card.setProperty("appRole", "hero")
-
-        eyebrow = QLabel("Production")
-        set_label_role(eyebrow, "hero-eyebrow")
-        self.prod_header_card.body_layout.addWidget(eyebrow)
 
         title = QLabel("Gesture Runtime Control")
         set_label_role(title, "hero-title")
