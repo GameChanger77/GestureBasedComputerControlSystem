@@ -39,12 +39,6 @@ class RuleLoader:
         return data
 
     def _validate(self, data: Dict[str, Any]) -> None:
-        """
-        Validate the top-level schema and each gesture entry.
-
-        Raises:
-            ValueError: if schema is invalid
-        """
         if not isinstance(data, dict):
             raise ValueError("Root must be an object")
 
@@ -58,19 +52,16 @@ class RuleLoader:
         if not isinstance(global_cfg, dict):
             raise ValueError("global must be an object")
 
-        # Validate each custom gesture entry
         for i, g in enumerate(data["custom_gestures"]):
             path = f"custom_gestures[{i}]"
             if not isinstance(g, dict):
                 raise ValueError(f"{path} must be an object")
 
-            # Required keys for compilation
             required = ["id", "name", "enabled", "mode", "type", "priority", "hand", "conditions", "action"]
             for r in required:
                 if r not in g:
                     raise ValueError(f"{path}.{r} is required")
 
-            # Enforce supported types/modes/hands
             if g["type"] not in ["pose", "hold"]:
                 raise ValueError(f"{path}.type must be 'pose' or 'hold'")
 
@@ -83,40 +74,41 @@ class RuleLoader:
             if not isinstance(g["conditions"], list):
                 raise ValueError(f"{path}.conditions must be a list")
 
-            # Action must be an object with at least a type
             if not isinstance(g["action"], dict) or "type" not in g["action"]:
                 raise ValueError(f"{path}.action must be an object with action.type")
 
-            # confirm is optional but must be object if present
+            if g["action"]["type"] == "macro":
+                steps = g["action"].get("steps")
+                if not isinstance(steps, list) or len(steps) == 0:
+                    raise ValueError(f"{path}.action.steps must be a non-empty list for action.type='macro'")
+
             if "confirm" in g and not isinstance(g["confirm"], dict):
                 raise ValueError(f"{path}.confirm must be an object if present")
-            # -------------------------
-            # Validate custom_macros[]
-            # -------------------------
-            if "custom_macros" in data:
-                if not isinstance(data["custom_macros"], list):
-                    raise ValueError("custom_macros must be a list")
 
-                for i, m in enumerate(data["custom_macros"]):
-                    path = f"custom_macros[{i}]"
-                    if not isinstance(m, dict):
-                        raise ValueError(f"{path} must be an object")
+        if "custom_macros" in data:
+            if not isinstance(data["custom_macros"], list):
+                raise ValueError("custom_macros must be a list")
 
-                    required = ["id", "name", "enabled", "mode", "priority", "steps", "action"]
-                    for r in required:
-                        if r not in m:
-                            raise ValueError(f"{path}.{r} is required")
+            for i, m in enumerate(data["custom_macros"]):
+                path = f"custom_macros[{i}]"
+                if not isinstance(m, dict):
+                    raise ValueError(f"{path} must be an object")
 
-                    if m["mode"] not in ["mouse", "keyboard", "hotkey"]:
-                        raise ValueError(f"{path}.mode must be mouse|keyboard|hotkey")
+                required = ["id", "name", "enabled", "mode", "priority", "steps", "action"]
+                for r in required:
+                    if r not in m:
+                        raise ValueError(f"{path}.{r} is required")
 
-                    if not isinstance(m["steps"], list) or len(m["steps"]) == 0:
-                        raise ValueError(f"{path}.steps must be a non-empty list")
+                if m["mode"] not in ["mouse", "keyboard", "hotkey"]:
+                    raise ValueError(f"{path}.mode must be mouse|keyboard|hotkey")
 
-                    for j, s in enumerate(m["steps"]):
-                        sp = f"{path}.steps[{j}]"
-                        if not isinstance(s, dict) or "gesture_id" not in s:
-                            raise ValueError(f"{sp}.gesture_id is required")
+                if not isinstance(m["steps"], list) or len(m["steps"]) == 0:
+                    raise ValueError(f"{path}.steps must be a non-empty list")
 
-                    if not isinstance(m["action"], dict) or "type" not in m["action"]:
-                        raise ValueError(f"{path}.action must be an object with action.type")
+                for j, s in enumerate(m["steps"]):
+                    sp = f"{path}.steps[{j}]"
+                    if not isinstance(s, dict) or "gesture_id" not in s:
+                        raise ValueError(f"{sp}.gesture_id is required")
+
+                if not isinstance(m["action"], dict) or "type" not in m["action"]:
+                    raise ValueError(f"{path}.action must be an object with action.type")

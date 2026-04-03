@@ -7,11 +7,12 @@ import threading
 import time
 from collections import deque
 
-from backend.macros.macro_models import MacroActionStep
-from backend.gestures.keyboard_mode.KeyCodes import get_windows_vk, normalize_key
-from pynput.mouse import Controller as Mouse, Button
 from pynput.keyboard import Controller as Keyboard, Key
+from pynput.mouse import Controller as Mouse, Button
 from pyparsing import ABC, abstractmethod
+
+from backend.gestures.keyboard_mode.KeyCodes import get_windows_vk, normalize_key
+from backend.macros.macro_models import MacroActionStep
 
 OS_TYPE = platform.system()
 if OS_TYPE == "Windows":
@@ -147,7 +148,7 @@ class Action:
             _fields_ = [("type", wintypes.DWORD), ("union", _INPUTUNION)]
 
         self._send_input = ctypes.windll.user32.SendInput
-        self._send_input.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+        self._send_input.argtypes = (wintypes.UINT, wintypes.LPVOID, ctypes.c_int)
         self._send_input.restype = wintypes.UINT
 
         self._get_last_error = ctypes.windll.kernel32.GetLastError
@@ -173,7 +174,8 @@ class Action:
             try:
                 fn(*args)
             except Exception as exc:
-                print(f"Error executing queued action: {exc}")
+                name = getattr(fn, "__name__", str(fn))
+                print(f"Error executing queued action {name}: {exc}")
             finally:
                 if origin_ns is not None:
                     self._record_action_latency(origin_ns=origin_ns)
@@ -497,7 +499,8 @@ class Action:
             ),
         )
 
-        sent = self._send_input(1, ctypes.byref(input_obj), ctypes.sizeof(self._INPUT))
+        inputs = (self._INPUT * 1)(input_obj)
+        sent = self._send_input(1, inputs, ctypes.sizeof(self._INPUT))
         if sent != 1:
             self._keyboard_send_failures += 1
             if self._keyboard_send_failures == 1:

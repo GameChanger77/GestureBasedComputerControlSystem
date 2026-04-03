@@ -346,7 +346,7 @@ class BuiltInGestureRegistry:
             return GestureRuleOverride(
                 conditions=[
                     {
-                        "op": "only_fingers_extended",
+                        "op": "only_fingers_extended.json",
                         "fingers": ["index"],
                         "threshold_deg": float(config_source.get("finger_extension_angle", 155.0)),
                     }
@@ -389,7 +389,7 @@ class BuiltInGestureRegistry:
             return GestureRuleOverride(
                 conditions=[
                     {
-                        "op": "only_fingers_extended",
+                        "op": "only_fingers_extended.json",
                         "fingers": ["index", "middle"],
                         "threshold_deg": float(config_source.get("finger_extension_angle", 155.0)),
                     }
