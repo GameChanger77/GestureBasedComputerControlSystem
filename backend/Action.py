@@ -11,6 +11,7 @@ from typing import List, Optional
 from backend.macros.macro_models import MacroActionStep
 from backend.gestures.keyboard_mode.KeyCodes import normalize_key
 from backend.platforms import PlatformKeyboardBackend, create_keyboard_backend
+
 try:
     from pynput.mouse import Controller as Mouse, Button
     from pynput.keyboard import Controller as Keyboard, Key
@@ -18,9 +19,11 @@ except ImportError:
     Mouse = None
     Keyboard = None
 
+
     class Button:
         left = "left"
         right = "right"
+
 
     class Key:
         tab = "tab"
@@ -86,7 +89,8 @@ class MouseTest(ABC):
     @abstractmethod
     def scroll(self, delta_x: int = 0, delta_y: int = 0):
         pass
-    
+
+
 class KeyboardTest(ABC):
     @abstractmethod
     def press_key(self, key):
@@ -134,9 +138,9 @@ class _PynputKeyboardBackend(PlatformKeyboardBackend):
 
         if self._os_type == "Linux":
             return (
-                getattr(Key, side_super, None)
-                or getattr(Key, side_cmd, None)
-                or getattr(Key, "cmd", None)
+                    getattr(Key, side_super, None)
+                    or getattr(Key, side_cmd, None)
+                    or getattr(Key, "cmd", None)
             )
         if self._os_type == "Darwin":
             return getattr(Key, side_cmd, None) or getattr(Key, "cmd", None)
@@ -291,15 +295,16 @@ class _PynputKeyboardBackend(PlatformKeyboardBackend):
         except Exception:
             return False
 
+
 class Action:
 
     def __init__(
-        self,
-        mouse: MouseTest = None,
-        keyboard_test: KeyboardTest = None,
-        osType=None,
-        screen_origin_x: int = 0,
-        screen_origin_y: int = 0,
+            self,
+            mouse: MouseTest = None,
+            keyboard_test: KeyboardTest = None,
+            osType=None,
+            screen_origin_x: int = 0,
+            screen_origin_y: int = 0,
     ):
         if mouse is None and Mouse is None:
             raise RuntimeError("pynput is required for the default mouse controller")
@@ -374,7 +379,6 @@ class Action:
             argtypes = [wintypes.UINT, wintypes.LPVOID, wintypes.INT]
 
         return _SendInputCompat()
-
 
     def _action_worker(self):
         """Execute queued OS actions off the tracker thread."""
@@ -685,7 +689,6 @@ class Action:
             global_y=int(position["global_y"]),
         )
 
-
     def move_cursor(self, x: int, y: int):
         """
         Public method to move the cursor.
@@ -718,7 +721,6 @@ class Action:
         self._invalidate_pending_move_actions()
         origin_ns = self._capture_latency_origin_for_action()
         self._enqueue_action(self._double_click_impl, (x, y), origin_ns=origin_ns)
-
 
     def right_click(self, x: int = None, y: int = None):
         """
@@ -781,7 +783,7 @@ class Action:
     def perform_macro(self, keys: list):
         for key in keys:
             self.press_key(key)
-            
+
         for key in keys:
             self.release_key(key)
 
@@ -867,6 +869,20 @@ class Action:
         origin_ns = self._capture_latency_origin_for_action()
         self._enqueue_action(self._tap_key_impl, (logical,), origin_ns=origin_ns)
 
+    def replace_recent_text(self, old_text: str, new_text: str = ""):
+        """Backspace recently emitted text, then optionally type replacement text."""
+        old_payload = str(old_text or "")
+        new_payload = str(new_text or "")
+        if not old_payload and not new_payload:
+            return
+
+        origin_ns = self._capture_latency_origin_for_action()
+        self._enqueue_action(
+            self._replace_recent_text_impl,
+            (old_payload, new_payload),
+            origin_ns=origin_ns,
+        )
+
     def _tap_hotkey_impl(self, logical_keys):
         if self._keyboard_backend.tap_hotkey(logical_keys):
             self._record_action_event("tap_hotkey", keys=list(logical_keys))
@@ -889,6 +905,17 @@ class Action:
     def _tap_key_impl(self, logical):
         if self._keyboard_backend.tap_key(logical):
             self._record_action_event("tap_key", key=logical)
+
+    def _replace_recent_text_impl(self, old_payload: str, new_payload: str):
+        if old_payload:
+            for _ in range(len(old_payload)):
+                self._tap_key_impl("backspace")
+
+        if old_payload and new_payload:
+            time.sleep(0.005)
+
+        if new_payload:
+            self._type_text_impl(new_payload)
 
     def type_text(self, text):
         """Type a text string in one action."""

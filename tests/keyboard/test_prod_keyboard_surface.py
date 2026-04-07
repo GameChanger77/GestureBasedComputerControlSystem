@@ -1,4 +1,7 @@
 import unittest
+from unittest.mock import patch
+
+import numpy as np
 
 from backend.HandsData import HandsData
 from backend.gestures.keyboard_mode.ProdWindowKeyboardSurface import ProdWindowKeyboardSurface
@@ -52,6 +55,24 @@ class ProdWindowKeyboardSurfaceTests(unittest.TestCase):
         self.surface._right_open_for_drag = lambda hands_data: False
         state = self.surface.update_layout(self.empty, paused=False, rows=self.rows)
         self.assertTrue(state.extra_overlay["prod_window_locked"])
+
+    def test_drag_requires_fully_open_palm_facing_camera(self):
+        hands = HandsData({"Right": np.zeros((21, 3), dtype=np.float32)}, {"Right": np.zeros((21, 3), dtype=np.float32)})
+
+        with patch(
+            "backend.gestures.keyboard_mode.ProdWindowKeyboardSurface.is_hand_fully_open",
+            return_value=True,
+        ) as open_mock:
+            self.assertTrue(self.surface._right_open_for_drag(hands))
+
+        open_mock.assert_called_once_with(
+            hands.wrist.right,
+            extension_threshold=self.surface.open_extension_threshold,
+            min_extended_fingers=5,
+            openness_threshold=0.08,
+            require_palm_facing_camera=True,
+            min_palm_normal_z=self.surface.open_min_palm_normal_z,
+        )
 
 
 if __name__ == "__main__":
