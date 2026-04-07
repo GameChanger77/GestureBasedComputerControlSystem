@@ -12,6 +12,8 @@ from typing import List, Optional
 class PlatformKeyboardBackend(ABC):
     """Abstract interface for platform-specific keyboard input."""
 
+    META_KEY_LABEL = "Meta"
+
     @abstractmethod
     def initialize(self) -> bool:
         """
@@ -111,4 +113,9 @@ class PlatformKeyboardBackend(ABC):
             Error message, or None if backend is available.
         """
         pass
+
+    @classmethod
+    def get_meta_key_label(cls) -> str:
+        """Get the user-facing label for the platform meta key."""
+        return cls.META_KEY_LABEL
 

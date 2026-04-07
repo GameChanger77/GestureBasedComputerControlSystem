@@ -16,6 +16,8 @@ from backend.gestures.keyboard_mode.KeyCodes import normalize_key
 class WindowsKeyboardBackend(PlatformKeyboardBackend):
     """Windows keyboard backend using SendInput API."""
 
+    META_KEY_LABEL = "Win"
+
     # Windows Virtual Key codes mapping
     LOGICAL_TO_WINDOWS_VK: Dict[str, int] = {
         "escape": 0x1B,

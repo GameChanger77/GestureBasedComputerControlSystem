@@ -8,9 +8,26 @@ import platform
 from typing import Optional
 
 from backend.platforms.PlatformKeyboardBackend import PlatformKeyboardBackend
-from backend.platforms.WindowsKeyboardBackend import WindowsKeyboardBackend
-from backend.platforms.LinuxKeyboardBackend import LinuxKeyboardBackend
-from backend.platforms.MacOSKeyboardBackend import MacOSKeyboardBackend
+
+
+def get_keyboard_backend_class() -> type[PlatformKeyboardBackend]:
+    """Get the keyboard backend class for the current platform."""
+    system = platform.system()
+
+    if system == "Windows":
+        from backend.platforms.WindowsKeyboardBackend import WindowsKeyboardBackend
+
+        return WindowsKeyboardBackend
+    if system == "Darwin":
+        from backend.platforms.MacOSKeyboardBackend import MacOSKeyboardBackend
+
+        return MacOSKeyboardBackend
+    if system == "Linux":
+        from backend.platforms.LinuxKeyboardBackend import LinuxKeyboardBackend
+
+        return LinuxKeyboardBackend
+
+    raise RuntimeError(f"Unsupported operating system: {system}")
 
 
 def create_keyboard_backend() -> PlatformKeyboardBackend:
@@ -24,16 +41,8 @@ def create_keyboard_backend() -> PlatformKeyboardBackend:
         RuntimeError: If backend cannot be initialized.
     """
     system = platform.system()
-    backend: Optional[PlatformKeyboardBackend] = None
-
-    if system == "Windows":
-        backend = WindowsKeyboardBackend()
-    elif system == "Darwin":
-        backend = MacOSKeyboardBackend()
-    elif system == "Linux":
-        backend = LinuxKeyboardBackend()
-    else:
-        raise RuntimeError(f"Unsupported operating system: {system}")
+    backend_class = get_keyboard_backend_class()
+    backend: Optional[PlatformKeyboardBackend] = backend_class()
 
     if not backend.initialize():
         reason = backend.get_failure_reason()

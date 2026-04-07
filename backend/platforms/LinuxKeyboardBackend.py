@@ -19,6 +19,8 @@ from pynput.keyboard import Controller as PyNputKeyboard, Key
 class LinuxKeyboardBackend(PlatformKeyboardBackend):
     """Linux keyboard backend with X11/Wayland support."""
 
+    META_KEY_LABEL = "Super"
+
     # Extended key support for xdotool (cross-platform compatibility)
     LOGICAL_TO_XDOTOOL = {
         "escape": "Escape",

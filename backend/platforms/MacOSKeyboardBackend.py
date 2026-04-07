@@ -23,6 +23,8 @@ except ImportError:
 class MacOSKeyboardBackend(PlatformKeyboardBackend):
     """macOS keyboard backend using Quartz framework."""
 
+    META_KEY_LABEL = "Cmd"
+
     # Virtual key codes for macOS (from <Carbon/Carbon.h>)
     LOGICAL_TO_MACOS = {
         "a": 0x00, "b": 0x0B, "c": 0x08, "d": 0x02, "e": 0x0E, "f": 0x03, "g": 0x05,
@@ -157,7 +159,7 @@ class MacOSKeyboardBackend(PlatformKeyboardBackend):
         if not logical or logical in self._held_keys:
             return False
 
-        vk_code = self.MAC_VK_CODES.get(logical)
+        vk_code = self.LOGICAL_TO_MACOS.get(logical)
         if vk_code is None:
             return False
 
@@ -172,7 +174,7 @@ class MacOSKeyboardBackend(PlatformKeyboardBackend):
         if not logical:
             return False
 
-        vk_code = self.MAC_VK_CODES.get(logical)
+        vk_code = self.LOGICAL_TO_MACOS.get(logical)
         if vk_code is None:
             return False
 
@@ -186,7 +188,7 @@ class MacOSKeyboardBackend(PlatformKeyboardBackend):
         if not logical:
             return False
 
-        vk_code = self.MAC_VK_CODES.get(logical)
+        vk_code = self.LOGICAL_TO_MACOS.get(logical)
         if vk_code is None:
             return False
 
@@ -203,7 +205,7 @@ class MacOSKeyboardBackend(PlatformKeyboardBackend):
 
         vk_codes = []
         for logical in logical_keys:
-            vk = self.MAC_VK_CODES.get(logical)
+            vk = self.LOGICAL_TO_MACOS.get(logical)
             if vk is None:
                 return False
             vk_codes.append((logical, vk))
@@ -261,7 +263,7 @@ class MacOSKeyboardBackend(PlatformKeyboardBackend):
         """Release any currently held keys."""
         for logical in list(self._held_keys):
             try:
-                vk_code = self.MAC_VK_CODES.get(logical)
+                vk_code = self.LOGICAL_TO_MACOS.get(logical)
                 if vk_code is not None:
                     self._send_key_event(vk_code, key_down=False)
             except Exception as e:

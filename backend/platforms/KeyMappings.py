@@ -1,32 +1,30 @@
 """
-Centralized key mappings getter for platform-agnostic access to key codes.
+Centralized platform keyboard metadata getters.
 
-This module provides functions to get keyboard mappings for the current platform
-without creating backend instances.
+This module provides platform-specific keyboard mappings and labels without
+creating backend instances.
 """
 
-import platform
-from typing import Dict, Optional
+from typing import Dict
+
+from backend.platforms.KeyboardBackendFactory import get_keyboard_backend_class
 
 
-def get_logical_to_key_mapping() -> Dict[str, any]:
+def get_logical_to_key_mapping() -> Dict[str, object]:
     """
     Get the key mapping dictionary for the current platform.
 
     Returns:
         Dictionary mapping logical key names to platform-specific codes.
     """
-    system = platform.system()
+    backend_class = get_keyboard_backend_class()
 
-    if system == "Windows":
-        from backend.platforms.WindowsKeyboardBackend import WindowsKeyboardBackend
-        return WindowsKeyboardBackend.LOGICAL_TO_WINDOWS_VK
-    elif system == "Linux":
-        from backend.platforms.LinuxKeyboardBackend import LinuxKeyboardBackend
-        return LinuxKeyboardBackend.LOGICAL_TO_XDOTOOL
-    elif system == "Darwin":
-        from backend.platforms.MacOSKeyboardBackend import MacOSKeyboardBackend
-        return MacOSKeyboardBackend.LOGICAL_TO_MACOS
+    if hasattr(backend_class, "LOGICAL_TO_WINDOWS_VK"):
+        return backend_class.LOGICAL_TO_WINDOWS_VK
+    if hasattr(backend_class, "LOGICAL_TO_XDOTOOL"):
+        return backend_class.LOGICAL_TO_XDOTOOL
+    if hasattr(backend_class, "LOGICAL_TO_MACOS"):
+        return backend_class.LOGICAL_TO_MACOS
 
     # Fallback: return a basic cross-platform mapping
     return {
@@ -37,4 +35,9 @@ def get_logical_to_key_mapping() -> Dict[str, any]:
         "backspace": "backspace",
         "delete": "delete",
     }
+
+
+def get_meta_key_label() -> str:
+    """Get the user-facing label for the current platform meta key."""
+    return get_keyboard_backend_class().get_meta_key_label()
 
