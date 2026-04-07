@@ -39,6 +39,7 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
         self.keyboard_padding_bottom_px = 8
         self.follow_alpha = 0.28
         self.open_extension_threshold = float(config.get("finger_extension_angle", 155.0))
+        self.open_min_palm_normal_z = 0.35
         self._window_locked = True
         self._unlock_pending_frames = 0
         self._screen_origin_x_px = 0.0
@@ -138,8 +139,10 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
         return is_hand_fully_open(
             right,
             extension_threshold=self.open_extension_threshold,
-            min_extended_fingers=4,
+            min_extended_fingers=5,
             openness_threshold=0.08,
+            require_palm_facing_camera=True,
+            min_palm_normal_z=self.open_min_palm_normal_z,
         )
 
     def _update_window_follow(self, hands_data):

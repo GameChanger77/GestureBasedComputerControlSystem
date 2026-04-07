@@ -107,6 +107,7 @@ class AirTypingSwipeStateTests(unittest.TestCase):
             "keyboard_swipe_confidence_threshold": 0.45,
             "keyboard_swipe_release_pending_frames": 1,
             "keyboard_swipe_tracking_grace_frames": 2,
+            "keyboard_replace_flick_cooldown_seconds": 0.75,
             "pinch_threshold": 0.15,
             "keyboard_flip_x_for_mapping": False,
         }
@@ -487,6 +488,16 @@ class AirTypingSwipeStateTests(unittest.TestCase):
         self.assertEqual(self.action.tapped, ["backspace"] * len("world "))
         self.assertTrue(self.gesture._flick_window_active)
 
+    def test_shorter_deliberate_down_flick_still_deletes_latest_word(self):
+        self._commit_swipe_word("hello", candidates=["hello", "help", "held", "helm"])
+        self._commit_swipe_word("world", candidates=["world", "word", "worry", "worm"])
+
+        self._perform_flick([(0.76, 0.42), (0.75, 0.50), (0.74, 0.56)])
+
+        self.assertEqual(len(self.gesture._swipe_word_history), 1)
+        self.assertEqual(self.gesture.get_overlay_data()["swipe_best"], "hello")
+        self.assertEqual(self.action.tapped, ["backspace"] * len("world "))
+
     def test_post_commit_flick_down_uses_current_emitted_text_after_replacement(self):
         self._commit_swipe_word("hello", candidates=["hello", "help", "held", "helm"])
         self._perform_flick([(0.76, 0.42), (0.67, 0.42), (0.58, 0.42)])
@@ -515,6 +526,155 @@ class AirTypingSwipeStateTests(unittest.TestCase):
         self.assertEqual(self.action.tapped, ["backspace"] * len("hello "))
         self.assertEqual(len(self.gesture._swipe_word_history), 1)
         self.assertEqual(self.gesture.get_overlay_data()["swipe_best"], "help")
+
+    def test_diagonal_down_motion_does_not_delete_word(self):
+        self._commit_swipe_word("hello", candidates=["hello", "help", "held", "helm"])
+        self._commit_swipe_word("world", candidates=["world", "word", "worry", "worm"])
+
+        for x, y in [(0.76, 0.42), (0.73, 0.52), (0.68, 0.62)]:
+            self.gesture.update(
+                _make_hands_data(
+                    right_present=True,
+                    right_pinch=False,
+                    right_index_x=x,
+                    right_index_y=y,
+                )
+            )
+            self._advance_time()
+
+        self.assertEqual(len(self.gesture._swipe_word_history), 2)
+        self.assertEqual(self.gesture.get_overlay_data()["swipe_best"], "world")
+        self.assertEqual(self.action.tapped, [])
+
+    def test_failed_delete_attempt_does_not_turn_recovery_up_motion_into_replace(self):
+        self._commit_swipe_word("hello", candidates=["hello", "help", "held", "helm"])
+
+        for x, y in [
+            (0.76, 0.42),
+            (0.73, 0.50),
+            (0.685, 0.60),
+            (0.70, 0.54),
+            (0.72, 0.46),
+        ]:
+            self.gesture.update(
+                _make_hands_data(
+                    right_present=True,
+                    right_pinch=False,
+                    right_index_x=x,
+                    right_index_y=y,
+                )
+            )
+            self._advance_time()
+
+        self.assertEqual(self.action.typed_text, ["hello "])
+        self.assertEqual(self.action.tapped, [])
+        self.assertEqual(len(self.gesture._swipe_word_history), 1)
+        self.assertEqual(self.gesture.get_overlay_data()["swipe_best"], "hello")
+
+    def test_delete_then_immediate_flick_can_replace_previous_word(self):
+        self._commit_swipe_word("hello", candidates=["hello", "help", "held", "helm"])
+        self._commit_swipe_word("world", candidates=["world", "word", "worry", "worm"])
+
+        for x, y in [
+            (0.76, 0.42),
+            (0.76, 0.52),
+            (0.76, 0.62),
+            (0.76, 0.62),
+            (0.67, 0.62),
+            (0.58, 0.62),
+        ]:
+            self.gesture.update(
+                _make_hands_data(
+                    right_present=True,
+                    right_pinch=False,
+                    right_index_x=x,
+                    right_index_y=y,
+                )
+            )
+            self._advance_time()
+
+        self.assertEqual(self.action.typed_text, ["hello ", "world ", "help "])
+        self.assertEqual(
+            self.action.tapped,
+            ["backspace"] * (len("world ") + len("hello ")),
+        )
+        self.assertEqual(len(self.gesture._swipe_word_history), 1)
+        self.assertEqual(self.gesture.get_overlay_data()["swipe_best"], "help")
+
+    def test_replace_flick_is_ignored_during_cooldown(self):
+        self._commit_swipe_word("hello", candidates=["hello", "help", "held", "helm"])
+
+        for x, y in [
+            (0.76, 0.42),
+            (0.67, 0.42),
+            (0.58, 0.42),
+            (0.66, 0.42),
+            (0.74, 0.42),
+            (0.83, 0.42),
+        ]:
+            self.gesture.update(
+                _make_hands_data(
+                    right_present=True,
+                    right_pinch=False,
+                    right_index_x=x,
+                    right_index_y=y,
+                )
+            )
+            self._advance_time()
+
+        self.assertEqual(self.action.typed_text, ["hello ", "help "])
+        self.assertEqual(self.action.tapped, ["backspace"] * len("hello "))
+        self.assertEqual(len(self.gesture._swipe_word_history), 1)
+        self.assertEqual(self.gesture.get_overlay_data()["swipe_best"], "help")
+
+    def test_delete_still_works_while_replace_flick_is_on_cooldown(self):
+        self._commit_swipe_word("hello", candidates=["hello", "help", "held", "helm"])
+
+        for x, y in [
+            (0.76, 0.42),
+            (0.67, 0.42),
+            (0.58, 0.42),
+        ]:
+            self.gesture.update(
+                _make_hands_data(
+                    right_present=True,
+                    right_pinch=False,
+                    right_index_x=x,
+                    right_index_y=y,
+                )
+            )
+            self._advance_time()
+
+        for _ in range(2):
+            self.gesture.update(
+                _make_hands_data(
+                    right_present=True,
+                    right_pinch=False,
+                    right_index_x=0.58,
+                    right_index_y=0.42,
+                )
+            )
+            self._advance_time()
+
+        for x, y in [
+            (0.58, 0.42),
+            (0.58, 0.52),
+            (0.58, 0.62),
+        ]:
+            self.gesture.update(
+                _make_hands_data(
+                    right_present=True,
+                    right_pinch=False,
+                    right_index_x=x,
+                    right_index_y=y,
+                )
+            )
+            self._advance_time()
+
+        self.assertEqual(self.action.typed_text, ["hello ", "help "])
+        self.assertEqual(self.action.tapped, ["backspace"] * (len("hello ") + len("help ")))
+        self.assertEqual(len(self.gesture._swipe_word_history), 0)
+        self.assertFalse(self.gesture._flick_window_active)
 
     def test_post_commit_flick_down_can_delete_up_to_ten_words_of_history(self):
         for idx in range(11):

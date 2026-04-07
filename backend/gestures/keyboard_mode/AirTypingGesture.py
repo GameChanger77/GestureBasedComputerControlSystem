@@ -47,11 +47,15 @@ class AirTypingGesture(GestureRecognizer):
     _FN_KEY_TO_FUNCTION = KeyboardLayoutHelper.FN_KEY_TO_FUNCTION
     _SUGGESTION_CHIP_COUNT = KeyboardLayoutHelper.SUGGESTION_CHIP_COUNT
     _SWIPE_HISTORY_LIMIT = 10
-    _DELETE_FLICK_MIN_DISPLACEMENT = 0.10
+    _DELETE_FLICK_MIN_DISPLACEMENT = 0.085
     _DELETE_FLICK_MIN_DOMINANCE_RATIO = 1.75
+    _DELETE_FLICK_MAX_HORIZONTAL_DRIFT = 0.07
+    _DELETE_FLICK_MIN_SMOOTHNESS = 0.86
     _FLICK_REARM_STABLE_FRAMES = 2
     _FLICK_REARM_MAX_STEP = 0.018
+    _FLICK_REARM_ESCAPE_DISTANCE = 0.045
     _EXIT_FIST_MAX_THUMB_EXTENSION_RATIO = 0.98
+    _DEFAULT_REPLACE_FLICK_COOLDOWN_SECONDS = 0.75
 
     def __init__(
         self,
@@ -114,6 +118,15 @@ class AirTypingGesture(GestureRecognizer):
         if self.keyboard_swipe_tracking_grace_frames < 0:
             self.keyboard_swipe_tracking_grace_frames = 0
         self.keyboard_swipe_auto_space = True
+        self.replace_flick_cooldown_seconds = max(
+            0.0,
+            float(
+                self.config.get(
+                    "keyboard_replace_flick_cooldown_seconds",
+                    self._DEFAULT_REPLACE_FLICK_COOLDOWN_SECONDS,
+                )
+            ),
+        )
         self._swipe_point_min_distance = 0.0035
         self._swipe_point_min_distance_sq = self._swipe_point_min_distance * self._swipe_point_min_distance
 
@@ -189,9 +202,13 @@ class AirTypingGesture(GestureRecognizer):
         self._flick_window_active = False
         self._flick_right_missing = False
         self._flick_rearm_pending = False
+        self._flick_rearm_escape_direction: Optional[str] = None
+        self._flick_rearm_origin_point: Optional[Tuple[float, float]] = None
         self._flick_rearm_last_point: Optional[Tuple[float, float]] = None
         self._flick_rearm_stable_frames = 0
         self._flick_rearm_max_step_sq = self._FLICK_REARM_MAX_STEP * self._FLICK_REARM_MAX_STEP
+        self._flick_rearm_escape_distance_sq = self._FLICK_REARM_ESCAPE_DISTANCE * self._FLICK_REARM_ESCAPE_DISTANCE
+        self._replace_flick_cooldown_until = 0.0
         flick_min_displacement = float(self.config.get("keyboard_flick_min_displacement", 0.075))
         flick_min_speed = float(self.config.get("keyboard_flick_min_speed", 0.25))
         flick_dominance_ratio = float(self.config.get("keyboard_flick_dominance_ratio", 1.2))
@@ -439,28 +456,88 @@ class AirTypingGesture(GestureRecognizer):
         for _ in range(len(text)):
             self.action.tap_key("backspace")
 
+    def _format_emitted_word(self, word: str) -> str:
+        text = str(word)
+        if self._caps_lock_active:
+            text = "".join(ch.upper() if ch.isalpha() else ch for ch in text)
+        if self.keyboard_swipe_auto_space:
+            text += " "
+        return text
+
+    def _replace_emitted_text(self, old_text: str, replacement_text: str = ""):
+        old_payload = str(old_text or "")
+        replacement_payload = str(replacement_text or "")
+        if hasattr(self.action, "replace_recent_text"):
+            self.action.replace_recent_text(old_payload, replacement_payload)
+            return
+        self._backspace_text(old_payload)
+        if replacement_payload:
+            self.action.type_text(replacement_payload)
+
     def _reset_flick_detectors(self):
         self._flick_detector.reset()
         self._delete_flick_detector.reset()
 
     def _clear_flick_rearm(self):
         self._flick_rearm_pending = False
+        self._flick_rearm_escape_direction = None
+        self._flick_rearm_origin_point = None
         self._flick_rearm_last_point = None
         self._flick_rearm_stable_frames = 0
 
-    def _begin_flick_rearm(self, point: Optional[Tuple[float, float]]):
+    def _begin_flick_rearm(self, point: Optional[Tuple[float, float]], *, escape_direction: Optional[str] = None):
         self._clear_flick_rearm()
         self._flick_rearm_pending = True
+        self._flick_rearm_escape_direction = str(escape_direction) if escape_direction else None
+        self._flick_rearm_origin_point = point
         self._flick_rearm_last_point = point
         self._reset_flick_detectors()
 
-    def _update_flick_rearm(self, point: Optional[Tuple[float, float]]) -> bool:
+    def _seed_flick_detectors(
+        self,
+        start_point: Tuple[float, float],
+        end_point: Tuple[float, float],
+        now: float,
+    ):
+        seed_time = now - (1.0 / 30.0)
+        self._flick_detector.add_sample(start_point, seed_time)
+        self._flick_detector.add_sample(end_point, now)
+        self._delete_flick_detector.add_sample(start_point, seed_time)
+        self._delete_flick_detector.add_sample(end_point, now)
+
+    def _flick_rearm_escape_reached(self, direction: Optional[str], dx: float, dy: float) -> bool:
+        if not direction:
+            return False
+        if direction == "any":
+            return (dx * dx + dy * dy) >= self._flick_rearm_escape_distance_sq
+        if direction == "left":
+            return dx >= self._FLICK_REARM_ESCAPE_DISTANCE
+        if direction == "right":
+            return dx <= -self._FLICK_REARM_ESCAPE_DISTANCE
+        if direction == "up":
+            return dy >= self._FLICK_REARM_ESCAPE_DISTANCE
+        if direction == "down":
+            return dy <= -self._FLICK_REARM_ESCAPE_DISTANCE
+        return False
+
+    def _update_flick_rearm(self, point: Optional[Tuple[float, float]], now: float) -> bool:
         if not self._flick_rearm_pending:
             return False
         if point is None:
             self._clear_flick_rearm()
             self._reset_flick_detectors()
             return False
+
+        origin = self._flick_rearm_origin_point
+        if origin is not None:
+            origin_dx = point[0] - origin[0]
+            origin_dy = point[1] - origin[1]
+            if self._flick_rearm_escape_reached(self._flick_rearm_escape_direction, origin_dx, origin_dy):
+                self._clear_flick_rearm()
+                self._reset_flick_detectors()
+                self._seed_flick_detectors(origin, point, now)
+                return True
+
         if self._flick_rearm_last_point is None:
             self._flick_rearm_last_point = point
             return True
@@ -602,6 +679,7 @@ class AirTypingGesture(GestureRecognizer):
 
     def _start_swipe(self):
         self._cancel_flick_window()
+        self._replace_flick_cooldown_until = 0.0
         self._swipe_active = True
         self._swipe_release_counter = 0
         self._swipe_lost_frames = 0
@@ -651,11 +729,7 @@ class AirTypingGesture(GestureRecognizer):
             self._swipe_trace.append(swipe_token)
 
     def _emit_word(self, word: str) -> str:
-        text = str(word)
-        if self._caps_lock_active:
-            text = "".join(ch.upper() if ch.isalpha() else ch for ch in text)
-        if self.keyboard_swipe_auto_space:
-            text += " "
+        text = self._format_emitted_word(word)
         self.action.type_text(text)
         return text
 
@@ -736,9 +810,8 @@ class AirTypingGesture(GestureRecognizer):
         if record is None or not record.emitted_text:
             return False
 
-        self._backspace_text(record.emitted_text)
-
-        emitted = self._emit_word(replacement)
+        emitted = self._format_emitted_word(replacement)
+        self._replace_emitted_text(record.emitted_text, emitted)
         record.selected_word = replacement
         record.emitted_text = emitted
         record.confidence = 1.0
@@ -753,7 +826,7 @@ class AirTypingGesture(GestureRecognizer):
             return False
 
         deleted_word = record.selected_word
-        self._backspace_text(record.emitted_text)
+        self._replace_emitted_text(record.emitted_text, "")
         self._swipe_word_history.pop()
         self._sync_swipe_history_state()
         self._last_event = f"delete:{deleted_word}"
@@ -814,6 +887,7 @@ class AirTypingGesture(GestureRecognizer):
             return
         self._flick_window_active = True
         self._flick_right_missing = False
+        self._replace_flick_cooldown_until = 0.0
         self._clear_flick_rearm()
         self._reset_flick_detectors()
 
@@ -822,6 +896,23 @@ class AirTypingGesture(GestureRecognizer):
         self._flick_right_missing = False
         self._clear_flick_rearm()
         self._reset_flick_detectors()
+
+    def _is_deliberate_delete_flick(self) -> bool:
+        motion = self._delete_flick_detector._motion
+        if motion.frame_count < 3:
+            return False
+
+        displacement_vec, _ = motion.get_displacement()
+        dx = abs(float(displacement_vec[0]))
+        dy = float(displacement_vec[1])
+        if dy < self._DELETE_FLICK_MIN_DISPLACEMENT:
+            return False
+        if dx > self._DELETE_FLICK_MAX_HORIZONTAL_DRIFT:
+            return False
+
+        if motion.get_path_smoothness() < self._DELETE_FLICK_MIN_SMOOTHNESS:
+            return False
+        return True
 
     def _replace_last_swipe_word_by_flick(self, direction: str) -> bool:
         suggestion_idx = None
@@ -859,26 +950,35 @@ class AirTypingGesture(GestureRecognizer):
             self._flick_right_missing = False
 
         point = (tip[0], tip[1])
-        if self._update_flick_rearm(point):
+        now = self._now_seconds()
+        if self._update_flick_rearm(point, now):
             return True
 
-        now = self._now_seconds()
-        self._flick_detector.add_sample(point, now)
         self._delete_flick_detector.add_sample(point, now)
-        direction = self._flick_detector.detect()
-        if direction:
-            handled = self._replace_last_swipe_word_by_flick(direction)
-            if handled and self._swipe_word_history:
-                self._begin_flick_rearm(point)
-            elif not self._swipe_word_history:
-                self._cancel_flick_window()
-            return handled
+        replace_cooldown_active = now < self._replace_flick_cooldown_until
+        if replace_cooldown_active:
+            self._flick_detector.reset()
+        else:
+            self._flick_detector.add_sample(point, now)
+            direction = self._flick_detector.detect()
+            if direction:
+                handled = self._replace_last_swipe_word_by_flick(direction)
+                if handled and self._swipe_word_history:
+                    self._replace_flick_cooldown_until = now + self.replace_flick_cooldown_seconds
+                    self._begin_flick_rearm(point, escape_direction=direction)
+                elif not self._swipe_word_history:
+                    self._cancel_flick_window()
+                return handled
 
         delete_direction = self._delete_flick_detector.detect()
         if delete_direction:
+            if not self._is_deliberate_delete_flick():
+                self._begin_flick_rearm(point, escape_direction=None)
+                return True
             handled = self._replace_last_swipe_word_by_flick(delete_direction)
             if handled and self._swipe_word_history:
-                self._begin_flick_rearm(point)
+                self._replace_flick_cooldown_until = 0.0
+                self._begin_flick_rearm(point, escape_direction="any")
             elif not self._swipe_word_history:
                 self._cancel_flick_window()
             return handled
@@ -991,6 +1091,7 @@ class AirTypingGesture(GestureRecognizer):
         self._cancel_swipe()
         self._clear_swipe_word_history()
         self._active_modifiers.clear()
+        self._replace_flick_cooldown_until = 0.0
         self._paused = True
         self._resume_counter = 0
         self._status = reason
@@ -1108,6 +1209,7 @@ class AirTypingGesture(GestureRecognizer):
         self._special_key_pinch_latched = False
         self._last_pinch_value = None
         self._exit_fist_ready = False
+        self._replace_flick_cooldown_until = 0.0
         self._swipe_word_history = []
         self._suggestion_words = []
         self._suggestion_chips = []
