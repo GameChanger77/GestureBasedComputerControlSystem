@@ -111,6 +111,80 @@ class ModeSwitchRightHandTests(unittest.TestCase):
             detected, _ = gesture.detect_gesture(_hands(right=False, left=True))
         self.assertFalse(detected)
 
+    def test_exit_strict_fist_ignores_thumb_spread_when_thumb_not_extended(self):
+        strategizer = _StrategizerStub("keyboard")
+        gesture = KeyboardModeExitGesture(_ActionStub(), strategizer=strategizer)
+        hand = SimpleNamespace(
+            exists=True,
+            thumb=SimpleNamespace(),
+            index=SimpleNamespace(),
+            middle=SimpleNamespace(),
+            ring=SimpleNamespace(),
+            pinky=SimpleNamespace(),
+        )
+
+        with patch(
+            "backend.gestures.switch_mode.KeyboardModeExitGesture.get_hand_openness",
+            return_value=0.05,
+        ) as openness_mock, patch(
+            "backend.gestures.switch_mode.KeyboardModeExitGesture.get_finger_extension",
+            side_effect=[0.20, 0.22, 0.24, 0.21, 0.40],
+        ), patch(
+            "backend.gestures.switch_mode.KeyboardModeExitGesture.get_finger_angle",
+            side_effect=[100.0, 105.0, 102.0, 98.0],
+        ):
+            self.assertTrue(gesture._is_strict_fist(hand))
+
+        openness_mock.assert_called_once_with(hand, include_thumb=False)
+
+    def test_exit_strict_fist_allows_thumb_that_is_not_fully_extended(self):
+        strategizer = _StrategizerStub("keyboard")
+        gesture = KeyboardModeExitGesture(_ActionStub(), strategizer=strategizer)
+        hand = SimpleNamespace(
+            exists=True,
+            thumb=SimpleNamespace(),
+            index=SimpleNamespace(),
+            middle=SimpleNamespace(),
+            ring=SimpleNamespace(),
+            pinky=SimpleNamespace(),
+        )
+
+        with patch(
+            "backend.gestures.switch_mode.KeyboardModeExitGesture.get_hand_openness",
+            return_value=0.05,
+        ), patch(
+            "backend.gestures.switch_mode.KeyboardModeExitGesture.get_finger_extension",
+            side_effect=[0.20, 0.22, 0.24, 0.21, 0.95],
+        ), patch(
+            "backend.gestures.switch_mode.KeyboardModeExitGesture.get_finger_angle",
+            side_effect=[100.0, 105.0, 102.0, 98.0],
+        ):
+            self.assertTrue(gesture._is_strict_fist(hand))
+
+    def test_exit_strict_fist_rejects_clearly_extended_thumb(self):
+        strategizer = _StrategizerStub("keyboard")
+        gesture = KeyboardModeExitGesture(_ActionStub(), strategizer=strategizer)
+        hand = SimpleNamespace(
+            exists=True,
+            thumb=SimpleNamespace(),
+            index=SimpleNamespace(),
+            middle=SimpleNamespace(),
+            ring=SimpleNamespace(),
+            pinky=SimpleNamespace(),
+        )
+
+        with patch(
+            "backend.gestures.switch_mode.KeyboardModeExitGesture.get_hand_openness",
+            return_value=0.05,
+        ), patch(
+            "backend.gestures.switch_mode.KeyboardModeExitGesture.get_finger_extension",
+            side_effect=[0.20, 0.22, 0.24, 0.21, 0.995],
+        ), patch(
+            "backend.gestures.switch_mode.KeyboardModeExitGesture.get_finger_angle",
+            side_effect=[100.0, 105.0, 102.0, 98.0],
+        ):
+            self.assertFalse(gesture._is_strict_fist(hand))
+
     def test_hotkey_entry_uses_ok_sign_from_mouse_mode(self):
         strategizer = _StrategizerStub("mouse")
         gesture = HotkeyModeEntryGesture(_ActionStub(), strategizer=strategizer)

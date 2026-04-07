@@ -251,12 +251,13 @@ def get_finger_extension(finger):
     return 0.0
 
 
-def get_hand_openness(hand):
+def get_hand_openness(hand, include_thumb=True):
     """
     Get how open a hand is based on finger spread.
 
     Args:
         hand: Hand object
+        include_thumb: Whether thumb spread should contribute to openness
 
     Returns:
         float: Openness value [0-1] where 1 is fully open
@@ -265,13 +266,21 @@ def get_hand_openness(hand):
         return 0.0
 
     # Calculate average distance between adjacent fingertips
-    fingertips = [
-        hand.thumb.tip,
-        hand.index.tip,
-        hand.middle.tip,
-        hand.ring.tip,
-        hand.pinky.tip
-    ]
+    if include_thumb:
+        fingertips = [
+            hand.thumb.tip,
+            hand.index.tip,
+            hand.middle.tip,
+            hand.ring.tip,
+            hand.pinky.tip,
+        ]
+    else:
+        fingertips = [
+            hand.index.tip,
+            hand.middle.tip,
+            hand.ring.tip,
+            hand.pinky.tip,
+        ]
 
     total_spread = 0.0
     count = 0

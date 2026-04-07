@@ -811,6 +811,20 @@ class Action:
         origin_ns = self._capture_latency_origin_for_action()
         self._enqueue_action(self._tap_key_impl, (logical,), origin_ns=origin_ns)
 
+    def replace_recent_text(self, old_text: str, new_text: str = ""):
+        """Backspace recently emitted text, then optionally type replacement text."""
+        old_payload = str(old_text or "")
+        new_payload = str(new_text or "")
+        if not old_payload and not new_payload:
+            return
+
+        origin_ns = self._capture_latency_origin_for_action()
+        self._enqueue_action(
+            self._replace_recent_text_impl,
+            (old_payload, new_payload),
+            origin_ns=origin_ns,
+        )
+
     def _tap_hotkey_impl_pynput(self, logical_keys):
         resolved_keys = []
         for logical in logical_keys:
@@ -1035,6 +1049,33 @@ class Action:
                 return True
         return False
 
+    def _delete_recent_text_impl_linux(self, char_count: int):
+        if char_count <= 0:
+            return True
+
+        for backend in self._linux_keyboard_backend_order():
+            if backend == "xdotool" and self._xdotool_path:
+                key = self._logical_to_xdotool_key("backspace")
+                if key and self._run_input_command(
+                    [self._xdotool_path, "key", "--repeat", str(int(char_count)), "--delay", "0", "--", key]
+                ):
+                    return True
+            if backend == "ydotool" and self._ydotool_path:
+                code = self._logical_to_ydotool_code("backspace")
+                if code is not None:
+                    args = [self._ydotool_path, "key"]
+                    for _ in range(int(char_count)):
+                        args.extend((f"{code}:1", f"{code}:0"))
+                    if self._run_input_command(args):
+                        return True
+            if backend == "pynput":
+                for _ in range(int(char_count)):
+                    if not self._tap_key_impl_pynput("backspace"):
+                        break
+                else:
+                    return True
+        return False
+
     def _type_text_impl_xdotool(self, text: str):
         if not self._xdotool_path:
             return False
@@ -1122,6 +1163,24 @@ class Action:
             return
         self._tap_key_impl_pynput(logical)
         self._record_action_event("tap_key", key=logical)
+
+    def _replace_recent_text_impl(self, old_payload: str, new_payload: str):
+        if old_payload:
+            deleted_fast = False
+            if self.detected_os == "Linux":
+                deleted_fast = self._delete_recent_text_impl_linux(len(old_payload))
+            if deleted_fast:
+                for _ in range(len(old_payload)):
+                    self._record_action_event("tap_key", key="backspace")
+            else:
+                for _ in range(len(old_payload)):
+                    self._tap_key_impl("backspace")
+
+        if old_payload and new_payload:
+            time.sleep(0.005)
+
+        if new_payload:
+            self._type_text_impl(new_payload)
 
     def type_text(self, text):
         """Type a text string in one action."""
