@@ -19,6 +19,61 @@ from pynput.keyboard import Controller as PyNputKeyboard, Key
 class LinuxKeyboardBackend(PlatformKeyboardBackend):
     """Linux keyboard backend with X11/Wayland support."""
 
+    # Extended key support for xdotool (cross-platform compatibility)
+    LOGICAL_TO_XDOTOOL = {
+        "escape": "Escape",
+        "f1": "F1", "f2": "F2", "f3": "F3", "f4": "F4", "f5": "F5",
+        "f6": "F6", "f7": "F7", "f8": "F8", "f9": "F9", "f10": "F10",
+        "f11": "F11", "f12": "F12",
+        "print_screen": "Print",
+        "scroll_lock": "Scroll_Lock",
+        "pause": "Pause",
+        "backtick": "grave",
+        "minus": "minus",
+        "equals": "equal",
+        "backspace": "BackSpace",
+        "tab": "Tab",
+        "left_bracket": "bracketleft",
+        "right_bracket": "bracketright",
+        "backslash": "backslash",
+        "caps_lock": "Caps_Lock",
+        "semicolon": "semicolon",
+        "quote": "apostrophe",
+        "enter": "Return",
+        "left_shift": "Shift_L",
+        "right_shift": "Shift_R",
+        "comma": "comma",
+        "period": "period",
+        "slash": "slash",
+        "left_ctrl": "Control_L",
+        "right_ctrl": "Control_R",
+        "left_alt": "Alt_L",
+        "right_alt": "Alt_R",
+        "left_win": "Super_L",
+        "right_win": "Super_R",
+        "space": "space",
+        "num_lock": "Num_Lock",
+        "insert": "Insert",
+        "delete": "Delete",
+        "home": "Home",
+        "end": "End",
+        "page_up": "Page_Up",
+        "page_down": "Page_Down",
+        "arrow_up": "Up",
+        "arrow_down": "Down",
+        "arrow_left": "Left",
+        "arrow_right": "Right",
+        "numpad_divide": "KP_Divide",
+        "numpad_multiply": "KP_Multiply",
+        "numpad_subtract": "KP_Subtract",
+        "numpad_add": "KP_Add",
+        "numpad_enter": "KP_Enter",
+        "numpad_decimal": "KP_Decimal",
+        "numpad0": "KP_0", "numpad1": "KP_1", "numpad2": "KP_2", "numpad3": "KP_3",
+        "numpad4": "KP_4", "numpad5": "KP_5", "numpad6": "KP_6", "numpad7": "KP_7",
+        "numpad8": "KP_8", "numpad9": "KP_9",
+    }
+
     def __init__(self):
         self._xdotool_path = shutil.which("xdotool")
         self._ydotool_path = shutil.which("ydotool")
@@ -101,56 +156,19 @@ class LinuxKeyboardBackend(PlatformKeyboardBackend):
             print(f"Error running input command {args[0]}: {e}")
             return False
 
+    @staticmethod
+    def get_xdotool_key(key_code: str) -> Optional[str]:
+        """Get xdotool key name for a logical key id."""
+        key = normalize_key(key_code)
+        if len(key) == 1:
+            return key
+        return LinuxKeyboardBackend.LOGICAL_TO_XDOTOOL.get(key)
+
     def _logical_to_xdotool_key(self, logical: str) -> Optional[str]:
         """Convert logical key code to xdotool key name."""
         if len(logical) == 1:
             return logical
-
-        key_lookup = {
-            "backtick": "grave",
-            "minus": "minus",
-            "equals": "equal",
-            "left_bracket": "bracketleft",
-            "right_bracket": "bracketright",
-            "backslash": "backslash",
-            "semicolon": "semicolon",
-            "quote": "apostrophe",
-            "comma": "comma",
-            "period": "period",
-            "slash": "slash",
-            "left_win": "Super_L",
-            "right_win": "Super_R",
-            "left_shift": "Shift_L",
-            "right_shift": "Shift_R",
-            "left_ctrl": "Control_L",
-            "right_ctrl": "Control_R",
-            "left_alt": "Alt_L",
-            "right_alt": "Alt_R",
-            "enter": "Return",
-            "backspace": "BackSpace",
-            "tab": "Tab",
-            "escape": "Escape",
-            "caps_lock": "Caps_Lock",
-            "space": "space",
-            "delete": "Delete",
-            "insert": "Insert",
-            "home": "Home",
-            "end": "End",
-            "page_up": "Page_Up",
-            "page_down": "Page_Down",
-            "arrow_left": "Left",
-            "arrow_right": "Right",
-            "arrow_up": "Up",
-            "arrow_down": "Down",
-            "f1": "F1", "f2": "F2", "f3": "F3", "f4": "F4", "f5": "F5",
-            "f6": "F6", "f7": "F7", "f8": "F8", "f9": "F9", "f10": "F10",
-            "f11": "F11", "f12": "F12",
-            "print_screen": "Print",
-            "scroll_lock": "Scroll_Lock",
-            "pause": "Pause",
-            "num_lock": "Num_Lock",
-        }
-        return key_lookup.get(logical)
+        return self.LOGICAL_TO_XDOTOOL.get(logical)
 
     def _logical_to_ydotool_code(self, logical: str) -> Optional[int]:
         """Convert logical key code to ydotool key code."""

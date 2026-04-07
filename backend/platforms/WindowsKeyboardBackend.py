@@ -141,6 +141,12 @@ class WindowsKeyboardBackend(PlatformKeyboardBackend):
 
         self._held_keys = set()
 
+    @staticmethod
+    def get_windows_vk_static(key_code: str) -> Optional[int]:
+        """Static method to get Windows VK code for a logical key id."""
+        key = normalize_key(key_code)
+        return WindowsKeyboardBackend.LOGICAL_TO_WINDOWS_VK.get(key)
+
     def initialize(self) -> bool:
         """Initialize Windows keyboard structures."""
         try:

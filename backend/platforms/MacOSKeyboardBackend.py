@@ -24,7 +24,7 @@ class MacOSKeyboardBackend(PlatformKeyboardBackend):
     """macOS keyboard backend using Quartz framework."""
 
     # Virtual key codes for macOS (from <Carbon/Carbon.h>)
-    MAC_VK_CODES = {
+    LOGICAL_TO_MACOS = {
         "a": 0x00, "b": 0x0B, "c": 0x08, "d": 0x02, "e": 0x0E, "f": 0x03, "g": 0x05,
         "h": 0x04, "i": 0x22, "j": 0x26, "k": 0x28, "l": 0x25, "m": 0x2E, "n": 0x2D,
         "o": 0x1F, "p": 0x23, "q": 0x0C, "r": 0x0F, "s": 0x01, "t": 0x11, "u": 0x20,
@@ -84,6 +84,12 @@ class MacOSKeyboardBackend(PlatformKeyboardBackend):
         self._failure_reason = None
         self._held_keys = set()
         self._frameworks_available = MACOS_FRAMEWORKS_AVAILABLE
+
+    @staticmethod
+    def get_macos_vk_static(key_code: str) -> Optional[int]:
+        """Static method to get Windows VK code for a logical key id."""
+        key = normalize_key(key_code)
+        return MacOSKeyboardBackend.LOGICAL_TO_MACOS.get(key)
 
     def initialize(self) -> bool:
         """Initialize macOS keyboard backend."""

@@ -91,7 +91,6 @@ class Action:
 
         # Latency tracking (capture -> action completion)
         self._latency_lock = threading.Lock()
-        self._windows_backend = None
         self._latency_samples_ms = deque(maxlen=120)
         self._latest_latency_ms = None
         self._avg_latency_ms = None

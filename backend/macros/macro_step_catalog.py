@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.gestures.keyboard_mode.KeyCodes import LOGICAL_TO_WINDOWS_VK
+from backend.platforms.KeyMappings import get_logical_to_key_mapping
 
 
 def _build_key_options():
@@ -25,7 +25,9 @@ def _build_key_options():
         "arrow_up",
         "arrow_down",
     ]
-    ordered_keys.extend(sorted(LOGICAL_TO_WINDOWS_VK))
+    # Get platform-specific key mappings
+    key_mapping = get_logical_to_key_mapping()
+    ordered_keys.extend(sorted(key_mapping.keys()))
     options = []
     for key in ordered_keys:
         if key in seen:
