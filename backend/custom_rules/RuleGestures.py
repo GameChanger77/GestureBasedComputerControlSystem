@@ -18,6 +18,7 @@ class _RuleGestureBase:
     - Evaluate JSON conditions via ConditionEvaluator
     - Convert action targets (like "index.tip") to screen coordinates
     - Execute Action methods (left_click, right_click, move_cursor, scroll)
+    - Execute simple macro step lists for mouse and keyboard actions
     """
 
     def __init__(self, screen_width: int, screen_height: int, config, evaluator: ConditionEvaluator, rule: Dict[str, Any]):
@@ -50,7 +51,7 @@ class _RuleGestureBase:
         - right_click
         - mouse_move
         - scroll
-        - macro   <-- new
+        - macro
         """
         action_spec = self.rule["action"]
         a_type = action_spec["type"]
@@ -144,6 +145,15 @@ class _RuleGestureBase:
         - right_click
         - scroll
         - delay_ms
+        - tap_key
+        - key_down
+        - key_up
+        - tap_hotkey
+        - type_text
+
+        Accepted step key names:
+        - "type"
+        - "step_type"
 
         For click steps:
         - if a target is given, use it
@@ -156,11 +166,12 @@ class _RuleGestureBase:
             if not isinstance(step, dict):
                 raise ValueError(f"Macro step {i} must be an object")
 
-            s_type = step.get("type")
+            s_type = step.get("type") or step.get("step_type")
             params = step.get("params", {})
 
             if s_type == "delay_ms":
-                compiled.append(("delay_ms", int(params.get("value", 0))))
+                delay_value = params.get("value", params.get("duration_ms", 0))
+                compiled.append(("delay_ms", int(delay_value)))
                 continue
 
             if s_type == "scroll":
@@ -191,6 +202,39 @@ class _RuleGestureBase:
                     )
 
                 compiled.append((s_type, target[0], target[1]))
+                continue
+
+            if s_type == "tap_key":
+                key = params.get("key")
+                if not key:
+                    raise ValueError(f"Macro step {i} (tap_key) requires params.key")
+                compiled.append(("tap_key", str(key)))
+                continue
+
+            if s_type == "key_down":
+                key = params.get("key")
+                if not key:
+                    raise ValueError(f"Macro step {i} (key_down) requires params.key")
+                compiled.append(("key_down", str(key)))
+                continue
+
+            if s_type == "key_up":
+                key = params.get("key")
+                if not key:
+                    raise ValueError(f"Macro step {i} (key_up) requires params.key")
+                compiled.append(("key_up", str(key)))
+                continue
+
+            if s_type == "tap_hotkey":
+                keys = params.get("keys", [])
+                if not isinstance(keys, list) or not keys:
+                    raise ValueError(f"Macro step {i} (tap_hotkey) requires non-empty params.keys")
+                compiled.append(("tap_hotkey", [str(k) for k in keys]))
+                continue
+
+            if s_type == "type_text":
+                text = params.get("text", "")
+                compiled.append(("type_text", str(text)))
                 continue
 
             raise ValueError(f"Unsupported macro step type: {s_type}")
@@ -244,6 +288,27 @@ class _RuleGestureBase:
                     _, value = step
                     time.sleep(max(0, value) / 1000.0)
 
+                elif s_type == "tap_key":
+                    _, key = step
+                    self.action.tap_key(key)
+
+                elif s_type == "key_down":
+                    _, key = step
+                    self.action.key_down(key)
+
+                elif s_type == "key_up":
+                    _, key = step
+                    self.action.key_up(key)
+
+                elif s_type == "tap_hotkey":
+                    _, keys = step
+                    self.action.tap_hotkey(keys)
+
+                elif s_type == "type_text":
+                    _, text = step
+                    self.action.type_text(text)
+
+
 class RuleSnapshotGesture(SnapshotGestureRecognizer, _RuleGestureBase):
     """
     Snapshot (pose) gesture compiled from JSON.
@@ -292,7 +357,8 @@ class RuleContinuousGesture(ContinuousGestureRecognizer, _RuleGestureBase):
     - Fires EVERY frame while held (ContinuousGestureRecognizer behavior)
 
     WARNING:
-    - Avoid mapping click actions to continuous gestures or you'll spam clicks.
+    - Avoid mapping click actions or keyboard macros to continuous gestures
+      or they may repeat every frame while held.
     """
 
     def __init__(self, action, screen_width, screen_height, config, evaluator, rule, pending_frames, ending_frames):

@@ -1,0 +1,43 @@
+{
+  "id": "g_two_finger_copy_all",
+  "name": "Two Finger Copy All",
+  "enabled": true,
+  "mode": "keyboard",
+  "type": "pose",
+  "priority": 12,
+  "hand": "right",
+  "conditions": [
+    {
+      "op": "only_fingers_extended",
+      "fingers": ["index", "middle", "ring"],
+      "threshold_deg": 155
+    }
+  ],
+  "confirm": {
+    "pending_frames": 3,
+    "ending_frames": 2
+  },
+  "action": {
+    "type": "macro",
+    "steps": [
+      {
+        "type": "tap_hotkey",
+        "params": {
+          "keys": ["left_ctrl", "a"]
+        }
+      },
+      {
+        "type": "delay_ms",
+        "params": {
+          "duration_ms": 60
+        }
+      },
+      {
+        "type": "tap_hotkey",
+        "params": {
+          "keys": ["left_ctrl", "c"]
+        }
+      }
+    ]
+  }
+}
