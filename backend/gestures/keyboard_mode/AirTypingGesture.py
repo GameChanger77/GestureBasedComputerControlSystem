@@ -1,19 +1,34 @@
 import math
 import platform
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from backend.HandsData import HandsData
 from backend.gestures.FlickDetector import FlickDetector
 from backend.gestures.GestureRecognizer import GestureRecognizer
-from backend.gestures.GestureUtils import are_fingers_pinched, get_pinch_distance
+from backend.gestures.GestureUtils import (
+    are_fingers_pinched,
+    get_finger_angle,
+    get_finger_extension,
+    get_hand_openness,
+    get_pinch_distance,
+)
 from backend.gestures.keyboard_mode.DevOverlayKeyboardSurface import DevOverlayKeyboardSurface
 from backend.gestures.keyboard_mode.KeyboardLayoutHelper import KeyboardLayoutHelper
 from backend.gestures.keyboard_mode.KeyboardThemes import KeyboardThemeRegistry
 from backend.gestures.keyboard_mode.KeyboardSurfaceBase import HandFrame, KeyboardSurfaceBase
 from backend.gestures.keyboard_mode.ProdWindowKeyboardSurface import ProdWindowKeyboardSurface
 from backend.gestures.keyboard_mode.SwipeDecoder import SwipeDecoder
+
+
+@dataclass
+class SwipeWordRecord:
+    selected_word: str
+    candidates: List[str]
+    emitted_text: str
+    confidence: float
 
 
 class AirTypingGesture(GestureRecognizer):
@@ -31,6 +46,12 @@ class AirTypingGesture(GestureRecognizer):
     _MODIFIER_PRESS_ORDER = KeyboardLayoutHelper.MODIFIER_PRESS_ORDER
     _FN_KEY_TO_FUNCTION = KeyboardLayoutHelper.FN_KEY_TO_FUNCTION
     _SUGGESTION_CHIP_COUNT = KeyboardLayoutHelper.SUGGESTION_CHIP_COUNT
+    _SWIPE_HISTORY_LIMIT = 10
+    _DELETE_FLICK_MIN_DISPLACEMENT = 0.10
+    _DELETE_FLICK_MIN_DOMINANCE_RATIO = 1.75
+    _FLICK_REARM_STABLE_FRAMES = 2
+    _FLICK_REARM_MAX_STEP = 0.018
+    _EXIT_FIST_MAX_THUMB_EXTENSION_RATIO = 0.98
 
     def __init__(
         self,
@@ -125,9 +146,8 @@ class AirTypingGesture(GestureRecognizer):
         self._swipe_lost_frames = 0
         self._special_key_pinch_latched = False
         self._last_pinch_value: Optional[float] = None
-        self._last_swipe_emitted_text = ""
-        self._last_swipe_word = ""
-        self._last_swipe_candidates: List[str] = []
+        self._exit_fist_ready = False
+        self._swipe_word_history: List[SwipeWordRecord] = []
         self._suggestion_words: List[str] = []
         self._suggestion_chips: List[Dict[str, object]] = []
         self._hovered_suggestion_idx: Optional[int] = None
@@ -166,12 +186,12 @@ class AirTypingGesture(GestureRecognizer):
 
         lexicon_path = Path(__file__).resolve().parent / "data" / "swipe-words.txt"
         self._swipe_decoder = SwipeDecoder(lexicon_path, max_words=None)
-        self._flick_window_seconds = float(self.config.get("keyboard_flick_selection_window_seconds", 3.0))
-        if self._flick_window_seconds < 0.0:
-            self._flick_window_seconds = 0.0
         self._flick_window_active = False
-        self._flick_window_deadline = 0.0
         self._flick_right_missing = False
+        self._flick_rearm_pending = False
+        self._flick_rearm_last_point: Optional[Tuple[float, float]] = None
+        self._flick_rearm_stable_frames = 0
+        self._flick_rearm_max_step_sq = self._FLICK_REARM_MAX_STEP * self._FLICK_REARM_MAX_STEP
         flick_min_displacement = float(self.config.get("keyboard_flick_min_displacement", 0.075))
         flick_min_speed = float(self.config.get("keyboard_flick_min_speed", 0.25))
         flick_dominance_ratio = float(self.config.get("keyboard_flick_dominance_ratio", 1.2))
@@ -180,6 +200,12 @@ class AirTypingGesture(GestureRecognizer):
             min_displacement=flick_min_displacement,
             min_speed=flick_min_speed,
             dominance_ratio=flick_dominance_ratio,
+        )
+        self._delete_flick_detector = FlickDetector(
+            allowed_directions=("down",),
+            min_displacement=max(flick_min_displacement, self._DELETE_FLICK_MIN_DISPLACEMENT),
+            min_speed=flick_min_speed,
+            dominance_ratio=max(flick_dominance_ratio, self._DELETE_FLICK_MIN_DOMINANCE_RATIO),
         )
 
     def _normalized_point(self, point: Optional[Tuple[float, float, float]]) -> Optional[Tuple[float, float, float]]:
@@ -353,6 +379,104 @@ class AirTypingGesture(GestureRecognizer):
         self._suggestion_words = alternatives[: self._SUGGESTION_CHIP_COUNT]
         self._layout_suggestion_chips()
 
+    def _clear_suggestions(self):
+        self._suggestion_words = []
+        self._layout_suggestion_chips()
+
+    def _latest_swipe_word_record(self) -> Optional[SwipeWordRecord]:
+        if not self._swipe_word_history:
+            return None
+        return self._swipe_word_history[-1]
+
+    def _sync_swipe_history_state(self):
+        record = self._latest_swipe_word_record()
+        if record is None:
+            self._swipe_candidates = []
+            self._swipe_best = ""
+            self._swipe_confidence = 0.0
+            self._clear_suggestions()
+            self._flick_window_active = False
+            return
+
+        self._swipe_candidates = list(record.candidates)
+        self._swipe_best = record.selected_word
+        self._swipe_confidence = float(record.confidence)
+        self._set_suggestions_from_candidates(record.selected_word, record.candidates)
+
+    def _remember_swipe_word(
+        self,
+        *,
+        selected_word: str,
+        candidates: List[str],
+        emitted_text: str,
+        confidence: float,
+    ):
+        self._swipe_word_history.append(
+            SwipeWordRecord(
+                selected_word=str(selected_word),
+                candidates=list(candidates),
+                emitted_text=str(emitted_text),
+                confidence=float(confidence),
+            )
+        )
+        if len(self._swipe_word_history) > self._SWIPE_HISTORY_LIMIT:
+            self._swipe_word_history = self._swipe_word_history[-self._SWIPE_HISTORY_LIMIT :]
+        self._sync_swipe_history_state()
+
+    def _clear_swipe_word_history(self):
+        self._swipe_word_history = []
+        self._sync_swipe_history_state()
+        self._cancel_flick_window()
+
+    def _restore_latest_swipe_word_state(self):
+        self._sync_swipe_history_state()
+        if self._swipe_word_history and not self._swipe_active and not self._special_key_pinch_latched:
+            self._start_flick_window()
+        elif not self._swipe_word_history:
+            self._cancel_flick_window()
+
+    def _backspace_text(self, text: str):
+        for _ in range(len(text)):
+            self.action.tap_key("backspace")
+
+    def _reset_flick_detectors(self):
+        self._flick_detector.reset()
+        self._delete_flick_detector.reset()
+
+    def _clear_flick_rearm(self):
+        self._flick_rearm_pending = False
+        self._flick_rearm_last_point = None
+        self._flick_rearm_stable_frames = 0
+
+    def _begin_flick_rearm(self, point: Optional[Tuple[float, float]]):
+        self._clear_flick_rearm()
+        self._flick_rearm_pending = True
+        self._flick_rearm_last_point = point
+        self._reset_flick_detectors()
+
+    def _update_flick_rearm(self, point: Optional[Tuple[float, float]]) -> bool:
+        if not self._flick_rearm_pending:
+            return False
+        if point is None:
+            self._clear_flick_rearm()
+            self._reset_flick_detectors()
+            return False
+        if self._flick_rearm_last_point is None:
+            self._flick_rearm_last_point = point
+            return True
+
+        dx = point[0] - self._flick_rearm_last_point[0]
+        dy = point[1] - self._flick_rearm_last_point[1]
+        if (dx * dx + dy * dy) <= self._flick_rearm_max_step_sq:
+            self._flick_rearm_stable_frames += 1
+        else:
+            self._flick_rearm_stable_frames = 0
+        self._flick_rearm_last_point = point
+
+        if self._flick_rearm_stable_frames >= self._FLICK_REARM_STABLE_FRAMES:
+            self._clear_flick_rearm()
+            self._reset_flick_detectors()
+        return True
 
     def _both_hands_present(self, hands_data: HandsData) -> bool:
         return hands_data.camera.has_left and hands_data.camera.has_right
@@ -536,11 +660,49 @@ class AirTypingGesture(GestureRecognizer):
         return text
 
     def blocks_keyboard_mode_exit(self) -> str:
+        if self._exit_fist_ready:
+            return ""
         if self._swipe_active:
             return "Swipe gesture in progress"
         if self._special_key_pinch_latched:
             return "Key selection pinch is still latched"
         return ""
+
+    def _right_hand_matches_keyboard_exit_pose(self, hands_data: HandsData) -> bool:
+        if not hands_data.wrist.has_right:
+            return False
+
+        right_hand = hands_data.wrist.right
+        if right_hand is None or not right_hand.exists:
+            return False
+
+        max_openness = float(self.config.get("keyboard_mode_exit_max_openness", 0.16))
+        max_extension_ratio = float(self.config.get("keyboard_mode_exit_max_extension_ratio", 0.90))
+        max_avg_finger_angle = float(self.config.get("keyboard_mode_exit_max_avg_finger_angle", 145.0))
+
+        openness = get_hand_openness(right_hand, include_thumb=False)
+        if openness > max_openness:
+            return False
+
+        finger_extensions = [
+            get_finger_extension(right_hand.index),
+            get_finger_extension(right_hand.middle),
+            get_finger_extension(right_hand.ring),
+            get_finger_extension(right_hand.pinky),
+        ]
+        if max(finger_extensions) > max_extension_ratio:
+            return False
+        if get_finger_extension(right_hand.thumb) > self._EXIT_FIST_MAX_THUMB_EXTENSION_RATIO:
+            return False
+
+        finger_angles = [
+            get_finger_angle(right_hand.index),
+            get_finger_angle(right_hand.middle),
+            get_finger_angle(right_hand.ring),
+            get_finger_angle(right_hand.pinky),
+        ]
+        avg_angle = sum(finger_angles) / len(finger_angles)
+        return avg_angle <= max_avg_finger_angle
 
     def _current_right_slot_id(self, hands_data: HandsData) -> Optional[str]:
         right_hand = hands_data.camera.right if hands_data.camera.has_right else None
@@ -570,41 +732,54 @@ class AirTypingGesture(GestureRecognizer):
         replacement = self._suggestion_words[suggestion_idx]
         if not replacement:
             return False
-        if not self._last_swipe_emitted_text:
+        record = self._latest_swipe_word_record()
+        if record is None or not record.emitted_text:
             return False
 
-        for _ in range(len(self._last_swipe_emitted_text)):
-            self.action.tap_key("backspace")
+        self._backspace_text(record.emitted_text)
 
         emitted = self._emit_word(replacement)
-        self._last_swipe_word = replacement
-        self._last_swipe_emitted_text = emitted
-        self._swipe_best = replacement
-        self._swipe_confidence = 1.0
+        record.selected_word = replacement
+        record.emitted_text = emitted
+        record.confidence = 1.0
+        self._sync_swipe_history_state()
         self._last_event = f"suggest:{replacement}"
         self._last_confidence = 1.0
-        self._set_suggestions_from_candidates(replacement, self._last_swipe_candidates)
+        return True
+
+    def _delete_last_swipe_word(self) -> bool:
+        record = self._latest_swipe_word_record()
+        if record is None or not record.emitted_text:
+            return False
+
+        deleted_word = record.selected_word
+        self._backspace_text(record.emitted_text)
+        self._swipe_word_history.pop()
+        self._sync_swipe_history_state()
+        self._last_event = f"delete:{deleted_word}"
+        self._last_confidence = 1.0
         return True
 
     def _commit_swipe(self, release_slot_id: Optional[str]):
         if release_slot_id is None:
             self._cancel_swipe()
+            self._sync_swipe_history_state()
             return
 
         unique_keys = len(set(self._swipe_trace_slots))
         if unique_keys == 1 and self._swipe_trace_slots:
             self._tap_slot_key(self._swipe_trace_slots[-1])
-            self._swipe_best = ""
-            self._swipe_confidence = 1.0
-            self._swipe_candidates = []
             self._cancel_swipe()
+            self._sync_swipe_history_state()
             return
 
         if len(self._swipe_points) < self.keyboard_swipe_min_points:
             self._cancel_swipe()
+            self._sync_swipe_history_state()
             return
         if unique_keys < self.keyboard_swipe_min_unique_keys:
             self._cancel_swipe()
+            self._sync_swipe_history_state()
             return
 
         best_word, confidence, candidates = self._swipe_decoder.decode(
@@ -614,36 +789,39 @@ class AirTypingGesture(GestureRecognizer):
 
         if not best_word:
             self._cancel_swipe()
+            self._sync_swipe_history_state()
             return
 
         emitted = self._emit_word(best_word)
-        self._swipe_best = best_word
-        self._swipe_confidence = confidence
-        self._swipe_candidates = candidates
-        self._last_swipe_word = best_word
-        self._last_swipe_emitted_text = emitted
-        self._last_swipe_candidates = list(candidates)
-        self._set_suggestions_from_candidates(best_word, candidates)
+        self._remember_swipe_word(
+            selected_word=best_word,
+            candidates=candidates,
+            emitted_text=emitted,
+            confidence=confidence,
+        )
         self._last_event = f"swipe:{best_word}"
         self._last_confidence = confidence
-        self._start_flick_window()
         self._cancel_swipe()
+        self._start_flick_window()
 
     @staticmethod
     def _now_seconds() -> float:
         return time.monotonic()
 
     def _start_flick_window(self):
+        if not self._swipe_word_history:
+            self._cancel_flick_window()
+            return
         self._flick_window_active = True
-        self._flick_window_deadline = self._now_seconds() + self._flick_window_seconds
         self._flick_right_missing = False
-        self._flick_detector.reset()
+        self._clear_flick_rearm()
+        self._reset_flick_detectors()
 
     def _cancel_flick_window(self):
         self._flick_window_active = False
-        self._flick_window_deadline = 0.0
         self._flick_right_missing = False
-        self._flick_detector.reset()
+        self._clear_flick_rearm()
+        self._reset_flick_detectors()
 
     def _replace_last_swipe_word_by_flick(self, direction: str) -> bool:
         suggestion_idx = None
@@ -653,17 +831,14 @@ class AirTypingGesture(GestureRecognizer):
             suggestion_idx = 1
         elif direction == "right":
             suggestion_idx = 2
+        elif direction == "down":
+            return self._delete_last_swipe_word()
         if suggestion_idx is None:
             return False
         return self._replace_last_swipe_word(suggestion_idx)
 
     def _update_flick_window(self, hands_data: HandsData, *, start_pinch_active: bool, right_camera_present: bool) -> bool:
         if not self._flick_window_active:
-            return False
-
-        now = self._now_seconds()
-        if now >= self._flick_window_deadline:
-            self._cancel_flick_window()
             return False
 
         if start_pinch_active:
@@ -680,15 +855,33 @@ class AirTypingGesture(GestureRecognizer):
             return True
 
         if self._flick_right_missing:
-            self._flick_detector.reset()
+            self._reset_flick_detectors()
             self._flick_right_missing = False
 
-        self._flick_detector.add_sample((tip[0], tip[1]), now)
+        point = (tip[0], tip[1])
+        if self._update_flick_rearm(point):
+            return True
+
+        now = self._now_seconds()
+        self._flick_detector.add_sample(point, now)
+        self._delete_flick_detector.add_sample(point, now)
         direction = self._flick_detector.detect()
         if direction:
-            replaced = self._replace_last_swipe_word_by_flick(direction)
-            self._cancel_flick_window()
-            return replaced
+            handled = self._replace_last_swipe_word_by_flick(direction)
+            if handled and self._swipe_word_history:
+                self._begin_flick_rearm(point)
+            elif not self._swipe_word_history:
+                self._cancel_flick_window()
+            return handled
+
+        delete_direction = self._delete_flick_detector.detect()
+        if delete_direction:
+            handled = self._replace_last_swipe_word_by_flick(delete_direction)
+            if handled and self._swipe_word_history:
+                self._begin_flick_rearm(point)
+            elif not self._swipe_word_history:
+                self._cancel_flick_window()
+            return handled
 
         return True
 
@@ -717,6 +910,8 @@ class AirTypingGesture(GestureRecognizer):
         if self._special_key_pinch_latched:
             if release_reached:
                 self._special_key_pinch_latched = False
+                if self._swipe_word_history:
+                    self._start_flick_window()
             return
 
         if self._update_flick_window(
@@ -731,6 +926,7 @@ class AirTypingGesture(GestureRecognizer):
                 self._swipe_lost_frames += 1
                 if self._swipe_lost_frames > self.keyboard_swipe_tracking_grace_frames:
                     self._cancel_swipe()
+                    self._sync_swipe_history_state()
                 return
 
             if self._swipe_lost_frames > 0:
@@ -793,7 +989,7 @@ class AirTypingGesture(GestureRecognizer):
         self._hovered_slots.clear()
         self._hovered_suggestion_idx = None
         self._cancel_swipe()
-        self._cancel_flick_window()
+        self._clear_swipe_word_history()
         self._active_modifiers.clear()
         self._paused = True
         self._resume_counter = 0
@@ -816,6 +1012,7 @@ class AirTypingGesture(GestureRecognizer):
         return True
 
     def _update_overlay_only(self, hands_data: HandsData):
+        self._exit_fist_ready = self._right_hand_matches_keyboard_exit_pose(hands_data)
         camera_hands = self._get_camera_hands(hands_data.camera)
         layout = self._surface.update_layout(
             hands_data,
@@ -910,9 +1107,8 @@ class AirTypingGesture(GestureRecognizer):
         self._swipe_lost_frames = 0
         self._special_key_pinch_latched = False
         self._last_pinch_value = None
-        self._last_swipe_emitted_text = ""
-        self._last_swipe_word = ""
-        self._last_swipe_candidates = []
+        self._exit_fist_ready = False
+        self._swipe_word_history = []
         self._suggestion_words = []
         self._suggestion_chips = []
         self._hovered_suggestion_idx = None

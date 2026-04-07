@@ -118,7 +118,15 @@ class AirTypingSwipeStateTests(unittest.TestCase):
             self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.74))
 
         # Deterministic decoder behavior for integration-state tests.
-        self.gesture._swipe_decoder.decode = lambda trace, top_k=3: ("hello", 0.90, ["hello", "help"])
+        self._decode_results = []
+
+        def _decode(trace, top_k=3):
+            _ = (trace, top_k)
+            if self._decode_results:
+                return self._decode_results.pop(0)
+            return ("hello", 0.90, ["hello", "help"])
+
+        self.gesture._swipe_decoder.decode = _decode
         self.gesture._map_tip_to_slot = lambda side, tip, frame: (
             {"id": "h"} if tip[0] < 0.64 else
             {"id": "e"} if tip[0] < 0.68 else
@@ -128,6 +136,62 @@ class AirTypingSwipeStateTests(unittest.TestCase):
 
     def _advance_time(self, dt: float = 0.05):
         self._clock += dt
+
+    def _queue_decode_result(self, word: str, candidates, confidence: float = 0.90):
+        self._decode_results.append((word, confidence, list(candidates)))
+
+    def _commit_swipe_word(
+        self,
+        word: str = "hello",
+        *,
+        candidates=None,
+        x_positions=None,
+        y_positions=None,
+        confidence: float = 0.90,
+    ):
+        if candidates is None:
+            candidates = [word, "help"]
+        if x_positions is None:
+            x_positions = [0.62, 0.66, 0.70, 0.76]
+        if y_positions is None:
+            y_positions = [0.60] * len(x_positions)
+        self._queue_decode_result(word, candidates, confidence=confidence)
+        for x, y in zip(x_positions, y_positions):
+            self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=x, right_index_y=y))
+            self._advance_time()
+        self.gesture.update(
+            _make_hands_data(
+                right_present=True,
+                right_pinch=False,
+                right_index_x=x_positions[-1],
+                right_index_y=y_positions[-1],
+            )
+        )
+        self._advance_time()
+
+    def _perform_flick(self, points):
+        for x, y in points:
+            self.gesture.update(
+                _make_hands_data(
+                    right_present=True,
+                    right_pinch=False,
+                    right_index_x=x,
+                    right_index_y=y,
+                )
+            )
+            self._advance_time()
+        if points:
+            last_x, last_y = points[-1]
+            for _ in range(2):
+                self.gesture.update(
+                    _make_hands_data(
+                        right_present=True,
+                        right_pinch=False,
+                        right_index_x=last_x,
+                        right_index_y=last_y,
+                    )
+                )
+                self._advance_time()
 
     def test_right_pinch_start_hold_release_commits_word(self):
         x_positions = [0.62, 0.66, 0.70, 0.76]
@@ -363,21 +427,19 @@ class AirTypingSwipeStateTests(unittest.TestCase):
 
         self.assertEqual(self.action.typed_text, ["HELLO "])
 
-    def test_post_commit_flick_left_replaces_with_alt_1(self):
-        for x in [0.62, 0.66, 0.70, 0.76]:
-            self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=x))
-            self._advance_time()
-        self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.76))
-        self._advance_time()
+    def test_post_commit_flick_left_replaces_with_alt_1_after_long_idle(self):
+        self._commit_swipe_word(
+            "hello",
+            candidates=["hello", "help", "held", "helm"],
+        )
         self.assertTrue(self.gesture._flick_window_active)
+        self._advance_time(10.0)
 
-        for x in [0.76, 0.67, 0.58]:
-            self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=x))
-            self._advance_time()
+        self._perform_flick([(0.76, 0.42), (0.67, 0.42), (0.58, 0.42)])
 
         self.assertEqual(self.action.typed_text, ["hello ", "help "])
         self.assertEqual(self.action.tapped, ["backspace"] * len("hello "))
-        self.assertFalse(self.gesture._flick_window_active)
+        self.assertTrue(self.gesture._flick_window_active)
 
     def test_post_commit_flick_up_replaces_with_alt_2(self):
         self.gesture._swipe_decoder.decode = lambda trace, top_k=3: ("hello", 0.90, ["hello", "help", "held", "helm"])
@@ -393,27 +455,88 @@ class AirTypingSwipeStateTests(unittest.TestCase):
             self._advance_time()
 
         self.assertEqual(self.action.typed_text, ["hello ", "held "])
-        self.assertFalse(self.gesture._flick_window_active)
+        self.assertTrue(self.gesture._flick_window_active)
 
-    def test_post_commit_flick_window_expires_without_replacement(self):
-        for x in [0.62, 0.66, 0.70, 0.76]:
-            self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=x))
-            self._advance_time()
+    def test_post_commit_flick_window_stays_active_without_timeout(self):
+        self._commit_swipe_word("hello", candidates=["hello", "help", "held", "helm"])
+        self.assertTrue(self.gesture._flick_window_active)
+        self.assertEqual(self.action.typed_text, ["hello "])
+
+        self._advance_time(30.0)
         self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.76))
         self.assertTrue(self.gesture._flick_window_active)
         self.assertEqual(self.action.typed_text, ["hello "])
 
-        self._advance_time(3.1)
-        self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.76))
+    def test_post_commit_flick_down_deletes_latest_word_and_restores_previous_suggestions(self):
+        self._commit_swipe_word("hello", candidates=["hello", "help", "held", "helm"])
+        self._commit_swipe_word("world", candidates=["world", "word", "worry", "worm"])
+
+        self.assertEqual(len(self.gesture._swipe_word_history), 2)
+        self.assertEqual(self.gesture.get_overlay_data()["swipe_best"], "world")
+
+        self._perform_flick([(0.76, 0.42), (0.76, 0.52), (0.76, 0.62)])
+
+        self.assertEqual(len(self.gesture._swipe_word_history), 1)
+        self.assertEqual(self.gesture.get_overlay_data()["swipe_best"], "hello")
+        suggestion_texts = [
+            chip.get("text", "")
+            for chip in self.gesture.get_overlay_data().get("suggestion_chips", [])
+            if chip.get("text")
+        ]
+        self.assertEqual(suggestion_texts[:3], ["help", "held", "helm"])
+        self.assertEqual(self.action.tapped, ["backspace"] * len("world "))
+        self.assertTrue(self.gesture._flick_window_active)
+
+    def test_post_commit_flick_down_uses_current_emitted_text_after_replacement(self):
+        self._commit_swipe_word("hello", candidates=["hello", "help", "held", "helm"])
+        self._perform_flick([(0.76, 0.42), (0.67, 0.42), (0.58, 0.42)])
+        self._perform_flick([(0.76, 0.42), (0.76, 0.52), (0.76, 0.62)])
+
+        self.assertEqual(self.action.typed_text, ["hello ", "help "])
+        self.assertEqual(self.action.tapped, ["backspace"] * (len("hello ") + len("help ")))
+        self.assertEqual(len(self.gesture._swipe_word_history), 0)
         self.assertFalse(self.gesture._flick_window_active)
-        self.assertEqual(self.action.typed_text, ["hello "])
+
+    def test_single_curved_horizontal_flick_does_not_also_delete_word(self):
+        self._commit_swipe_word("hello", candidates=["hello", "help", "held", "helm"])
+
+        for x, y in [(0.76, 0.42), (0.67, 0.42), (0.58, 0.42), (0.58, 0.52), (0.58, 0.62)]:
+            self.gesture.update(
+                _make_hands_data(
+                    right_present=True,
+                    right_pinch=False,
+                    right_index_x=x,
+                    right_index_y=y,
+                )
+            )
+            self._advance_time()
+
+        self.assertEqual(self.action.typed_text, ["hello ", "help "])
+        self.assertEqual(self.action.tapped, ["backspace"] * len("hello "))
+        self.assertEqual(len(self.gesture._swipe_word_history), 1)
+        self.assertEqual(self.gesture.get_overlay_data()["swipe_best"], "help")
+
+    def test_post_commit_flick_down_can_delete_up_to_ten_words_of_history(self):
+        for idx in range(11):
+            word = f"word{idx}"
+            self._commit_swipe_word(word, candidates=[word, f"{word}a", f"{word}b", f"{word}c"])
+
+        self.assertEqual(len(self.gesture._swipe_word_history), 10)
+
+        for _ in range(10):
+            self._perform_flick([(0.76, 0.42), (0.76, 0.52), (0.76, 0.62)])
+
+        self.assertEqual(len(self.gesture._swipe_word_history), 0)
+        self.assertFalse(self.gesture._flick_window_active)
+        suggestion_texts = [
+            chip.get("text", "")
+            for chip in self.gesture.get_overlay_data().get("suggestion_chips", [])
+            if chip.get("text")
+        ]
+        self.assertEqual(suggestion_texts, [])
 
     def test_pinch_during_flick_window_cancels_window_and_starts_next_swipe(self):
-        for x in [0.62, 0.66, 0.70, 0.76]:
-            self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=x))
-            self._advance_time()
-        self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.76))
-        self._advance_time()
+        self._commit_swipe_word("hello", candidates=["hello", "help", "held", "helm"])
         self.assertTrue(self.gesture._flick_window_active)
 
         self.gesture.update(
