@@ -17,7 +17,9 @@ class ProductionKeyboardWindow(QWidget):
         self._content_rect: Tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)
 
         self.setWindowTitle("Swipe Keyboard")
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setWindowFlags(
+            Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowTransparentForInput
+        )
         self.setWindowFlag(Qt.WindowDoesNotAcceptFocus, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WA_TranslucentBackground, True)

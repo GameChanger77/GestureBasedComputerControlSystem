@@ -640,6 +640,7 @@ class MainWindow(QMainWindow):
             overlay_data = self._get_keyboard_overlay_data()
             if self.production_keyboard_window:
                 self.production_keyboard_window.set_overlay_data(overlay_data)
+            self._update_mode_label()
             return
 
         if not self.stats_widget:

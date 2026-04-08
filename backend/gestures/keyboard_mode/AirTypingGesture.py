@@ -1,5 +1,4 @@
 import math
-import platform
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +20,7 @@ from backend.gestures.keyboard_mode.KeyboardThemes import KeyboardThemeRegistry
 from backend.gestures.keyboard_mode.KeyboardSurfaceBase import HandFrame, KeyboardSurfaceBase
 from backend.gestures.keyboard_mode.ProdWindowKeyboardSurface import ProdWindowKeyboardSurface
 from backend.gestures.keyboard_mode.SwipeDecoder import SwipeDecoder
+from backend.platforms.KeyMappings import get_meta_key_label
 
 
 @dataclass
@@ -73,13 +73,8 @@ class AirTypingGesture(GestureRecognizer):
         self.ui_mode = str(ui_mode)
         self.screen_width = int(screen_width)
         self.screen_height = int(screen_height)
-        os_name = platform.system()
-        if os_name == "Darwin":
-            self._meta_key_label = "Cmd"
-        elif os_name == "Linux":
-            self._meta_key_label = "Super"
-        else:
-            self._meta_key_label = "Win"
+        action_os = getattr(action, "detected_os", None)
+        self._meta_key_label = get_meta_key_label(action_os)
 
         # constants for unified swipe keyboard mode.
         self.require_both_hands = False
