@@ -6,15 +6,15 @@ import threading
 import time
 from collections import deque
 from copy import deepcopy
-from typing import List, Optional
 
 from backend.macros.macro_models import MacroActionStep
 from backend.gestures.keyboard_mode.KeyCodes import normalize_key
-from backend.platforms import PlatformKeyboardBackend, create_keyboard_backend
+from backend.platforms import PlatformKeyboardBackend, create_keyboard_backend, normalize_os_name
+from backend.platforms.PynputKeyboardBackend import PynputKeyboardBackend
 
 try:
     from pynput.mouse import Controller as Mouse, Button
-    from pynput.keyboard import Controller as Keyboard, Key
+    from pynput.keyboard import Controller as Keyboard
 except ImportError:
     Mouse = None
     Keyboard = None
@@ -23,48 +23,6 @@ except ImportError:
     class Button:
         left = "left"
         right = "right"
-
-
-    class Key:
-        tab = "tab"
-        backspace = "backspace"
-        enter = "enter"
-        space = "space"
-        esc = "esc"
-        caps_lock = "caps_lock"
-        shift_l = "shift_l"
-        shift_r = "shift_r"
-        ctrl_l = "ctrl_l"
-        ctrl_r = "ctrl_r"
-        alt_l = "alt_l"
-        alt_r = "alt_r"
-        cmd = "cmd"
-        cmd_l = "cmd_l"
-        cmd_r = "cmd_r"
-        super_l = "super_l"
-        super_r = "super_r"
-        insert = "insert"
-        delete = "delete"
-        home = "home"
-        end = "end"
-        page_up = "page_up"
-        page_down = "page_down"
-        left = "left"
-        right = "right"
-        up = "up"
-        down = "down"
-        f1 = "f1"
-        f2 = "f2"
-        f3 = "f3"
-        f4 = "f4"
-        f5 = "f5"
-        f6 = "f6"
-        f7 = "f7"
-        f8 = "f8"
-        f9 = "f9"
-        f10 = "f10"
-        f11 = "f11"
-        f12 = "f12"
 
 OS_TYPE = platform.system()
 
@@ -109,193 +67,6 @@ class KeyboardTest(ABC):
         pass
 
 
-class _PynputKeyboardBackend(PlatformKeyboardBackend):
-    """Lightweight keyboard backend used for tests and unsupported platforms."""
-
-    def __init__(self, keyboard_controller, os_type: str):
-        self._keyboard = keyboard_controller
-        self._os_type = str(os_type)
-        self._held_keys = set()
-
-    def initialize(self) -> bool:
-        return True
-
-    def shutdown(self):
-        for logical in list(self._held_keys):
-            self.key_up(logical)
-        self._held_keys.clear()
-
-    def is_available(self) -> bool:
-        return self._keyboard is not None
-
-    def get_failure_reason(self) -> Optional[str]:
-        return None
-
-    def _pynput_meta_key(self, side: str):
-        is_left = side == "left"
-        side_super = "super_l" if is_left else "super_r"
-        side_cmd = "cmd_l" if is_left else "cmd_r"
-
-        if self._os_type == "Linux":
-            return (
-                    getattr(Key, side_super, None)
-                    or getattr(Key, side_cmd, None)
-                    or getattr(Key, "cmd", None)
-            )
-        if self._os_type == "Darwin":
-            return getattr(Key, side_cmd, None) or getattr(Key, "cmd", None)
-        return getattr(Key, side_cmd, None) or getattr(Key, "cmd", None)
-
-    def _resolve_key(self, key_code: str):
-        logical = normalize_key(key_code)
-        if not logical:
-            return None
-
-        if len(logical) == 1:
-            return logical
-
-        punct = {
-            "backtick": "`",
-            "minus": "-",
-            "equals": "=",
-            "left_bracket": "[",
-            "right_bracket": "]",
-            "backslash": "\\",
-            "semicolon": ";",
-            "quote": "'",
-            "comma": ",",
-            "period": ".",
-            "slash": "/",
-        }
-        if logical in punct:
-            return punct[logical]
-
-        key_lookup = {
-            "tab": getattr(Key, "tab", None),
-            "backspace": getattr(Key, "backspace", None),
-            "enter": getattr(Key, "enter", None),
-            "space": getattr(Key, "space", None),
-            "escape": getattr(Key, "esc", None),
-            "caps_lock": getattr(Key, "caps_lock", None),
-            "left_shift": getattr(Key, "shift_l", None),
-            "right_shift": getattr(Key, "shift_r", None),
-            "left_ctrl": getattr(Key, "ctrl_l", None),
-            "right_ctrl": getattr(Key, "ctrl_r", None),
-            "left_alt": getattr(Key, "alt_l", None),
-            "right_alt": getattr(Key, "alt_r", None),
-            "left_win": self._pynput_meta_key("left"),
-            "right_win": self._pynput_meta_key("right"),
-            "insert": getattr(Key, "insert", None),
-            "delete": getattr(Key, "delete", None),
-            "home": getattr(Key, "home", None),
-            "end": getattr(Key, "end", None),
-            "page_up": getattr(Key, "page_up", None),
-            "page_down": getattr(Key, "page_down", None),
-            "arrow_left": getattr(Key, "left", None),
-            "arrow_right": getattr(Key, "right", None),
-            "arrow_up": getattr(Key, "up", None),
-            "arrow_down": getattr(Key, "down", None),
-            "f1": getattr(Key, "f1", None),
-            "f2": getattr(Key, "f2", None),
-            "f3": getattr(Key, "f3", None),
-            "f4": getattr(Key, "f4", None),
-            "f5": getattr(Key, "f5", None),
-            "f6": getattr(Key, "f6", None),
-            "f7": getattr(Key, "f7", None),
-            "f8": getattr(Key, "f8", None),
-            "f9": getattr(Key, "f9", None),
-            "f10": getattr(Key, "f10", None),
-            "f11": getattr(Key, "f11", None),
-            "f12": getattr(Key, "f12", None),
-        }
-        return key_lookup.get(logical)
-
-    def key_down(self, key_code: str) -> bool:
-        logical = normalize_key(key_code)
-        if not logical or logical in self._held_keys:
-            return False
-
-        key = self._resolve_key(logical)
-        if key is None:
-            return False
-
-        try:
-            self._keyboard.press(key)
-            self._held_keys.add(logical)
-            return True
-        except Exception:
-            return False
-
-    def key_up(self, key_code: str) -> bool:
-        logical = normalize_key(key_code)
-        if not logical:
-            return False
-
-        key = self._resolve_key(logical)
-        if key is None:
-            return False
-
-        try:
-            self._keyboard.release(key)
-            self._held_keys.discard(logical)
-            return True
-        except Exception:
-            return False
-
-    def tap_key(self, key_code: str) -> bool:
-        logical = normalize_key(key_code)
-        if not logical:
-            return False
-
-        key = self._resolve_key(logical)
-        if key is None:
-            return False
-
-        try:
-            self._keyboard.press(key)
-            time.sleep(0.005)
-            self._keyboard.release(key)
-            return True
-        except Exception:
-            return False
-
-    def tap_hotkey(self, key_codes: List[str]) -> bool:
-        if not key_codes:
-            return False
-
-        resolved_keys = []
-        for key_code in key_codes:
-            key = self._resolve_key(key_code)
-            if key is None:
-                return False
-            resolved_keys.append(key)
-
-        try:
-            for key in resolved_keys:
-                self._keyboard.press(key)
-            time.sleep(0.010)
-        except Exception:
-            return False
-        finally:
-            for key in reversed(resolved_keys):
-                try:
-                    self._keyboard.release(key)
-                except Exception:
-                    pass
-
-        return True
-
-    def type_text(self, text: str) -> bool:
-        if not text:
-            return False
-
-        try:
-            self._keyboard.type(text)
-            return True
-        except Exception:
-            return False
-
-
 class Action:
 
     def __init__(
@@ -316,8 +87,7 @@ class Action:
         self.osType = osType if osType is not None else OS_TYPE
         self.screen_origin_x = int(screen_origin_x)
         self.screen_origin_y = int(screen_origin_y)
-        self.detected_os = self.osType
-        self._held_keys = set()
+        self.detected_os = normalize_os_name(self.osType)
         self._keyboard_backend = self._create_keyboard_backend(use_platform_backend=keyboard_test is None)
         self._windows_backend = (
             self._keyboard_backend
@@ -363,13 +133,14 @@ class Action:
         self._worker.start()
 
     def _create_keyboard_backend(self, *, use_platform_backend: bool) -> PlatformKeyboardBackend:
-        if use_platform_backend and self.detected_os == platform.system():
+        host_os = normalize_os_name()
+        if use_platform_backend and self.detected_os == host_os:
             try:
-                return create_keyboard_backend()
+                return create_keyboard_backend(target_os=self.detected_os)
             except Exception as exc:
                 print(f"Falling back to local keyboard controller backend: {exc}")
 
-        backend = _PynputKeyboardBackend(self.keyboard, self.detected_os)
+        backend = PynputKeyboardBackend(self.keyboard, self.detected_os)
         backend.initialize()
         return backend
 
@@ -771,21 +542,16 @@ class Action:
         return self._keyboard_backend.key_up(key_code)
 
     def press_key(self, key):
-        self._enqueue_action(self.keyboard.press, (key,))
+        self.key_down(key)
 
     def release_key(self, key):
-        self._enqueue_action(self.keyboard.release, (key,))
+        self.key_up(key)
 
     def press_and_release_key(self, key):
-        self.press_key(key)
-        self.release_key(key)
+        self.tap_key(key)
 
     def perform_macro(self, keys: list):
-        for key in keys:
-            self.press_key(key)
-
-        for key in keys:
-            self.release_key(key)
+        self.tap_hotkey(keys)
 
     def execute_macro_steps(self, steps):
         """Queue an ordered macro step chain for execution."""
@@ -809,11 +575,9 @@ class Action:
             if step_type == "tap_key":
                 self._tap_key_impl(params["key"])
             elif step_type == "key_down":
-                if self._key_down(params["key"]):
-                    self._held_keys.add(params["key"])
+                self._key_down(params["key"])
             elif step_type == "key_up":
                 self._key_up(params["key"])
-                self._held_keys.discard(params["key"])
             elif step_type == "tap_hotkey":
                 self._tap_hotkey_impl(params["keys"])
             elif step_type == "left_click":
@@ -836,12 +600,11 @@ class Action:
     def key_down(self, key_code: str):
         """Press and hold a keyboard key."""
         logical = normalize_key(key_code)
-        if not logical or logical in self._held_keys:
+        if not logical:
             return
 
         try:
             if self._key_down(logical):
-                self._held_keys.add(logical)
                 self._record_action_event("key_down", key=logical)
         except Exception as e:
             print(f"Error on key_down('{logical}'): {e}")
@@ -853,12 +616,10 @@ class Action:
             return
 
         try:
-            self._key_up(logical)
-            self._record_action_event("key_up", key=logical)
+            if self._key_up(logical):
+                self._record_action_event("key_up", key=logical)
         except Exception as e:
             print(f"Error on key_up('{logical}'): {e}")
-        finally:
-            self._held_keys.discard(logical)
 
     def tap_key(self, key_code: str):
         """Press and release a key."""
@@ -907,6 +668,8 @@ class Action:
             self._record_action_event("tap_key", key=logical)
 
     def _replace_recent_text_impl(self, old_payload: str, new_payload: str):
+        self.release_all_keys()
+
         if old_payload:
             for _ in range(len(old_payload)):
                 self._tap_key_impl("backspace")
@@ -932,17 +695,16 @@ class Action:
         if scope.get("capture_text"):
             self._record_action_event("type_text", text=payload, captured=True)
             return
+        self.release_all_keys()
         if self._keyboard_backend.type_text(payload):
             self._record_action_event("type_text", text=payload, captured=False)
 
     def release_all_keys(self):
         """Release any currently held keys."""
-        for key in list(self._held_keys):
-            try:
-                self._key_up(key)
-            except Exception as e:
-                print(f"Error releasing key '{key}': {e}")
-        self._held_keys.clear()
+        try:
+            self._keyboard_backend.release_all_keys()
+        except Exception as e:
+            print(f"Error releasing held keys: {e}")
 
     def close(self):
         """Stop background action worker."""

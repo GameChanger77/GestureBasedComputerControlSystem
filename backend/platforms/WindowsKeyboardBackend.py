@@ -125,6 +125,7 @@ class WindowsKeyboardBackend(PlatformKeyboardBackend):
         "numpad8": 0x68,
         "numpad9": 0x69,
     }
+    KEY_MAPPING = LOGICAL_TO_WINDOWS_VK
 
     def __init__(self):
         self.INPUT_KEYBOARD = 1
@@ -212,7 +213,7 @@ class WindowsKeyboardBackend(PlatformKeyboardBackend):
 
     def shutdown(self):
         """Clean up resources."""
-        self._release_all_keys()
+        self.release_all_keys()
 
     def get_windows_vk(self, key_code: str) -> Optional[int]:
         """Get Windows VK code for a logical key id."""
@@ -416,7 +417,7 @@ class WindowsKeyboardBackend(PlatformKeyboardBackend):
         """Get reason if backend is unavailable."""
         return self._failure_reason
 
-    def _release_all_keys(self):
+    def release_all_keys(self):
         """Release any currently held keys."""
         for logical in list(self._held_keys):
             try:

@@ -73,7 +73,8 @@ class AirTypingGesture(GestureRecognizer):
         self.ui_mode = str(ui_mode)
         self.screen_width = int(screen_width)
         self.screen_height = int(screen_height)
-        self._meta_key_label = get_meta_key_label()
+        action_os = getattr(action, "detected_os", None)
+        self._meta_key_label = get_meta_key_label(action_os)
 
         # constants for unified swipe keyboard mode.
         self.require_both_hands = False

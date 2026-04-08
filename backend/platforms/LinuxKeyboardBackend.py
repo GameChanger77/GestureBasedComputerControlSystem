@@ -75,6 +75,7 @@ class LinuxKeyboardBackend(PlatformKeyboardBackend):
         "numpad4": "KP_4", "numpad5": "KP_5", "numpad6": "KP_6", "numpad7": "KP_7",
         "numpad8": "KP_8", "numpad9": "KP_9",
     }
+    KEY_MAPPING = LOGICAL_TO_XDOTOOL
 
     def __init__(self):
         self._xdotool_path = shutil.which("xdotool")
@@ -112,7 +113,7 @@ class LinuxKeyboardBackend(PlatformKeyboardBackend):
 
     def shutdown(self):
         """Clean up resources."""
-        self._release_all_keys()
+        self.release_all_keys()
 
     def is_available(self) -> bool:
         """Check if backend is available."""
@@ -267,33 +268,42 @@ class LinuxKeyboardBackend(PlatformKeyboardBackend):
             return logical
 
         key_lookup = {
-            "tab": Key.tab,
-            "backspace": Key.backspace,
-            "enter": Key.enter,
-            "space": Key.space,
-            "escape": Key.esc,
-            "caps_lock": Key.caps_lock,
-            "left_shift": Key.shift_l,
-            "right_shift": Key.shift_r,
-            "left_ctrl": Key.ctrl_l,
-            "right_ctrl": Key.ctrl_r,
-            "left_alt": Key.alt_l,
-            "right_alt": Key.alt_r,
-            "left_win": Key.cmd,  # Fallback for super
-            "right_win": Key.cmd,
-            "insert": Key.insert,
-            "delete": Key.delete,
-            "home": Key.home,
-            "end": Key.end,
-            "page_up": Key.page_up,
-            "page_down": Key.page_down,
-            "arrow_left": Key.left,
-            "arrow_right": Key.right,
-            "arrow_up": Key.up,
-            "arrow_down": Key.down,
-            "f1": Key.f1, "f2": Key.f2, "f3": Key.f3, "f4": Key.f4, "f5": Key.f5,
-            "f6": Key.f6, "f7": Key.f7, "f8": Key.f8, "f9": Key.f9, "f10": Key.f10,
-            "f11": Key.f11, "f12": Key.f12,
+            "tab": getattr(Key, "tab", None),
+            "backspace": getattr(Key, "backspace", None),
+            "enter": getattr(Key, "enter", None),
+            "space": getattr(Key, "space", None),
+            "escape": getattr(Key, "esc", None),
+            "caps_lock": getattr(Key, "caps_lock", None),
+            "left_shift": getattr(Key, "shift_l", None),
+            "right_shift": getattr(Key, "shift_r", None),
+            "left_ctrl": getattr(Key, "ctrl_l", None),
+            "right_ctrl": getattr(Key, "ctrl_r", None),
+            "left_alt": getattr(Key, "alt_l", None),
+            "right_alt": getattr(Key, "alt_r", None),
+            "left_win": getattr(Key, "cmd", None),
+            "right_win": getattr(Key, "cmd", None),
+            "insert": getattr(Key, "insert", None),
+            "delete": getattr(Key, "delete", None),
+            "home": getattr(Key, "home", None),
+            "end": getattr(Key, "end", None),
+            "page_up": getattr(Key, "page_up", None),
+            "page_down": getattr(Key, "page_down", None),
+            "arrow_left": getattr(Key, "left", None),
+            "arrow_right": getattr(Key, "right", None),
+            "arrow_up": getattr(Key, "up", None),
+            "arrow_down": getattr(Key, "down", None),
+            "f1": getattr(Key, "f1", None),
+            "f2": getattr(Key, "f2", None),
+            "f3": getattr(Key, "f3", None),
+            "f4": getattr(Key, "f4", None),
+            "f5": getattr(Key, "f5", None),
+            "f6": getattr(Key, "f6", None),
+            "f7": getattr(Key, "f7", None),
+            "f8": getattr(Key, "f8", None),
+            "f9": getattr(Key, "f9", None),
+            "f10": getattr(Key, "f10", None),
+            "f11": getattr(Key, "f11", None),
+            "f12": getattr(Key, "f12", None),
         }
         return key_lookup.get(logical)
 
@@ -439,7 +449,7 @@ class LinuxKeyboardBackend(PlatformKeyboardBackend):
         """Get reason if backend is unavailable."""
         return self._failure_reason
 
-    def _release_all_keys(self):
+    def release_all_keys(self):
         """Release any currently held keys."""
         for logical in list(self._held_keys):
             try:
@@ -449,4 +459,3 @@ class LinuxKeyboardBackend(PlatformKeyboardBackend):
             except Exception as e:
                 print(f"Error releasing key '{logical}': {e}")
         self._held_keys.clear()
-

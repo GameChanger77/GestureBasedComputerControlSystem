@@ -13,6 +13,7 @@ class PlatformKeyboardBackend(ABC):
     """Abstract interface for platform-specific keyboard input."""
 
     META_KEY_LABEL = "Meta"
+    KEY_MAPPING = {}
 
     @abstractmethod
     def initialize(self) -> bool:
@@ -105,6 +106,11 @@ class PlatformKeyboardBackend(ABC):
         pass
 
     @abstractmethod
+    def release_all_keys(self):
+        """Release any keys currently held by this backend."""
+        pass
+
+    @abstractmethod
     def get_failure_reason(self) -> Optional[str]:
         """
         Get a human-readable reason if the backend failed initialization.
@@ -118,4 +124,3 @@ class PlatformKeyboardBackend(ABC):
     def get_meta_key_label(cls) -> str:
         """Get the user-facing label for the platform meta key."""
         return cls.META_KEY_LABEL
-

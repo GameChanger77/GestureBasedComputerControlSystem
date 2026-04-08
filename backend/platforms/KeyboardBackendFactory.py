@@ -10,9 +10,27 @@ from typing import Optional
 from backend.platforms.PlatformKeyboardBackend import PlatformKeyboardBackend
 
 
-def get_keyboard_backend_class() -> type[PlatformKeyboardBackend]:
-    """Get the keyboard backend class for the current platform."""
-    system = platform.system()
+def normalize_os_name(target_os: Optional[str] = None) -> str:
+    """Normalize OS aliases to the canonical names used by the app."""
+    if target_os is None:
+        return platform.system()
+
+    normalized = str(target_os).strip()
+    lookup = {
+        "windows": "Windows",
+        "win": "Windows",
+        "darwin": "Darwin",
+        "mac": "Darwin",
+        "macos": "Darwin",
+        "osx": "Darwin",
+        "linux": "Linux",
+    }
+    return lookup.get(normalized.lower(), normalized)
+
+
+def get_keyboard_backend_class(target_os: Optional[str] = None) -> type[PlatformKeyboardBackend]:
+    """Get the keyboard backend class for the requested platform."""
+    system = normalize_os_name(target_os)
 
     if system == "Windows":
         from backend.platforms.WindowsKeyboardBackend import WindowsKeyboardBackend
@@ -30,7 +48,7 @@ def get_keyboard_backend_class() -> type[PlatformKeyboardBackend]:
     raise RuntimeError(f"Unsupported operating system: {system}")
 
 
-def create_keyboard_backend() -> PlatformKeyboardBackend:
+def create_keyboard_backend(target_os: Optional[str] = None) -> PlatformKeyboardBackend:
     """
     Create and initialize the appropriate keyboard backend for the current platform.
 
@@ -40,8 +58,8 @@ def create_keyboard_backend() -> PlatformKeyboardBackend:
     Raises:
         RuntimeError: If backend cannot be initialized.
     """
-    system = platform.system()
-    backend_class = get_keyboard_backend_class()
+    system = normalize_os_name(target_os)
+    backend_class = get_keyboard_backend_class(system)
     backend: Optional[PlatformKeyboardBackend] = backend_class()
 
     if not backend.initialize():
@@ -52,4 +70,3 @@ def create_keyboard_backend() -> PlatformKeyboardBackend:
         )
 
     return backend
-

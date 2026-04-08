@@ -1,31 +1,44 @@
 """
 macOS-specific keyboard input backend using native Quartz APIs.
-
-Uses Quartz (Core Graphics) and Accessibility framework for reliable
-keyboard injection and text input without requiring special permissions.
 """
 
-import time
 from typing import List, Optional
 
-from backend.platforms.PlatformKeyboardBackend import PlatformKeyboardBackend
 from backend.gestures.keyboard_mode.KeyCodes import normalize_key
+from backend.platforms.PlatformKeyboardBackend import PlatformKeyboardBackend
 
-# Try to import macOS-specific frameworks
+CGEventCreateKeyboardEvent = None
+CGEventKeyboardSetUnicodeString = None
+CGEventPost = None
+CGEventSetFlags = None
+kCGHIDEventTap = None
+kCGEventFlagMaskShift = 0
+kCGEventFlagMaskControl = 0
+kCGEventFlagMaskAlternate = 0
+kCGEventFlagMaskCommand = 0
+QUARTZ_IMPORT_ERROR = None
+
 try:
-    from Quartz import CGEventCreateKeyboardEvent, CGEventPost, kCGHIDEventTap, kCGKeyDown, kCGKeyUp
-    from AppKit import NSPasteboard, NSPasteboardTypeString, NSEvent, NSKeyDown, NSKeyUp, NSFlagsChanged
-    MACOS_FRAMEWORKS_AVAILABLE = True
-except ImportError:
-    MACOS_FRAMEWORKS_AVAILABLE = False
+    from Quartz import (
+        CGEventCreateKeyboardEvent,
+        CGEventKeyboardSetUnicodeString,
+        CGEventPost,
+        CGEventSetFlags,
+        kCGEventFlagMaskAlternate,
+        kCGEventFlagMaskCommand,
+        kCGEventFlagMaskControl,
+        kCGEventFlagMaskShift,
+        kCGHIDEventTap,
+    )
+except ImportError as exc:
+    QUARTZ_IMPORT_ERROR = str(exc)
 
 
 class MacOSKeyboardBackend(PlatformKeyboardBackend):
-    """macOS keyboard backend using Quartz framework."""
+    """macOS keyboard backend using Quartz keyboard events."""
 
     META_KEY_LABEL = "Cmd"
 
-    # Virtual key codes for macOS (from <Carbon/Carbon.h>)
     LOGICAL_TO_MACOS = {
         "a": 0x00, "b": 0x0B, "c": 0x08, "d": 0x02, "e": 0x0E, "f": 0x03, "g": 0x05,
         "h": 0x04, "i": 0x22, "j": 0x26, "k": 0x28, "l": 0x25, "m": 0x2E, "n": 0x2D,
@@ -57,7 +70,7 @@ class MacOSKeyboardBackend(PlatformKeyboardBackend):
         "left_alt": 0x3A,
         "right_alt": 0x3D,
         "left_win": 0x37,
-        "right_win": 0x36,  # Right Command
+        "right_win": 0x36,
         "left_cmd": 0x37,
         "right_cmd": 0x36,
         "arrow_up": 0x7E,
@@ -75,82 +88,104 @@ class MacOSKeyboardBackend(PlatformKeyboardBackend):
         "f6": 0x61, "f7": 0x62, "f8": 0x64, "f9": 0x65, "f10": 0x6D,
         "f11": 0x67, "f12": 0x6F,
     }
-
-    # Modifier key codes for macOS
-    MAC_MOD_SHIFT = 1 << 17
-    MAC_MOD_CTRL = 1 << 18
-    MAC_MOD_ALT = 1 << 19
-    MAC_MOD_CMD = 1 << 20
+    KEY_MAPPING = LOGICAL_TO_MACOS
+    MODIFIER_FLAG_BY_KEY = {
+        "left_shift": kCGEventFlagMaskShift,
+        "right_shift": kCGEventFlagMaskShift,
+        "left_ctrl": kCGEventFlagMaskControl,
+        "right_ctrl": kCGEventFlagMaskControl,
+        "left_alt": kCGEventFlagMaskAlternate,
+        "right_alt": kCGEventFlagMaskAlternate,
+        "left_win": kCGEventFlagMaskCommand,
+        "right_win": kCGEventFlagMaskCommand,
+        "left_cmd": kCGEventFlagMaskCommand,
+        "right_cmd": kCGEventFlagMaskCommand,
+    }
 
     def __init__(self):
         self._failure_reason = None
         self._held_keys = set()
-        self._frameworks_available = MACOS_FRAMEWORKS_AVAILABLE
+        self._initialized = False
+        self._quartz_available = (
+            CGEventCreateKeyboardEvent is not None
+            and CGEventKeyboardSetUnicodeString is not None
+            and CGEventPost is not None
+            and CGEventSetFlags is not None
+        )
 
     @staticmethod
     def get_macos_vk_static(key_code: str) -> Optional[int]:
-        """Static method to get Windows VK code for a logical key id."""
+        """Static method to get the macOS virtual key code for a logical key id."""
         key = normalize_key(key_code)
         return MacOSKeyboardBackend.LOGICAL_TO_MACOS.get(key)
 
     def initialize(self) -> bool:
         """Initialize macOS keyboard backend."""
-        if not self._frameworks_available:
-            self._failure_reason = (
-                "macOS Quartz framework not available. "
-                "Please ensure PyObjC is installed: pip install pyobjc-framework-ApplicationServices"
-            )
+        if not self._quartz_available:
+            self._failure_reason = f"Quartz unavailable: {QUARTZ_IMPORT_ERROR or 'unknown import error'}"
+            self._initialized = False
             return False
+
+        self._initialized = True
+        self._failure_reason = None
         return True
 
     def shutdown(self):
         """Clean up resources."""
-        self._release_all_keys()
+        self.release_all_keys()
+        self._initialized = False
 
     def is_available(self) -> bool:
         """Check if backend is available."""
-        return self._frameworks_available
+        return self._initialized
 
-    def _get_modifier_flags(self, logical_keys: List[str]) -> int:
-        """Calculate modifier flags for a list of keys."""
+    def _modifier_flag_for_key(self, logical: str) -> int:
+        return self.MODIFIER_FLAG_BY_KEY.get(logical, 0)
+
+    def _current_modifier_flags(self, extra_keys=None, exclude_keys=None) -> int:
+        keys = set(self._held_keys)
+        if extra_keys:
+            keys.update(extra_keys)
+        if exclude_keys:
+            keys.difference_update(exclude_keys)
+
         flags = 0
-        for logical in logical_keys:
-            if logical == "left_shift" or logical == "right_shift":
-                flags |= self.MAC_MOD_SHIFT
-            elif logical == "left_ctrl" or logical == "right_ctrl":
-                flags |= self.MAC_MOD_CTRL
-            elif logical == "left_alt" or logical == "right_alt":
-                flags |= self.MAC_MOD_ALT
-            elif logical == "left_win" or logical == "right_win" or logical == "left_cmd" or logical == "right_cmd":
-                flags |= self.MAC_MOD_CMD
+        for logical in keys:
+            flags |= self._modifier_flag_for_key(logical)
         return flags
 
     def _send_key_event(self, vk_code: int, key_down: bool, flags: int = 0) -> bool:
-        """
-        Send a key event using Quartz.
-
-        Args:
-            vk_code: Virtual key code for macOS
-            key_down: True for key down, False for key up
-            flags: Modifier flags
-
-        Returns:
-            True if successful, False otherwise.
-        """
+        """Send a key event using Quartz."""
         try:
-            event_type = kCGKeyDown if key_down else kCGKeyUp
             event = CGEventCreateKeyboardEvent(None, vk_code, key_down)
             if event is None:
                 return False
 
-            # Set modifier flags
-            if flags:
-                event.setIntegerValueForField_(flags, 1)  # Field 1 is flags
-
+            CGEventSetFlags(event, flags)
             CGEventPost(kCGHIDEventTap, event)
             return True
-        except Exception as e:
-            print(f"Error sending key event via Quartz: {e}")
+        except Exception as exc:
+            print(f"Error sending key event via Quartz: {exc}")
+            return False
+
+    def _send_unicode_text(self, text: str) -> bool:
+        """Inject text directly using Quartz Unicode keyboard events."""
+        try:
+            for char in text:
+                key_down = CGEventCreateKeyboardEvent(None, 0, True)
+                key_up = CGEventCreateKeyboardEvent(None, 0, False)
+                if key_down is None or key_up is None:
+                    return False
+
+                CGEventSetFlags(key_down, 0)
+                CGEventSetFlags(key_up, 0)
+                CGEventKeyboardSetUnicodeString(key_down, len(char), char)
+                CGEventKeyboardSetUnicodeString(key_up, len(char), char)
+                CGEventPost(kCGHIDEventTap, key_down)
+                CGEventPost(kCGHIDEventTap, key_up)
+            return True
+        except Exception as exc:
+            print(f"Error sending unicode text via Quartz: {exc}")
             return False
 
     def key_down(self, key_code: str) -> bool:
@@ -163,7 +198,8 @@ class MacOSKeyboardBackend(PlatformKeyboardBackend):
         if vk_code is None:
             return False
 
-        if self._send_key_event(vk_code, key_down=True):
+        flags = self._current_modifier_flags(extra_keys={logical})
+        if self._send_key_event(vk_code, key_down=True, flags=flags):
             self._held_keys.add(logical)
             return True
         return False
@@ -178,7 +214,8 @@ class MacOSKeyboardBackend(PlatformKeyboardBackend):
         if vk_code is None:
             return False
 
-        result = self._send_key_event(vk_code, key_down=False)
+        flags = self._current_modifier_flags(exclude_keys={logical})
+        result = self._send_key_event(vk_code, key_down=False, flags=flags)
         self._held_keys.discard(logical)
         return result
 
@@ -192,81 +229,73 @@ class MacOSKeyboardBackend(PlatformKeyboardBackend):
         if vk_code is None:
             return False
 
-        return self._send_key_event(vk_code, key_down=True) and self._send_key_event(vk_code, key_down=False)
+        down_flags = self._current_modifier_flags(extra_keys={logical})
+        up_flags = self._current_modifier_flags(exclude_keys={logical})
+        return self._send_key_event(vk_code, key_down=True, flags=down_flags) and self._send_key_event(
+            vk_code, key_down=False, flags=up_flags
+        )
 
     def tap_hotkey(self, key_codes: List[str]) -> bool:
-        """Press multiple keys together as a hotkey."""
+        """Press modifiers first, then tap non-modifiers, then release modifiers in reverse."""
         if not key_codes:
             return False
 
-        logical_keys = [normalize_key(k) for k in key_codes]
-        if not all(logical_keys):
-            return False
-
-        vk_codes = []
-        for logical in logical_keys:
-            vk = self.LOGICAL_TO_MACOS.get(logical)
-            if vk is None:
+        resolved = []
+        for key_code in key_codes:
+            logical = normalize_key(key_code)
+            if not logical:
                 return False
-            vk_codes.append((logical, vk))
-
-        flags = self._get_modifier_flags(logical_keys)
-
-        # Press all keys
-        for logical, vk_code in vk_codes:
-            if not self._send_key_event(vk_code, key_down=True, flags=flags):
-                # Release already-pressed keys on failure
-                for prev_logical, prev_vk in vk_codes[:vk_codes.index((logical, vk_code))]:
-                    self._send_key_event(prev_vk, key_down=False, flags=flags)
+            vk_code = self.LOGICAL_TO_MACOS.get(logical)
+            if vk_code is None:
                 return False
+            resolved.append((logical, vk_code))
 
-        # Release all keys in reverse order
-        success = True
-        for logical, vk_code in reversed(vk_codes):
-            if not self._send_key_event(vk_code, key_down=False, flags=flags):
-                success = False
+        modifier_keys = [item for item in resolved if self._modifier_flag_for_key(item[0])]
+        regular_keys = [item for item in resolved if not self._modifier_flag_for_key(item[0])]
+        pressed_modifiers = []
+        active_modifiers = set()
 
-        # Clear held keys tracking
-        for logical, _ in vk_codes:
-            self._held_keys.discard(logical)
+        try:
+            for logical, vk_code in modifier_keys:
+                active_modifiers.add(logical)
+                flags = self._current_modifier_flags(extra_keys=active_modifiers)
+                if not self._send_key_event(vk_code, key_down=True, flags=flags):
+                    return False
+                pressed_modifiers.append((logical, vk_code))
 
-        return success
+            active_modifier_flags = self._current_modifier_flags(extra_keys=active_modifiers)
+            for logical, vk_code in regular_keys:
+                if not self._send_key_event(vk_code, key_down=True, flags=active_modifier_flags):
+                    return False
+                if not self._send_key_event(vk_code, key_down=False, flags=active_modifier_flags):
+                    return False
+
+            return True
+        finally:
+            for logical, vk_code in reversed(pressed_modifiers):
+                active_modifiers.discard(logical)
+                flags = self._current_modifier_flags(extra_keys=active_modifiers)
+                self._send_key_event(vk_code, key_down=False, flags=flags)
 
     def type_text(self, text: str) -> bool:
-        """
-        Type text using the pasteboard (clipboard).
-
-        This is more reliable than character-by-character input on macOS,
-        especially for special characters and international input.
-        """
+        """Type text directly via Quartz Unicode events."""
         if not text:
             return False
 
-        try:
-            # Copy text to pasteboard
-            pasteboard = NSPasteboard.generalPasteboard()
-            pasteboard.clearContents()
-            pasteboard.setString_forType_(text, NSPasteboardTypeString)
-
-            # Paste using Cmd+V
-            time.sleep(0.01)
-            return self.tap_hotkey(["left_win", "v"])  # Cmd+V
-        except Exception as e:
-            print(f"Error typing text via pasteboard: {e}")
-            return False
+        return self._send_unicode_text(text)
 
     def get_failure_reason(self) -> Optional[str]:
         """Get reason if backend is unavailable."""
         return self._failure_reason
 
-    def _release_all_keys(self):
+    def release_all_keys(self):
         """Release any currently held keys."""
         for logical in list(self._held_keys):
             try:
                 vk_code = self.LOGICAL_TO_MACOS.get(logical)
                 if vk_code is not None:
-                    self._send_key_event(vk_code, key_down=False)
-            except Exception as e:
-                print(f"Error releasing key '{logical}': {e}")
+                    flags = self._current_modifier_flags(exclude_keys={logical})
+                    self._send_key_event(vk_code, key_down=False, flags=flags)
+            except Exception as exc:
+                print(f"Error releasing key '{logical}': {exc}")
         self._held_keys.clear()
-
