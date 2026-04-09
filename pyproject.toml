@@ -37,6 +37,7 @@ dependencies = [
     "sounddevice>=0.5.3",
     "pynput>=1.8.1",
     "pyobjc-framework-ApplicationServices>=10.0;sys_platform=='darwin'",
+    "pyobjc-framework-AVFoundation>=10.0;sys_platform=='darwin'",
     "pyobjc-framework-CoreData>=10.0;sys_platform=='darwin'",
     "pytest>=9.0.2",
 ]
