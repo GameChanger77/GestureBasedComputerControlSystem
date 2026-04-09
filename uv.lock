@@ -139,6 +139,15 @@ wheels = [
 ]
 
 [[package]]
+name = "colorama"
+version = "0.4.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
+]
+
+[[package]]
 name = "contourpy"
 version = "1.3.3"
 source = { registry = "https://pypi.org/simple" }
@@ -305,6 +314,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/63/22/8553ff6166f5cd21cfaa115aaacaa0dc73b91c079a8cfd54a482cbc0f4f5/fonttools-4.60.1-cp314-cp314t-win32.whl", hash = "sha256:1410155d0e764a4615774e5c2c6fc516259fe3eca5882f034eb9bfdbee056259", size = 2282241, upload-time = "2025-09-29T21:12:58.179Z" },
     { url = "https://files.pythonhosted.org/packages/8a/cb/fa7b4d148e11d5a72761a22e595344133e83a9507a4c231df972e657579b/fonttools-4.60.1-cp314-cp314t-win_amd64.whl", hash = "sha256:022beaea4b73a70295b688f817ddc24ed3e3418b5036ffcd5658141184ef0d0c", size = 2345760, upload-time = "2025-09-29T21:13:00.375Z" },
     { url = "https://files.pythonhosted.org/packages/c7/93/0dd45cd283c32dea1545151d8c3637b4b8c53cdb3a625aeb2885b184d74d/fonttools-4.60.1-py3-none-any.whl", hash = "sha256:906306ac7afe2156fcf0042173d6ebbb05416af70f6b370967b47f8f00103bbb", size = 1143175, upload-time = "2025-09-29T21:13:24.134Z" },
+]
+
+[[package]]
+name = "iniconfig"
+version = "2.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/34/14ca021ce8e5dfedc35312d08ba8bf51fdd999c576889fc2c24cb97f4f10/iniconfig-2.3.0.tar.gz", hash = "sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730", size = 20503, upload-time = "2025-10-18T21:55:43.219Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl", hash = "sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12", size = 7484, upload-time = "2025-10-18T21:55:41.639Z" },
 ]
 
 [[package]]
@@ -813,6 +831,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pluggy"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412, upload-time = "2025-05-15T12:30:07.975Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
+]
+
+[[package]]
 name = "project"
 version = "0.1.0"
 source = { virtual = "." }
@@ -841,8 +868,11 @@ dependencies = [
     { name = "pyautogui" },
     { name = "pycparser" },
     { name = "pynput" },
+    { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-coredata", marker = "sys_platform == 'darwin'" },
     { name = "pyparsing" },
     { name = "pyside6" },
+    { name = "pytest" },
     { name = "python-dateutil" },
     { name = "scipy" },
     { name = "sentencepiece" },
@@ -881,8 +911,11 @@ requires-dist = [
     { name = "pyautogui", specifier = ">=0.9.54" },
     { name = "pycparser", specifier = ">=2.23" },
     { name = "pynput", specifier = ">=1.8.1" },
+    { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
+    { name = "pyobjc-framework-coredata", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
     { name = "pyparsing", specifier = ">=3.2.5" },
     { name = "pyside6", specifier = ">=6.9.0" },
+    { name = "pytest", specifier = ">=9.0.2" },
     { name = "python-dateutil", specifier = ">=2.9.0.post0" },
     { name = "scipy", specifier = ">=1.16.3" },
     { name = "sentencepiece", specifier = ">=0.2.1" },
@@ -940,6 +973,15 @@ dependencies = [
     { name = "pyrect" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e1/70/c7a4f46dbf06048c6d57d9489b8e0f9c4c3d36b7479f03c5ca97eaa2541d/PyGetWindow-0.0.9.tar.gz", hash = "sha256:17894355e7d2b305cd832d717708384017c1698a90ce24f6f7fbf0242dd0a688", size = 9699, upload-time = "2020-10-04T02:12:50.806Z" }
+
+[[package]]
+name = "pygments"
+version = "2.20.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.20.0.tar.gz", hash = "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f", size = 4955991, upload-time = "2026-03-29T13:29:33.898Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176", size = 1231151, upload-time = "2026-03-29T13:29:30.038Z" },
+]
 
 [[package]]
 name = "pyinstaller"
@@ -1098,6 +1140,24 @@ wheels = [
 ]
 
 [[package]]
+name = "pyobjc-framework-coredata"
+version = "12.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3e/c5/8cd46cd4f1b7cf88bdeed3848f830ea9cdcc4e55cd0287a968a2838033fb/pyobjc_framework_coredata-12.1.tar.gz", hash = "sha256:1e47d3c5e51fdc87a90da62b97cae1bc49931a2bb064db1305827028e1fc0ffa", size = 124348, upload-time = "2025-11-14T10:13:36.435Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6b/a8/4c694c85365071baef36013a7460850dcf6ebfea0ba239e52d7293cdcb93/pyobjc_framework_coredata-12.1-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:c861dc42b786243cbd96d9ea07d74023787d03637ef69a2f75a1191a2f16d9d6", size = 16395, upload-time = "2025-11-14T09:44:21.105Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/29/fe24dc81e0f154805534923a56fe572c3b296092f086cf5a239fccc2d46a/pyobjc_framework_coredata-12.1-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:a3ee3581ca23ead0b152257e98622fe0bf7e7948f30a62a25a17cafe28fe015e", size = 16409, upload-time = "2025-11-14T09:44:23.582Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/12/a22773c3a590d4923c74990d6714c4463bd1e183daaa67d6b00c9f325b33/pyobjc_framework_coredata-12.1-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:79f68577a7e96c57559ec844a129a5edce6827cdfafe49bf31524a488d715a37", size = 16420, upload-time = "2025-11-14T09:44:26.179Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/32/9595f0c8727d6ac312d18d23fc4a327c34c6ab873d2b760bbc40cf063726/pyobjc_framework_coredata-12.1-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:279b39bdb2a9c5e4d0377c1e81263b7d137bf2be37e15d6b5b2403598596f0e3", size = 16576, upload-time = "2025-11-14T09:44:28.266Z" },
+    { url = "https://files.pythonhosted.org/packages/66/2e/238dedc9499b4cccb963dccdfbbc420ace33a01fb9e1221a79c3044fecce/pyobjc_framework_coredata-12.1-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:07d19e7db06e1ad21708cf01fc8014d5f1b73efd373a99af6ff882c1bfb8497b", size = 16479, upload-time = "2025-11-14T09:44:30.814Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/55/a044857da51644bce6d1914156db5190443653ab9ce6806864728d06d017/pyobjc_framework_coredata-12.1-cp314-cp314t-macosx_10_15_universal2.whl", hash = "sha256:ac49d45b372f768bd577a26b503dd04e553ffebd3aa96c653b1c88a3f2733552", size = 16636, upload-time = "2025-11-14T09:44:32.952Z" },
+]
+
+[[package]]
 name = "pyobjc-framework-coremedia"
 version = "12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1231,6 +1291,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/06/62/fbd1e81caafcda97b147c03f5b06cfaadd8da5fa8298f527d2ec648fa5b7/pyside6_essentials-6.10.0-cp39-abi3-manylinux_2_39_aarch64.whl", hash = "sha256:b1dd0864f0577a448fb44426b91cafff7ee7cccd1782ba66491e1c668033f998", size = 75454169, upload-time = "2025-10-08T09:48:38.21Z" },
     { url = "https://files.pythonhosted.org/packages/bb/3a/d8211d17e6ca70f641c6ebd309f08ef18930acda60e74082c75875a274da/pyside6_essentials-6.10.0-cp39-abi3-win_amd64.whl", hash = "sha256:fc167eb211dd1580e20ba90d299e74898e7a5a1306d832421e879641fc03b6fe", size = 74361794, upload-time = "2025-10-08T09:48:44.335Z" },
     { url = "https://files.pythonhosted.org/packages/61/e9/0e22e3c10325c4ff09447fadb43f7962afb82cef0b65358f5704251c6b32/pyside6_essentials-6.10.0-cp39-abi3-win_arm64.whl", hash = "sha256:6dd0936394cb14da2fd8e869899f5e0925a738b1c8d74c2f22503720ea363fb1", size = 55099467, upload-time = "2025-10-08T09:48:50.902Z" },
+]
+
+[[package]]
+name = "pytest"
+version = "9.0.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "iniconfig" },
+    { name = "packaging" },
+    { name = "pluggy" },
+    { name = "pygments" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d1/db/7ef3487e0fb0049ddb5ce41d3a49c235bf9ad299b6a25d5780a89f19230f/pytest-9.0.2.tar.gz", hash = "sha256:75186651a92bd89611d1d9fc20f0b4345fd827c41ccd5c299a868a05d70edf11", size = 1568901, upload-time = "2025-12-06T21:30:51.014Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/ab/b3226f0bd7cdcf710fbede2b3548584366da3b19b5021e74f5bde2a8fa3f/pytest-9.0.2-py3-none-any.whl", hash = "sha256:711ffd45bf766d5264d487b917733b453d917afd2b0ad65223959f59089f875b", size = 374801, upload-time = "2025-12-06T21:30:49.154Z" },
 ]
 
 [[package]]

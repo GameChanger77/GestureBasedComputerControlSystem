@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -77,11 +78,19 @@ class AirTypingSuggestionTests(unittest.TestCase):
         # Hardcoded resume_stability_frames=4 in gesture; warm up once for deterministic tests.
         for _ in range(4):
             self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.74))
-        self.gesture._swipe_decoder.decode = lambda trace, top_k=8: (
-            "hello",
-            0.92,
-            ["hello", "help", "held", "helm", "hero"],
-        )
+        self._decode_results = []
+
+        def _decode(trace, top_k=8):
+            _ = (trace, top_k)
+            if self._decode_results:
+                return self._decode_results.pop(0)
+            return (
+                "hello",
+                0.92,
+                ["hello", "help", "held", "helm", "hero"],
+            )
+
+        self.gesture._swipe_decoder.decode = _decode
         self.gesture._map_tip_to_slot = lambda side, tip, frame: (
             {"id": "h"} if tip[0] < 0.64 else
             {"id": "e"} if tip[0] < 0.68 else
@@ -89,10 +98,27 @@ class AirTypingSuggestionTests(unittest.TestCase):
             {"id": "o"}
         )
 
-    def _commit_swipe_word(self):
+    def _commit_swipe_word(self, word="hello", candidates=None):
+        if candidates is None:
+            candidates = ["hello", "help", "held", "helm", "hero"]
+        self._decode_results.append((word, 0.92, list(candidates)))
         for x in [0.62, 0.66, 0.70, 0.76]:
-            self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=x))
-        self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.76))
+            self.gesture.update(
+                _make_hands_data(
+                    right_present=True,
+                    right_pinch=True,
+                    right_index_x=x,
+                    right_index_y=0.60,
+                )
+            )
+        self.gesture.update(
+            _make_hands_data(
+                right_present=True,
+                right_pinch=False,
+                right_index_x=0.76,
+                right_index_y=0.60,
+            )
+        )
 
     def test_suggestions_show_three_after_swipe_commit(self):
         self._commit_swipe_word()
@@ -123,6 +149,96 @@ class AirTypingSuggestionTests(unittest.TestCase):
         self.assertEqual(self.action.typed_text[0], "hello ")
         self.assertEqual(self.action.typed_text[1], "help ")
         self.assertEqual(self.action.tapped, ["backspace"] * len("hello "))
+
+    def test_swipe_commit_does_not_block_keyboard_mode_exit_during_flick_window(self):
+        self._commit_swipe_word()
+        self.assertEqual(self.gesture.blocks_keyboard_mode_exit(), "")
+
+    def test_suggestion_replacement_only_blocks_until_pinch_is_released(self):
+        self._commit_swipe_word()
+        overlay = self.gesture.get_overlay_data()
+        chip = next(c for c in overlay.get("suggestion_chips", []) if c.get("text"))
+        cx = chip["x"] + (chip["w"] / 2.0)
+        cy = chip["y"] + (chip["h"] / 2.0)
+
+        self.gesture._flick_window_active = False
+        self.gesture.update(
+            _make_hands_data(
+                right_present=True,
+                right_pinch=True,
+                right_index_x=cx,
+                right_index_y=cy,
+            )
+        )
+
+        self.assertEqual(
+            self.gesture.blocks_keyboard_mode_exit(),
+            "Key selection pinch is still latched",
+        )
+
+        self.gesture.update(
+            _make_hands_data(
+                right_present=True,
+                right_pinch=False,
+                right_index_x=cx,
+                right_index_y=cy,
+            )
+        )
+
+        self.assertEqual(self.gesture.blocks_keyboard_mode_exit(), "")
+
+    def test_keyboard_exit_fist_does_not_get_blocked_by_latched_pinch(self):
+        self.gesture._special_key_pinch_latched = True
+
+        with patch.object(
+            self.gesture,
+            "_right_hand_matches_keyboard_exit_pose",
+            return_value=True,
+        ):
+            self.gesture.update(
+                _make_hands_data(
+                    right_present=True,
+                    right_pinch=True,
+                    right_index_x=0.74,
+                    right_index_y=0.42,
+                )
+            )
+
+        self.assertEqual(self.gesture.blocks_keyboard_mode_exit(), "")
+
+    def test_suggestion_tap_still_works_after_down_flick_restores_previous_word(self):
+        self._commit_swipe_word("hello", ["hello", "help", "held", "helm", "hero"])
+        self._commit_swipe_word("world", ["world", "word", "worry", "worm", "worn"])
+
+        for y in [0.42, 0.52, 0.62]:
+            self.gesture.update(
+                _make_hands_data(
+                    right_present=True,
+                    right_pinch=False,
+                    right_index_x=0.76,
+                    right_index_y=y,
+                )
+            )
+
+        overlay = self.gesture.get_overlay_data()
+        chip = next(c for c in overlay.get("suggestion_chips", []) if c.get("text") == "help")
+        cx = chip["x"] + (chip["w"] / 2.0)
+        cy = chip["y"] + (chip["h"] / 2.0)
+
+        self.gesture.update(
+            _make_hands_data(
+                right_present=True,
+                right_pinch=True,
+                right_index_x=cx,
+                right_index_y=cy,
+            )
+        )
+
+        self.assertEqual(self.action.typed_text, ["hello ", "world ", "help "])
+        self.assertEqual(
+            self.action.tapped,
+            ["backspace"] * (len("world ") + len("hello ")),
+        )
 
     def test_debug_hud_fields_are_minimal(self):
         self.gesture.update(_make_hands_data(right_present=True, right_pinch=False))

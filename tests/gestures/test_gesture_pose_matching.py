@@ -15,6 +15,7 @@ from backend.gesture_remap.pose_templates import (
 from backend.gesture_remap.recognizers import TemplateLeftClickGesture
 from backend.gesture_remap.rule_overrides import GestureRuleOverride
 from backend.gesture_remap.rule_recognizers import RuleLeftClickGesture, RuleMoveMouseGesture
+from backend.gestures.switch_mode.HotkeyModeEntryGesture import HotkeyModeEntryGesture
 from backend.gestures.mouse_mode.LeftClickGesture import LeftClickGesture
 from backend.gestures.mouse_mode.MoveMouseGesture import MoveMouseGesture
 
@@ -44,8 +45,8 @@ class _StrategizerStub:
             "click_pending_frames": 3,
             "scroll_pending_frames": 2,
             "ending_frames": 2,
-            "mouse_move_min_delta_px": 2,
-            "mouse_move_cadence_ms": 75,
+            "mouse_move_min_delta_px": 1,
+            "mouse_move_cadence_ms": 16,
             "keyboard_mode_entry_pending_frames": 6,
             "keyboard_mode_exit_pending_frames": 5,
             "keyboard_mode_exit_extension_angle": 150.0,
@@ -87,6 +88,15 @@ class GesturePoseMatchingTests(unittest.TestCase):
 
             self.assertIsInstance(recognizer, LeftClickGesture)
             self.assertNotIsInstance(recognizer, TemplateLeftClickGesture)
+
+    def test_registry_builds_hotkey_switch_gesture(self):
+        strategizer = _StrategizerStub()
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = GestureOverrideStore(Path(tmp_dir) / "gesture_overrides.json")
+
+            recognizer = BuiltInGestureRegistry.build_runtime_gesture("switch_to_hotkey", strategizer, store)
+
+            self.assertIsInstance(recognizer, HotkeyModeEntryGesture)
 
     def test_registry_uses_template_override_when_present(self):
         strategizer = _StrategizerStub()

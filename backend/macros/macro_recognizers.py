@@ -6,7 +6,7 @@ from backend.gestures.GestureRecognizer import SnapshotGestureRecognizer
 
 
 class _BaseMacroTriggerRecognizer(SnapshotGestureRecognizer):
-    consumes_events = True
+    consumes_events = False
 
     def __init__(self, action, *, name: str, action_steps, priority: int, pending_frames: int, ending_frames: int):
         super().__init__(action, priority=priority, pending_frames=pending_frames, ending_frames=ending_frames)

@@ -42,6 +42,7 @@ class ConditionEvaluator:
     - Most "pose" conditions should use wrist space, because wrist space is scale-normalized.
     - Actions that map to screen coordinates should use camera space (handled later in RuleGestures).
     """
+    _STRICT_FIST_MAX_THUMB_EXTENSION_RATIO = 0.98
 
     def eval_all(self, hands_data: HandsData, hand_label: str, conditions: list[Dict[str, Any]]) -> bool:
         """
@@ -158,6 +159,8 @@ class ConditionEvaluator:
                 extension_threshold=float(cond.get("extension_threshold", 155.0)),
                 min_extended_fingers=int(cond.get("min_extended_fingers", 4)),
                 openness_threshold=float(cond.get("openness_threshold", 0.08)),
+                require_palm_facing_camera=bool(cond.get("require_palm_facing_camera", False)),
+                min_palm_normal_z=float(cond.get("min_palm_normal_z", 0.35)),
             )
 
         if op == "strict_fist":
@@ -263,7 +266,9 @@ class ConditionEvaluator:
         max_extension_ratio: float,
         max_avg_finger_angle: float,
     ) -> bool:
-        openness = get_hand_openness(hand)
+        # Ignore thumb spread so resting it beside or in front of the fist does
+        # not affect fist detection, but still reject a clearly straight thumb.
+        openness = get_hand_openness(hand, include_thumb=False)
         if openness > max_openness:
             return False
 
@@ -274,6 +279,8 @@ class ConditionEvaluator:
             self._finger_extension(hand.pinky),
         ]
         if max(finger_extensions) > max_extension_ratio:
+            return False
+        if self._finger_extension(hand.thumb) > self._STRICT_FIST_MAX_THUMB_EXTENSION_RATIO:
             return False
 
         finger_angles = [

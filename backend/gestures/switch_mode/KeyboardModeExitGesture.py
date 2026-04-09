@@ -5,8 +5,9 @@ from backend.gestures.GestureUtils import get_finger_angle, get_finger_extension
 
 class KeyboardModeExitGesture(SnapshotGestureRecognizer):
     """
-    Switch from KEYBOARD mode to MOUSE mode when the right hand is a fist.
+    Switch from KEYBOARD or HOTKEY mode to MOUSE mode when the right hand is a fist.
     """
+    _MAX_THUMB_EXTENSION_RATIO = 0.98
 
     def __init__(
         self,
@@ -28,7 +29,9 @@ class KeyboardModeExitGesture(SnapshotGestureRecognizer):
         self.max_avg_finger_angle = max_avg_finger_angle
 
     def _is_strict_fist(self, hand) -> bool:
-        openness = get_hand_openness(hand)
+        # Ignore thumb spread so resting it beside or in front of the fist does
+        # not prevent keyboard exit, but still reject a clearly straight thumb.
+        openness = get_hand_openness(hand, include_thumb=False)
         if openness > self.max_openness:
             return False
 
@@ -41,6 +44,8 @@ class KeyboardModeExitGesture(SnapshotGestureRecognizer):
         ]
         if max(finger_extensions) > self.max_extension_ratio:
             return False
+        if get_finger_extension(hand.thumb) > self._MAX_THUMB_EXTENSION_RATIO:
+            return False
 
         finger_angles = [
             get_finger_angle(hand.index),
@@ -52,7 +57,7 @@ class KeyboardModeExitGesture(SnapshotGestureRecognizer):
         return avg_angle <= self.max_avg_finger_angle
 
     def detect_gesture(self, hands_data: HandsData):
-        if self.strategizer.current_mode.value != "keyboard":
+        if self.strategizer.current_mode.value not in ("keyboard", "hotkey"):
             return False, None
 
         if not hands_data.wrist.has_right:

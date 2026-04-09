@@ -1,5 +1,8 @@
+import math
+
 from backend.gestures.GestureRecognizer import ContinuousGestureRecognizer
-from backend.gestures.GestureUtils import are_only_fingers_extended
+from backend.gestures.GestureUtils import are_fingers_pinched, is_finger_extended
+from backend.gestures.GestureStateMachine import GestureState
 from backend.HandsData import HandsData
 
 
@@ -14,8 +17,16 @@ class ScrollGesture(ContinuousGestureRecognizer):
     Priority: Medium (higher than mouse tracking, lower than clicks)
     """
 
-    def __init__(self, action, priority, scroll_sensitivity, extension_threshold,
-                 pending_frames, ending_frames):
+    def __init__(
+        self,
+        action,
+        priority,
+        scroll_sensitivity,
+        extension_threshold,
+        pending_frames,
+        ending_frames,
+        pinch_threshold=0.45,
+    ):
         """
         Args:
             action: Action object for executing scroll
@@ -28,8 +39,12 @@ class ScrollGesture(ContinuousGestureRecognizer):
         super().__init__(action, priority, pending_frames, ending_frames)
         self.scroll_sensitivity = scroll_sensitivity
         self.extension_threshold = extension_threshold
+        self.non_scroll_extension_threshold = min(179.0, float(extension_threshold) + 12.0)
+        self.pinch_threshold = pinch_threshold
         self._last_y_position = None
+        self._scroll_residual_y = 0.0
         self._frame_count = 0
+        self.suppresses_lower_priorities_while_active = True
 
     def detect_gesture(self, hands_data: HandsData):
         """
@@ -48,11 +63,32 @@ class ScrollGesture(ContinuousGestureRecognizer):
         hand_wrist = hands_data.wrist.right
         hand_camera = hands_data.camera.right
 
-        # Check if ONLY index and middle fingers are extended (ring and pinky must be curled)
-        detected = are_only_fingers_extended(hand_wrist, ['index', 'middle'], self.extension_threshold)
-
-        if not detected:
+        if not is_finger_extended(hand_wrist.index, threshold=self.extension_threshold):
             self._last_y_position = None
+            self._scroll_residual_y = 0.0
+            return False, None
+        if not is_finger_extended(hand_wrist.middle, threshold=self.extension_threshold):
+            self._last_y_position = None
+            self._scroll_residual_y = 0.0
+            return False, None
+        if is_finger_extended(hand_wrist.ring, threshold=self.non_scroll_extension_threshold):
+            self._last_y_position = None
+            self._scroll_residual_y = 0.0
+            return False, None
+        if is_finger_extended(hand_wrist.pinky, threshold=self.non_scroll_extension_threshold):
+            self._last_y_position = None
+            self._scroll_residual_y = 0.0
+            return False, None
+
+        # Scroll should not overlap with click pinch poses.
+        thumb_tip = hand_wrist.thumb.tip
+        if are_fingers_pinched(thumb_tip, hand_wrist.middle.tip, self.pinch_threshold):
+            self._last_y_position = None
+            self._scroll_residual_y = 0.0
+            return False, None
+        if are_fingers_pinched(thumb_tip, hand_wrist.ring.tip, self.pinch_threshold):
+            self._last_y_position = None
+            self._scroll_residual_y = 0.0
             return False, None
 
         # Get average Y position of the two fingers for scroll tracking
@@ -69,29 +105,53 @@ class ScrollGesture(ContinuousGestureRecognizer):
         # Calculate scroll delta if we have a previous position
         scroll_delta_y = 0
         if self._last_y_position is not None:
-            # Delta is inverted: moving hand down = scroll down (positive)
-            # Camera Y increases as hand moves down, so we don't invert
             raw_delta = current_y - self._last_y_position
-            delta = raw_delta * self.scroll_sensitivity
-            scroll_delta_y = int(delta)
+            self._scroll_residual_y += raw_delta * self.scroll_sensitivity
+            if self._scroll_residual_y >= 1.0:
+                scroll_delta_y = int(math.floor(self._scroll_residual_y))
+            elif self._scroll_residual_y <= -1.0:
+                scroll_delta_y = int(math.ceil(self._scroll_residual_y))
+            if scroll_delta_y != 0:
+                self._scroll_residual_y -= scroll_delta_y
 
         # Update last position
         self._last_y_position = current_y
 
         return True, scroll_delta_y
 
-    def execute_action(self, data):
-        """
-        Perform scroll based on finger movement.
+    def update(self, hands_data: HandsData, frame_capture_ts_ns=None):
+        detected, gesture_data = self.detect_gesture(hands_data)
 
-        Args:
-            data: Scroll delta (int)
-        """
-        if data is not None and data != 0:
-            # Scroll vertically (delta_x=0, delta_y=data)
+        if detected and frame_capture_ts_ns is not None:
+            self.action.set_pending_latency_origin_ts_ns(frame_capture_ts_ns)
+
+        state, should_trigger, data = self.state_machine.update(detected, gesture_data)
+        action_executed = False
+        note = ""
+
+        if should_trigger and data:
             self.action.scroll(delta_x=0, delta_y=data)
+            action_executed = True
+            note = f"Scroll delta {int(data)} (residual {self._scroll_residual_y:.2f})"
+        elif state == GestureState.ACTIVE and detected:
+            note = f"Tracking scroll pose (residual {self._scroll_residual_y:.2f})"
+        elif not detected:
+            note = "Scroll pose not detected"
+
+        self._set_debug_frame(
+            detected=detected,
+            should_trigger=should_trigger,
+            action_executed=action_executed,
+            state=state,
+            note=note,
+        )
+        return action_executed
+
+    def execute_action(self, data):
+        pass
 
     def reset(self):
         """Reset gesture state and clear position tracking"""
         super().reset()
         self._last_y_position = None
+        self._scroll_residual_y = 0.0

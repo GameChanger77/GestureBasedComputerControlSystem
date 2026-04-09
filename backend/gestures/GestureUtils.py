@@ -251,12 +251,13 @@ def get_finger_extension(finger):
     return 0.0
 
 
-def get_hand_openness(hand):
+def get_hand_openness(hand, include_thumb=True):
     """
     Get how open a hand is based on finger spread.
 
     Args:
         hand: Hand object
+        include_thumb: Whether thumb spread should contribute to openness
 
     Returns:
         float: Openness value [0-1] where 1 is fully open
@@ -265,13 +266,21 @@ def get_hand_openness(hand):
         return 0.0
 
     # Calculate average distance between adjacent fingertips
-    fingertips = [
-        hand.thumb.tip,
-        hand.index.tip,
-        hand.middle.tip,
-        hand.ring.tip,
-        hand.pinky.tip
-    ]
+    if include_thumb:
+        fingertips = [
+            hand.thumb.tip,
+            hand.index.tip,
+            hand.middle.tip,
+            hand.ring.tip,
+            hand.pinky.tip,
+        ]
+    else:
+        fingertips = [
+            hand.index.tip,
+            hand.middle.tip,
+            hand.ring.tip,
+            hand.pinky.tip,
+        ]
 
     total_spread = 0.0
     count = 0
@@ -456,7 +465,14 @@ def is_palm_facing_camera(hand, min_normal_z=0.35):
     return abs(normal[2]) >= min_normal_z
 
 
-def is_hand_fully_open(hand, extension_threshold=155.0, min_extended_fingers=4, openness_threshold=0.08):
+def is_hand_fully_open(
+    hand,
+    extension_threshold=155.0,
+    min_extended_fingers=4,
+    openness_threshold=0.08,
+    require_palm_facing_camera=False,
+    min_palm_normal_z=0.35,
+):
     """
     Check if hand is open enough for mode-switch entry.
     """
@@ -466,4 +482,8 @@ def is_hand_fully_open(hand, extension_threshold=155.0, min_extended_fingers=4, 
     fingers = [hand.thumb, hand.index, hand.middle, hand.ring, hand.pinky]
     extended_count = sum(1 for finger in fingers if is_finger_extended(finger, threshold=extension_threshold))
     openness = get_hand_openness(hand)
-    return extended_count >= min_extended_fingers and openness >= openness_threshold
+    if extended_count < min_extended_fingers or openness < openness_threshold:
+        return False
+    if require_palm_facing_camera and not is_palm_facing_camera(hand, min_normal_z=min_palm_normal_z):
+        return False
+    return True

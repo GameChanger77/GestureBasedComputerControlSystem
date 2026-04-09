@@ -92,6 +92,8 @@ CONDITION_DEFINITIONS = {
             {"name": "extension_threshold", "label": "Extension Threshold (deg)", "type": "float", "min": 0.0, "max": 180.0, "step": 0.5, "decimals": 1, "default": 155.0},
             {"name": "min_extended_fingers", "label": "Min Extended Fingers", "type": "int", "min": 1, "max": 5, "default": 4},
             {"name": "openness_threshold", "label": "Openness Threshold", "type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 3, "default": 0.08},
+            {"name": "require_palm_facing_camera", "label": "Require Palm Facing Camera", "type": "bool", "default": False},
+            {"name": "min_palm_normal_z", "label": "Min Palm Facing Strength", "type": "float", "min": 0.0, "max": 1.0, "step": 0.01, "decimals": 2, "default": 0.35},
         ],
     },
     "strict_fist": {

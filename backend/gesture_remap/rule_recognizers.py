@@ -7,6 +7,7 @@ from backend.gestures.mouse_mode.LeftClickGesture import LeftClickGesture
 from backend.gestures.mouse_mode.MoveMouseGesture import MoveMouseGesture
 from backend.gestures.mouse_mode.RightClickGesture import RightClickGesture
 from backend.gestures.mouse_mode.ScrollGesture import ScrollGesture
+from backend.gestures.switch_mode.HotkeyModeEntryGesture import HotkeyModeEntryGesture
 from backend.gestures.switch_mode.KeyboardModeEntryGesture import KeyboardModeEntryGesture
 from backend.gestures.switch_mode.KeyboardModeExitGesture import KeyboardModeExitGesture
 
@@ -123,7 +124,21 @@ class RuleKeyboardModeEntryGesture(_RuleConditionMixin, KeyboardModeEntryGesture
         self._configure_rule_override(rule_override, hand_label=hand_label)
 
     def detect_gesture(self, hands_data):
-        if self.strategizer.current_mode.value != "mouse":
+        if self.strategizer.current_mode.value not in ("mouse", "hotkey"):
+            return False, None
+        hand_wrist, _ = self._hand_spaces(hands_data)
+        if not hand_wrist.exists:
+            return False, None
+        return self._matches_rule(hands_data), None
+
+
+class RuleHotkeyModeEntryGesture(_RuleConditionMixin, HotkeyModeEntryGesture):
+    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "right", **kwargs):
+        super().__init__(*args, **kwargs)
+        self._configure_rule_override(rule_override, hand_label=hand_label)
+
+    def detect_gesture(self, hands_data):
+        if self.strategizer.current_mode.value not in ("mouse", "keyboard"):
             return False, None
         hand_wrist, _ = self._hand_spaces(hands_data)
         if not hand_wrist.exists:
@@ -137,7 +152,7 @@ class RuleKeyboardModeExitGesture(_RuleConditionMixin, KeyboardModeExitGesture):
         self._configure_rule_override(rule_override, hand_label=hand_label)
 
     def detect_gesture(self, hands_data):
-        if self.strategizer.current_mode.value != "keyboard":
+        if self.strategizer.current_mode.value not in ("keyboard", "hotkey"):
             return False, None
         hand_wrist, _ = self._hand_spaces(hands_data)
         if not hand_wrist.exists:

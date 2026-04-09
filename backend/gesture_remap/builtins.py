@@ -7,6 +7,7 @@ from backend.gesture_remap.hand_rig import HandEditorAssetManifest
 from backend.gesture_remap.override_store import GestureOverrideStore
 from backend.gesture_remap.pose_templates import HandPoseTemplate, build_default_templates, build_preview_templates
 from backend.gesture_remap.recognizers import (
+    TemplateHotkeyModeEntryGesture,
     TemplateKeyboardModeEntryGesture,
     TemplateKeyboardModeExitGesture,
     TemplateLeftClickGesture,
@@ -16,6 +17,7 @@ from backend.gesture_remap.recognizers import (
 )
 from backend.gesture_remap.rule_overrides import GestureRuleOverride
 from backend.gesture_remap.rule_recognizers import (
+    RuleHotkeyModeEntryGesture,
     RuleKeyboardModeEntryGesture,
     RuleKeyboardModeExitGesture,
     RuleLeftClickGesture,
@@ -27,6 +29,7 @@ from backend.gestures.mouse_mode.LeftClickGesture import LeftClickGesture
 from backend.gestures.mouse_mode.MoveMouseGesture import MoveMouseGesture
 from backend.gestures.mouse_mode.RightClickGesture import RightClickGesture
 from backend.gestures.mouse_mode.ScrollGesture import ScrollGesture
+from backend.gestures.switch_mode.HotkeyModeEntryGesture import HotkeyModeEntryGesture
 from backend.gestures.switch_mode.KeyboardModeEntryGesture import KeyboardModeEntryGesture
 from backend.gestures.switch_mode.KeyboardModeExitGesture import KeyboardModeExitGesture
 
@@ -75,6 +78,7 @@ class BuiltInGestureRegistry:
                 "finger_angle": config["finger_extension_angle"],
                 "scroll_sens": config["scroll_sensitivity"],
                 "pinch_thresh": config["pinch_threshold"],
+                "left_click_hold_time_sec": config.get("left_click_hold_time_sec", 1.0),
                 "mouse_pending": config["mouse_tracking_pending_frames"],
                 "click_pending": config["click_pending_frames"],
                 "scroll_pending": config["scroll_pending_frames"],
@@ -139,6 +143,7 @@ class BuiltInGestureRegistry:
                 extension_threshold=p["finger_angle"],
                 pending_frames=p["click_pending"],
                 ending_frames=p["ending"],
+                double_click_hold_time=p["left_click_hold_time_sec"],
             )
 
         def left_click_override(action, strategizer, record):
@@ -152,6 +157,7 @@ class BuiltInGestureRegistry:
                 extension_threshold=p["finger_angle"],
                 pending_frames=p["click_pending"],
                 ending_frames=p["ending"],
+                double_click_hold_time=p["left_click_hold_time_sec"],
                 pose_template=record.pose_template,
                 matcher_config=record.matcher_config,
             )
@@ -167,6 +173,7 @@ class BuiltInGestureRegistry:
                 extension_threshold=p["finger_angle"],
                 pending_frames=record.rule_override.pending_frames,
                 ending_frames=record.rule_override.ending_frames,
+                double_click_hold_time=p["left_click_hold_time_sec"],
                 rule_override=record.rule_override,
             )
 
@@ -221,6 +228,7 @@ class BuiltInGestureRegistry:
                 extension_threshold=p["finger_angle"],
                 pending_frames=p["scroll_pending"],
                 ending_frames=p["ending"],
+                pinch_threshold=p["pinch_thresh"],
             )
 
         def scroll_override(action, strategizer, record):
@@ -252,7 +260,16 @@ class BuiltInGestureRegistry:
             config = strategizer.config
             return {
                 "finger_angle": config["finger_extension_angle"],
+                "pinch_thresh": config.get(
+                    "hotkey_mode_entry_pinch_threshold",
+                    config.get("pinch_threshold", 0.30),
+                ),
+                "entry_min_palm_normal_z": config.get("keyboard_mode_entry_min_palm_normal_z", 0.35),
                 "entry_pending": config.get("keyboard_mode_entry_pending_frames", 6),
+                "hotkey_entry_pending": config.get(
+                    "hotkey_mode_entry_pending_frames",
+                    config.get("keyboard_mode_entry_pending_frames", 6),
+                ),
                 "exit_pending": config.get("keyboard_mode_exit_pending_frames", 5),
                 "exit_angle": config.get("keyboard_mode_exit_extension_angle", 150.0),
                 "exit_max_openness": config.get("keyboard_mode_exit_max_openness", 0.16),
@@ -268,6 +285,7 @@ class BuiltInGestureRegistry:
                 strategizer=strategizer,
                 priority=20,
                 extension_threshold=p["finger_angle"],
+                min_palm_normal_z=p["entry_min_palm_normal_z"],
                 pending_frames=p["entry_pending"],
                 ending_frames=p["ending"],
             )
@@ -283,6 +301,45 @@ class BuiltInGestureRegistry:
                 ending_frames=p["ending"],
                 pose_template=record.pose_template,
                 matcher_config=record.matcher_config,
+            )
+
+        def switch_to_hotkey_default(action, strategizer):
+            p = switch_common(strategizer)
+            return HotkeyModeEntryGesture(
+                action,
+                strategizer=strategizer,
+                priority=20,
+                pinch_threshold=p["pinch_thresh"],
+                extension_threshold=p["finger_angle"],
+                pending_frames=p["hotkey_entry_pending"],
+                ending_frames=p["ending"],
+            )
+
+        def switch_to_hotkey_override(action, strategizer, record):
+            p = switch_common(strategizer)
+            return TemplateHotkeyModeEntryGesture(
+                action,
+                strategizer=strategizer,
+                priority=20,
+                pinch_threshold=p["pinch_thresh"],
+                extension_threshold=p["finger_angle"],
+                pending_frames=p["hotkey_entry_pending"],
+                ending_frames=p["ending"],
+                pose_template=record.pose_template,
+                matcher_config=record.matcher_config,
+            )
+
+        def switch_to_hotkey_rule_override(action, strategizer, record):
+            p = switch_common(strategizer)
+            return RuleHotkeyModeEntryGesture(
+                action,
+                strategizer=strategizer,
+                priority=20,
+                pinch_threshold=p["pinch_thresh"],
+                extension_threshold=p["finger_angle"],
+                pending_frames=record.rule_override.pending_frames,
+                ending_frames=record.rule_override.ending_frames,
+                rule_override=record.rule_override,
             )
 
         def switch_to_keyboard_rule_override(action, strategizer, record):
@@ -404,11 +461,43 @@ class BuiltInGestureRegistry:
                     {
                         "op": "hand_fully_open",
                         "extension_threshold": float(config_source.get("finger_extension_angle", 155.0)),
-                        "min_extended_fingers": 4,
+                        "min_extended_fingers": 5,
                         "openness_threshold": 0.08,
+                        "require_palm_facing_camera": True,
+                        "min_palm_normal_z": float(config_source.get("keyboard_mode_entry_min_palm_normal_z", 0.35)),
                     }
                 ],
                 pending_frames=int(config_source.get("keyboard_mode_entry_pending_frames", 6)),
+                ending_frames=int(config_source.get("ending_frames", 2)),
+            )
+
+        def switch_to_hotkey_rule_defaults(config_source):
+            return GestureRuleOverride(
+                conditions=[
+                    {
+                        "op": "pinch_distance_lt",
+                        "a": "thumb.tip",
+                        "b": "index.tip",
+                        "value": float(
+                            config_source.get(
+                                "hotkey_mode_entry_pinch_threshold",
+                                config_source.get("pinch_threshold", 0.30),
+                            )
+                        ),
+                        "space": "wrist",
+                    },
+                    {
+                        "op": "only_fingers_extended",
+                        "fingers": ["middle", "ring", "pinky"],
+                        "threshold_deg": float(config_source.get("finger_extension_angle", 155.0)),
+                    },
+                ],
+                pending_frames=int(
+                    config_source.get(
+                        "hotkey_mode_entry_pending_frames",
+                        config_source.get("keyboard_mode_entry_pending_frames", 6),
+                    )
+                ),
                 ending_frames=int(config_source.get("ending_frames", 2)),
             )
 
@@ -448,7 +537,7 @@ class BuiltInGestureRegistry:
                 mode_label="Mouse",
                 conflict_group="mouse",
                 hand="right",
-                default_description="Single click on pose enter, hold to trigger a double click.",
+                default_description="Single click on pose enter, hold to trigger one additional click.",
                 preview_pose_template=preview_templates["left_click"],
                 saved_pose_template=templates["left_click"],
                 default_rule_factory=left_click_rule_defaults,
@@ -478,7 +567,7 @@ class BuiltInGestureRegistry:
                 mode_label="Mouse",
                 conflict_group="mouse",
                 hand="right",
-                default_description="Scroll while holding the scroll pose and moving the hand vertically.",
+                default_description="Scroll while holding the scroll pose and moving the hand vertically; mouse move is suppressed while active.",
                 preview_pose_template=preview_templates["scroll"],
                 saved_pose_template=templates["scroll"],
                 default_rule_factory=scroll_rule_defaults,
@@ -490,10 +579,10 @@ class BuiltInGestureRegistry:
             BuiltInGestureDefinition(
                 id="switch_to_keyboard",
                 display_name="Switch To Keyboard Mode",
-                mode_label="Keyboard Switching",
+                mode_label="Mode Switching",
                 conflict_group="switch",
                 hand="right",
-                default_description="Enter keyboard mode from mouse mode.",
+                default_description="Enter keyboard mode from mouse mode, or exit hotkey mode with an open right hand.",
                 preview_pose_template=preview_templates["switch_to_keyboard"],
                 saved_pose_template=templates["switch_to_keyboard"],
                 default_rule_factory=switch_to_keyboard_rule_defaults,
@@ -503,12 +592,27 @@ class BuiltInGestureRegistry:
                 section="switch",
             ),
             BuiltInGestureDefinition(
-                id="switch_to_mouse",
-                display_name="Switch To Mouse Mode",
-                mode_label="Keyboard Switching",
+                id="switch_to_hotkey",
+                display_name="Switch To Hotkey Mode",
+                mode_label="Mode Switching",
                 conflict_group="switch",
                 hand="right",
-                default_description="Exit keyboard mode back to mouse mode.",
+                default_description="Enter hotkey mode from mouse or keyboard mode with a right-hand OK sign.",
+                preview_pose_template=preview_templates["switch_to_hotkey"],
+                saved_pose_template=templates["switch_to_hotkey"],
+                default_rule_factory=switch_to_hotkey_rule_defaults,
+                default_factory=switch_to_hotkey_default,
+                override_factory=switch_to_hotkey_override,
+                rule_override_factory=switch_to_hotkey_rule_override,
+                section="switch",
+            ),
+            BuiltInGestureDefinition(
+                id="switch_to_mouse",
+                display_name="Switch To Mouse Mode",
+                mode_label="Mode Switching",
+                conflict_group="switch",
+                hand="right",
+                default_description="Exit keyboard or hotkey mode back to mouse mode with a right-hand fist.",
                 preview_pose_template=preview_templates["switch_to_mouse"],
                 saved_pose_template=templates["switch_to_mouse"],
                 default_rule_factory=switch_to_mouse_rule_defaults,
@@ -551,9 +655,14 @@ class BuiltInGestureRegistry:
     def build_runtime_gesture(cls, gesture_id: str, strategizer, override_store: GestureOverrideStore):
         definition = cls.get(gesture_id)
         record = override_store.get(gesture_id) if override_store else None
+        recognizer = None
         if record and record.enabled:
             if record.is_rule_override and record.rule_override is not None:
-                return definition.rule_override_factory(strategizer.action, strategizer, record)
-            if record.is_point_override:
-                return definition.override_factory(strategizer.action, strategizer, record)
-        return definition.default_factory(strategizer.action, strategizer)
+                recognizer = definition.rule_override_factory(strategizer.action, strategizer, record)
+            elif record.is_point_override:
+                recognizer = definition.override_factory(strategizer.action, strategizer, record)
+        if recognizer is None:
+            recognizer = definition.default_factory(strategizer.action, strategizer)
+        recognizer.debug_name = definition.display_name
+        recognizer.debug_gesture_id = definition.id
+        return recognizer
