@@ -2,16 +2,24 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from backend.gesture_remap.builtins import BuiltInGestureRegistry
 from backend.gesture_remap.pose_templates import PoseMatcherConfig, build_pose_template
 from backend.gesture_remap.rule_overrides import GestureRuleOverride, POINT_OVERRIDE_KIND, RULE_OVERRIDE_KIND
-from backend.macros.macro_models import MacroActionStep, MacroPointTrigger, MacroRecord, MacroRuleTrigger
+from backend.macros.macro_models import (
+    MacroPointTrigger,
+    MacroRecord,
+    MacroRuleTrigger,
+    MacroSwipeConfig,
+    RULE_TRIGGER_TYPE_POSE,
+    RULE_TRIGGER_TYPE_SWIPE,
+)
 from backend.macros.macro_store import MacroStore
 
 
 class MacroStoreTests(unittest.TestCase):
     def test_rule_macro_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            store = MacroStore(Path(tmp_dir) / "gesture_macros.json")
+            store = MacroStore(Path(tmp_dir) / "gesture_macros.json", target_os="Windows")
             record = MacroRecord.build_new(
                 name="Rule Macro",
                 mode="mouse",
@@ -19,26 +27,31 @@ class MacroStoreTests(unittest.TestCase):
                 point_trigger=None,
                 rule_trigger=MacroRuleTrigger(
                     hand="right",
+                    trigger_type=RULE_TRIGGER_TYPE_POSE,
                     rule_override=GestureRuleOverride(
                         conditions=[{"op": "hand_count_eq", "value": 1}],
                         pending_frames=1,
                         ending_frames=1,
                     ),
+                    start_rule_override=None,
+                    swipe_config=None,
                 ),
-                action_steps=[MacroActionStep.from_dict({"type": "left_click", "params": {}})],
+                shortcut_keys=["left_ctrl", "c"],
+                target_os="Windows",
             )
             store.upsert(record)
 
-            reloaded = MacroStore(store.path)
+            reloaded = MacroStore(store.path, target_os="Windows")
             loaded = reloaded.get(record.id)
             self.assertIsNotNone(loaded)
             self.assertTrue(loaded.is_rule_trigger)
+            self.assertTrue(loaded.rule_trigger.is_pose_trigger)
             self.assertEqual(loaded.rule_trigger.hand, "right")
-            self.assertEqual(loaded.action_steps[0].step_type, "left_click")
+            self.assertEqual(loaded.shortcut_keys, ["left_ctrl", "c"])
 
     def test_point_macro_round_trip_and_delete(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            store = MacroStore(Path(tmp_dir) / "gesture_macros.json")
+            store = MacroStore(Path(tmp_dir) / "gesture_macros.json", target_os="Linux")
             trigger = MacroPointTrigger(
                 hand="either",
                 pose_template=build_pose_template(
@@ -55,32 +68,124 @@ class MacroStoreTests(unittest.TestCase):
                 trigger_kind=POINT_OVERRIDE_KIND,
                 point_trigger=trigger,
                 rule_trigger=None,
-                action_steps=[
-                    MacroActionStep.from_dict({"type": "tap_hotkey", "params": {"keys": ["left_ctrl", "left_alt", "delete"]}})
-                ],
+                shortcut_keys=["left_ctrl", "left_shift", "s"],
+                target_os="Linux",
             )
             store.upsert(record)
             self.assertIsNotNone(store.get(record.id))
             store.delete(record.id)
             self.assertIsNone(store.get(record.id))
 
-    def test_all_supported_action_steps_serialize(self):
-        steps = [
-            {"type": "tap_key", "params": {"key": "a"}},
-            {"type": "key_down", "params": {"key": "left_ctrl"}},
-            {"type": "key_up", "params": {"key": "left_ctrl"}},
-            {"type": "tap_hotkey", "params": {"keys": ["left_ctrl", "left_alt", "delete"]}},
-            {"type": "left_click", "params": {}},
-            {"type": "right_click", "params": {}},
-            {"type": "left_button_down", "params": {}},
-            {"type": "left_button_up", "params": {}},
-            {"type": "right_button_down", "params": {}},
-            {"type": "right_button_up", "params": {}},
-            {"type": "scroll", "params": {"delta_x": 0, "delta_y": -240}},
-            {"type": "delay_ms", "params": {"duration_ms": 150}},
-        ]
-        normalized = [MacroActionStep.from_dict(step) for step in steps]
-        self.assertEqual([step.step_type for step in normalized], [step["type"] for step in steps])
+    def test_swipe_macro_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = MacroStore(Path(tmp_dir) / "gesture_macros.json", target_os="Darwin")
+            record = MacroRecord.build_new(
+                name="Swipe Macro",
+                mode="hotkey",
+                trigger_kind=RULE_OVERRIDE_KIND,
+                point_trigger=None,
+                rule_trigger=MacroRuleTrigger(
+                    hand="left",
+                    trigger_type=RULE_TRIGGER_TYPE_SWIPE,
+                    rule_override=None,
+                    start_rule_override=GestureRuleOverride(
+                        conditions=[{"op": "hand_count_eq", "value": 1}],
+                        pending_frames=1,
+                        ending_frames=1,
+                    ),
+                    swipe_config=MacroSwipeConfig.from_dict(
+                        {
+                            "tracked_point": "index.tip",
+                            "direction": "left",
+                            "min_displacement": 0.16,
+                            "min_speed": 0.60,
+                            "min_smoothness": 0.70,
+                            "start_confirm_frames": 2,
+                            "timeout_frames": 20,
+                        }
+                    ),
+                ),
+                shortcut_keys=["cmd", "shift", "4"],
+                target_os="Darwin",
+            )
+            store.upsert(record)
+
+            reloaded = MacroStore(store.path, target_os="Darwin")
+            loaded = reloaded.get(record.id)
+            self.assertIsNotNone(loaded)
+            self.assertTrue(loaded.rule_trigger.is_swipe_trigger)
+            self.assertEqual(loaded.rule_trigger.swipe_config.direction, "left")
+            self.assertEqual(loaded.shortcut_keys, ["left_cmd", "left_shift", "4"])
+
+    def test_legacy_action_steps_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "action_steps"):
+            MacroRecord.from_dict(
+                {
+                    "id": "legacy",
+                    "name": "Legacy Macro",
+                    "mode": "mouse",
+                    "trigger_kind": RULE_OVERRIDE_KIND,
+                    "rule_trigger": {
+                        "hand": "right",
+                        "rule_override": {
+                            "conditions": [{"op": "hand_count_eq", "value": 1}],
+                            "confirm": {"pending_frames": 1, "ending_frames": 1},
+                        },
+                    },
+                    "action_steps": [{"type": "tap_key", "params": {"key": "a"}}],
+                },
+                target_os="Windows",
+            )
+
+    def test_validate_point_trigger_detects_builtin_conflict(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = MacroStore(Path(tmp_dir) / "gesture_macros.json", target_os="Windows")
+            built_in = BuiltInGestureRegistry.get("left_click")
+            other_def, comparison = store.validate_point_trigger(
+                BuiltInGestureRegistry,
+                macro_id=None,
+                mode="mouse",
+                hand="right",
+                pose_template=built_in.saved_pose_template,
+                matcher_config=PoseMatcherConfig(),
+            )
+            self.assertEqual(other_def.id, "left_click")
+            self.assertLessEqual(comparison.score, PoseMatcherConfig().conflict_threshold)
+
+    def test_validate_point_trigger_detects_other_macro_conflict(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = MacroStore(Path(tmp_dir) / "gesture_macros.json", target_os="Linux")
+            template = build_pose_template(
+                "Point Macro Trigger",
+                finger_curls={"index": 0.0, "middle": 0.0, "ring": 0.0, "pinky": 0.0},
+                thumb_curl=0.0,
+            )
+            existing = MacroRecord.build_new(
+                name="Existing Macro",
+                mode="hotkey",
+                trigger_kind=POINT_OVERRIDE_KIND,
+                point_trigger=MacroPointTrigger(
+                    hand="left",
+                    pose_template=template,
+                    editor_pose_template=None,
+                    matcher_config=PoseMatcherConfig(),
+                ),
+                rule_trigger=None,
+                shortcut_keys=["left_ctrl", "c"],
+                target_os="Linux",
+            )
+            store.upsert(existing)
+
+            other_record, comparison = store.validate_point_trigger(
+                BuiltInGestureRegistry,
+                macro_id=None,
+                mode="hotkey",
+                hand="left",
+                pose_template=template,
+                matcher_config=PoseMatcherConfig(),
+            )
+            self.assertEqual(other_record.name, "Existing Macro")
+            self.assertLessEqual(comparison.score, PoseMatcherConfig().conflict_threshold)
 
 
 if __name__ == "__main__":

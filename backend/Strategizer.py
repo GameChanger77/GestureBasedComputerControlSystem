@@ -56,7 +56,10 @@ class Strategizer:
         self._custom_gesture_instances = []
         self._last_mode_switch_ts = 0.0
         self.gesture_override_store = GestureOverrideStore.from_config(config)
-        self.macro_store = MacroStore.from_config(config)
+        self.macro_store = MacroStore.from_config(
+            config,
+            target_os=getattr(self.action, "detected_os", None),
+        )
         self._debug_snapshot = self._empty_debug_snapshot()
         self.load_legacy_custom_rules = bool(load_legacy_custom_rules)
 
@@ -117,6 +120,11 @@ class Strategizer:
             self.current_mode = mode
             self._last_mode_switch_ts = time.time()
             self._reset_mode_gestures(mode)
+            if hasattr(self.action, "show_feedback_message"):
+                try:
+                    self.action.show_feedback_message(mode.value.title(), feedback_type="mode")
+                except Exception:
+                    pass
             print(f"Switched to {mode.value} mode")
 
     def _reset_current_mode_gestures(self):
@@ -564,34 +572,6 @@ class Strategizer:
                     print(f"[OK] Loaded custom gesture: {rule.get('id')} ({mode_str})")
                 except Exception as exc:
                     print(f"[WARN] Skipped custom gesture {rule.get('id')}: {exc}")
-
-            gesture_rule_by_id = {
-                gesture["id"]: gesture
-                for gesture in rules.get("custom_gestures", [])
-                if gesture.get("enabled", False)
-            }
-
-            for macro in rules.get("custom_macros", []):
-                if not macro.get("enabled", False):
-                    continue
-
-                mode_str = macro.get("mode", "mouse")
-                if mode_str == "mouse":
-                    mode = ControlMode.MOUSE
-                elif mode_str == "keyboard":
-                    mode = ControlMode.KEYBOARD
-                else:
-                    mode = ControlMode.HOTKEY
-
-                try:
-                    recognizer = compiler.compile_macro(
-                        self.action, macro, gesture_rule_by_id, global_cfg
-                    )
-                    self.add_custom_gesture(recognizer, mode=mode)
-                    self._custom_gesture_instances.append(recognizer)
-                    print(f"[OK] Loaded custom macro: {macro.get('id')} ({mode_str})")
-                except Exception as exc:
-                    print(f"[WARN] Skipped custom macro {macro.get('id')}: {exc}")
 
         for macro_record in self.macro_store.list_records():
             if not macro_record.enabled:

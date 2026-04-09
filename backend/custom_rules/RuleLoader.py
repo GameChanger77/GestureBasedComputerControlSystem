@@ -29,7 +29,6 @@ class RuleLoader:
                 "version": 1,
                 "global": {"default_pending_frames": 3, "default_ending_frames": 2},
                 "custom_gestures": [],
-                "custom_macros": []
             }
 
         with open(self.path, "r", encoding="utf-8") as f:
@@ -78,37 +77,16 @@ class RuleLoader:
                 raise ValueError(f"{path}.action must be an object with action.type")
 
             if g["action"]["type"] == "macro":
-                steps = g["action"].get("steps")
-                if not isinstance(steps, list) or len(steps) == 0:
-                    raise ValueError(f"{path}.action.steps must be a non-empty list for action.type='macro'")
+                raise ValueError(
+                    f"{path}.action.type='macro' is no longer supported. "
+                    "Use the Macros settings page for custom shortcut gestures."
+                )
 
             if "confirm" in g and not isinstance(g["confirm"], dict):
                 raise ValueError(f"{path}.confirm must be an object if present")
 
         if "custom_macros" in data:
-            if not isinstance(data["custom_macros"], list):
-                raise ValueError("custom_macros must be a list")
-
-            for i, m in enumerate(data["custom_macros"]):
-                path = f"custom_macros[{i}]"
-                if not isinstance(m, dict):
-                    raise ValueError(f"{path} must be an object")
-
-                required = ["id", "name", "enabled", "mode", "priority", "steps", "action"]
-                for r in required:
-                    if r not in m:
-                        raise ValueError(f"{path}.{r} is required")
-
-                if m["mode"] not in ["mouse", "keyboard", "hotkey"]:
-                    raise ValueError(f"{path}.mode must be mouse|keyboard|hotkey")
-
-                if not isinstance(m["steps"], list) or len(m["steps"]) == 0:
-                    raise ValueError(f"{path}.steps must be a non-empty list")
-
-                for j, s in enumerate(m["steps"]):
-                    sp = f"{path}.steps[{j}]"
-                    if not isinstance(s, dict) or "gesture_id" not in s:
-                        raise ValueError(f"{sp}.gesture_id is required")
-
-                if not isinstance(m["action"], dict) or "type" not in m["action"]:
-                    raise ValueError(f"{path}.action must be an object with action.type")
+            raise ValueError(
+                "custom_macros is no longer supported in gesture_custom_rules.json. "
+                "Use the Macros settings page for custom shortcut gestures."
+            )

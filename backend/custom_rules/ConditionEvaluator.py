@@ -27,8 +27,8 @@ class ConditionEvaluator:
     Supported ops (current minimal set):
     - finger_extended:
         { "op": "finger_extended", "finger": "index", "value": true, "threshold_deg": 155 }
-    - only_fingers_extended.json:
-        { "op": "only_fingers_extended.json", "fingers": ["index","middle"], "threshold_deg": 155 }
+    - only_fingers_extended:
+        { "op": "only_fingers_extended", "fingers": ["index","middle"], "threshold_deg": 155 }
     - pinch_distance_lt / pinch_distance_gt:
         { "op": "pinch_distance_lt", "a": "thumb.tip", "b": "index.tip", "value": 0.13, "space": "wrist" }
     - hand_openness_gt / hand_openness_lt:
@@ -104,9 +104,9 @@ class ConditionEvaluator:
             got = is_finger_extended(finger, threshold=thr)
             return got == want
 
-        if op == "only_fingers_extended.json":
+        if op in {"only_fingers_extended", "only_fingers_extended.json"}:
             # Example:
-            # { "op": "only_fingers_extended.json", "fingers": ["index"], "threshold_deg": 155 }
+            # { "op": "only_fingers_extended", "fingers": ["index"], "threshold_deg": 155 }
             fingers = cond.get("fingers", [])
             thr = float(cond.get("threshold_deg", 155.0))
 

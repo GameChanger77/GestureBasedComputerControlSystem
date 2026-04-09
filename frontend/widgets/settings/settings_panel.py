@@ -39,6 +39,7 @@ class SettingsPanel(QWidget):
 
     settings_saved = Signal(dict)
     gesture_overrides_changed = Signal()
+    macro_settings_changed = Signal()
     CAMERA_OPTION_ROLE = Qt.UserRole + 1
 
     def __init__(self, ui_mode="dev", parent=None):
@@ -76,6 +77,7 @@ class SettingsPanel(QWidget):
         self._gesture_settings_page = GestureSettingsPage()
         self._gesture_settings_page.overrides_changed.connect(self.gesture_overrides_changed)
         self._macro_settings_page = MacroSettingsPage()
+        self._macro_settings_page.macros_changed.connect(self.macro_settings_changed)
 
         page_definitions = GestureConfig.get_page_definitions(ui_mode=self.ui_mode)
         ordered_page_names = list(page_definitions.keys())

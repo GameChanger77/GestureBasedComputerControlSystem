@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import time
 from typing import Any, Dict, Optional
 
 from backend.HandsData import HandsData
 from backend.custom_rules.ConditionEvaluator import ConditionEvaluator
-from backend.gestures.GestureRecognizer import SnapshotGestureRecognizer, ContinuousGestureRecognizer
+from backend.gestures.GestureRecognizer import ContinuousGestureRecognizer, SnapshotGestureRecognizer
 from backend.gestures.GestureUtils import camera_to_screen
 
 
@@ -18,7 +17,6 @@ class _RuleGestureBase:
     - Evaluate JSON conditions via ConditionEvaluator
     - Convert action targets (like "index.tip") to screen coordinates
     - Execute Action methods (left_click, right_click, move_cursor, scroll)
-    - Execute simple macro step lists for mouse and keyboard actions
     """
 
     def __init__(self, screen_width: int, screen_height: int, config, evaluator: ConditionEvaluator, rule: Dict[str, Any]):
@@ -51,21 +49,10 @@ class _RuleGestureBase:
         - right_click
         - mouse_move
         - scroll
-        - macro
         """
         action_spec = self.rule["action"]
         a_type = action_spec["type"]
         params = action_spec.get("params", {})
-
-        if a_type == "macro":
-            compiled_steps = self._build_macro_steps(
-                hands_data,
-                hand_label,
-                action_spec.get("steps", []),
-            )
-            if not compiled_steps:
-                return None
-            return ("macro", compiled_steps)
 
         if a_type in ("left_click", "right_click", "mouse_move"):
             target = self._resolve_screen_target(hands_data, hand_label, params, allow_default_landmark=True)
@@ -135,112 +122,6 @@ class _RuleGestureBase:
         sx, sy = camera_to_screen(pt, self.screen_width, self.screen_height)
         return sx, sy
 
-    def _build_macro_steps(self, hands_data: HandsData, hand_label: str, steps: list[Dict[str, Any]]):
-        """
-        Compile a macro's JSON steps into executable tuples.
-
-        Supported step types:
-        - mouse_move
-        - left_click
-        - right_click
-        - scroll
-        - delay_ms
-        - tap_key
-        - key_down
-        - key_up
-        - tap_hotkey
-        - type_text
-
-        Accepted step key names:
-        - "type"
-        - "step_type"
-
-        For click steps:
-        - if a target is given, use it
-        - otherwise reuse the most recent target from a previous mouse_move/click step
-        """
-        compiled = []
-        last_target: Optional[tuple[int, int]] = None
-
-        for i, step in enumerate(steps):
-            if not isinstance(step, dict):
-                raise ValueError(f"Macro step {i} must be an object")
-
-            s_type = step.get("type") or step.get("step_type")
-            params = step.get("params", {})
-
-            if s_type == "delay_ms":
-                delay_value = params.get("value", params.get("duration_ms", 0))
-                compiled.append(("delay_ms", int(delay_value)))
-                continue
-
-            if s_type == "scroll":
-                dx = int(params.get("delta_x", 0))
-                dy = int(params.get("delta_y", 0))
-                compiled.append(("scroll", dx, dy))
-                continue
-
-            if s_type in ("mouse_move", "left_click", "right_click"):
-                explicit_target = self._resolve_screen_target(
-                    hands_data,
-                    hand_label,
-                    params,
-                    allow_default_landmark=False,
-                )
-
-                if explicit_target is not None:
-                    target = explicit_target
-                    last_target = target
-                elif s_type in ("left_click", "right_click") and last_target is not None:
-                    target = last_target
-                elif s_type == "mouse_move":
-                    raise ValueError(f"Macro step {i} ({s_type}) needs a target")
-                else:
-                    raise ValueError(
-                        f"Macro step {i} ({s_type}) needs a target, "
-                        f"or must come after a targeted mouse_move/click step"
-                    )
-
-                compiled.append((s_type, target[0], target[1]))
-                continue
-
-            if s_type == "tap_key":
-                key = params.get("key")
-                if not key:
-                    raise ValueError(f"Macro step {i} (tap_key) requires params.key")
-                compiled.append(("tap_key", str(key)))
-                continue
-
-            if s_type == "key_down":
-                key = params.get("key")
-                if not key:
-                    raise ValueError(f"Macro step {i} (key_down) requires params.key")
-                compiled.append(("key_down", str(key)))
-                continue
-
-            if s_type == "key_up":
-                key = params.get("key")
-                if not key:
-                    raise ValueError(f"Macro step {i} (key_up) requires params.key")
-                compiled.append(("key_up", str(key)))
-                continue
-
-            if s_type == "tap_hotkey":
-                keys = params.get("keys", [])
-                if not isinstance(keys, list) or not keys:
-                    raise ValueError(f"Macro step {i} (tap_hotkey) requires non-empty params.keys")
-                compiled.append(("tap_hotkey", [str(k) for k in keys]))
-                continue
-
-            if s_type == "type_text":
-                text = params.get("text", "")
-                compiled.append(("type_text", str(text)))
-                continue
-
-            raise ValueError(f"Unsupported macro step type: {s_type}")
-
-        return compiled
-
     def _execute(self, data):
         if not data:
             return
@@ -263,51 +144,6 @@ class _RuleGestureBase:
             _, dx, dy = data
             self.action.scroll(delta_x=dx, delta_y=dy)
 
-        elif a_type == "macro":
-            _, steps = data
-            for step in steps:
-                s_type = step[0]
-
-                if s_type == "mouse_move":
-                    _, x, y = step
-                    self.action.move_cursor(x, y)
-
-                elif s_type == "left_click":
-                    _, x, y = step
-                    self.action.left_click(x, y)
-
-                elif s_type == "right_click":
-                    _, x, y = step
-                    self.action.right_click(x, y)
-
-                elif s_type == "scroll":
-                    _, dx, dy = step
-                    self.action.scroll(delta_x=dx, delta_y=dy)
-
-                elif s_type == "delay_ms":
-                    _, value = step
-                    time.sleep(max(0, value) / 1000.0)
-
-                elif s_type == "tap_key":
-                    _, key = step
-                    self.action.tap_key(key)
-
-                elif s_type == "key_down":
-                    _, key = step
-                    self.action.key_down(key)
-
-                elif s_type == "key_up":
-                    _, key = step
-                    self.action.key_up(key)
-
-                elif s_type == "tap_hotkey":
-                    _, keys = step
-                    self.action.tap_hotkey(keys)
-
-                elif s_type == "type_text":
-                    _, text = step
-                    self.action.type_text(text)
-
 
 class RuleSnapshotGesture(SnapshotGestureRecognizer, _RuleGestureBase):
     """
@@ -329,22 +165,16 @@ class RuleSnapshotGesture(SnapshotGestureRecognizer, _RuleGestureBase):
         _RuleGestureBase.__init__(self, screen_width, screen_height, config, evaluator, rule)
 
     def detect_gesture(self, hands_data: HandsData):
-        """
-        Returns:
-            tuple: (detected, action_data)
-        """
         hand_label = self._pick_hand(hands_data)
         if hand_label is None:
             return False, None
 
-        ok = self.evaluator.eval_all(hands_data, hand_label, self.rule["conditions"])
-        if not ok:
+        if not self.evaluator.eval_all(hands_data, hand_label, self.rule["conditions"]):
             return False, None
 
         return True, self._build_action_data(hands_data, hand_label)
 
     def execute_action(self, data):
-        """Execute the configured action once per activation."""
         self._execute(data)
 
 
@@ -355,10 +185,6 @@ class RuleContinuousGesture(ContinuousGestureRecognizer, _RuleGestureBase):
     Activated when:
     - All JSON conditions evaluate True for pending_frames
     - Fires EVERY frame while held (ContinuousGestureRecognizer behavior)
-
-    WARNING:
-    - Avoid mapping click actions or keyboard macros to continuous gestures
-      or they may repeat every frame while held.
     """
 
     def __init__(self, action, screen_width, screen_height, config, evaluator, rule, pending_frames, ending_frames):
@@ -372,20 +198,14 @@ class RuleContinuousGesture(ContinuousGestureRecognizer, _RuleGestureBase):
         _RuleGestureBase.__init__(self, screen_width, screen_height, config, evaluator, rule)
 
     def detect_gesture(self, hands_data: HandsData):
-        """
-        Returns:
-            tuple: (detected, action_data)
-        """
         hand_label = self._pick_hand(hands_data)
         if hand_label is None:
             return False, None
 
-        ok = self.evaluator.eval_all(hands_data, hand_label, self.rule["conditions"])
-        if not ok:
+        if not self.evaluator.eval_all(hands_data, hand_label, self.rule["conditions"]):
             return False, None
 
         return True, self._build_action_data(hands_data, hand_label)
 
     def execute_action(self, data):
-        """Execute the configured action every frame while active."""
         self._execute(data)

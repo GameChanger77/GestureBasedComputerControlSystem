@@ -68,6 +68,38 @@ class ActionTutorialScopeTests(unittest.TestCase):
         self.assertEqual(event["text"], "hello")
         action.close()
 
+    def test_tap_hotkey_records_shortcut_label_and_cursor_position(self):
+        keyboard = _FakeKeyboard()
+        action = Action(mouse=_FakeMouse(), keyboard_test=keyboard, osType="Windows")
+
+        action.move_cursor(120, 240)
+        action._action_queue.join()
+        action.tap_hotkey(["left_ctrl", "c"])
+        action._action_queue.join()
+
+        event = action.get_action_events()[-1]
+        self.assertEqual(event["type"], "tap_hotkey")
+        self.assertEqual(event["keys"], ["left_ctrl", "c"])
+        self.assertEqual(event["shortcut_label"], "Ctrl + C")
+        self.assertEqual(event["global_x"], 120)
+        self.assertEqual(event["global_y"], 240)
+        action.close()
+
+    def test_show_feedback_message_records_label_and_cursor_position(self):
+        action = Action(mouse=_FakeMouse(), keyboard_test=_FakeKeyboard(), osType="Test")
+
+        action.move_cursor(44, 88)
+        action._action_queue.join()
+        action.show_feedback_message("Keyboard", feedback_type="mode")
+
+        event = action.get_action_events()[-1]
+        self.assertEqual(event["type"], "overlay_feedback")
+        self.assertEqual(event["label"], "Keyboard")
+        self.assertEqual(event["feedback_type"], "mode")
+        self.assertEqual(event["global_x"], 44)
+        self.assertEqual(event["global_y"], 88)
+        action.close()
+
 
 if __name__ == "__main__":
     unittest.main()

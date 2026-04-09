@@ -39,7 +39,7 @@ uv run python main.py --dev
 uv run python main.py --prod
 ```
 
-Legacy JSON custom rules/macros are **off by default**. To explicitly load
+Legacy JSON custom rules are **off by default**. To explicitly load
 `gesture_custom_rules.json` from the same directory as `gesture_config.json`,
 start the app with:
 ```powershell
@@ -53,6 +53,15 @@ uv run python main.py --prod --load-legacy-custom-rules
 ```
 
 Bundled installer builds always run `prod` mode, even if `--dev` is passed.
+
+Custom gesture macros are separate from the legacy JSON rule path. They are
+created in the app's `Macros` settings page, stored in `gesture_macros.json`,
+and load automatically on startup. Each macro is exactly one gesture trigger
+mapped to exactly one shortcut chord, with support for:
+- Rule-based pose triggers
+- Rule-based swipe triggers
+- 3D hand-model pose triggers
+- OS-aware shortcut keys (`Win` on Windows, `Cmd` on macOS, `Super` on Linux)
 
 ## Verify environment
 ```powershell
@@ -145,6 +154,17 @@ If prompted by your OS, allow camera access for Python/terminal.
 
 ---
 
+## Custom Gesture Macros
+
+- Created from the `Macros` settings page, not from `gesture_custom_rules.json`
+- Each macro fires one shortcut chord such as `Ctrl + V` or `Cmd + Shift + 4`
+- Macros can be assigned to `mouse`, `keyboard`, or `hotkey` mode
+- Rule-based macros can use either a static pose or a swipe motion
+- 3D hand-model macros compare the full saved hand pose against live landmarks
+- Macro recognizers run at higher priority than built-ins in the same mode so a custom shortcut can override overlapping built-in behavior cleanly
+
+---
+
 ## Motion Gesture Recognition
 
 **Location**: `backend/gestures/GestureRecognizer.py` (lines 190-297)
@@ -157,11 +177,14 @@ If prompted by your OS, allow camera access for Python/terminal.
 - Rich trajectory analysis capabilities:
   - Velocity and direction calculation
   - Total distance traveled vs. straight-line displacement
-  - Swipe detection (axis-specific with direction)
-  - Path smoothness analysis
-  - Clench detection (closing hand motion)
+- Swipe detection (axis-specific with direction)
+- Path smoothness analysis
+- Clench detection (closing hand motion)
 
-**Current Implementations**: None yet (framework ready for implementation)
+**Current Implementations**:
+- Custom macro swipe triggers built on `MotionGestureRecognizer` and `MotionTracker`
+- Directional support for `left`, `right`, `up`, and `down` swipes
+- Rearm gating so one continuous swipe only fires one shortcut until the start pose is released
 
 **Potential Use Cases**:
 - Swipe left/right for browser navigation (Back/Forward)

@@ -5,12 +5,19 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.Strategizer import Strategizer
-from backend.macros.macro_models import MacroActionStep, MacroRecord, MacroRuleTrigger
-from backend.macros.macro_store import MacroStore
+from backend.custom_rules.RuleLoader import RuleLoader
 from backend.gesture_remap.rule_overrides import GestureRuleOverride, RULE_OVERRIDE_KIND
+from backend.macros.macro_models import (
+    MacroRecord,
+    MacroRuleTrigger,
+    RULE_TRIGGER_TYPE_POSE,
+)
+from backend.macros.macro_store import MacroStore
 
 
 class _ActionStub:
+    detected_os = "Windows"
+
     def move_cursor(self, *_args, **_kwargs):
         pass
 
@@ -32,7 +39,13 @@ class _ActionStub:
     def type_text(self, *_args, **_kwargs):
         pass
 
+    def tap_hotkey(self, *_args, **_kwargs):
+        return True
+
     def set_pending_latency_origin_ts_ns(self, _ts):
+        pass
+
+    def release_all_keys(self):
         pass
 
 
@@ -63,7 +76,7 @@ class _ConfigStub(dict):
         self.config = self
 
 
-def _write_legacy_rules(path: Path):
+def _write_legacy_rules(path: Path, *, include_custom_macros=False, macro_action_type=False):
     payload = {
         "version": 1,
         "global": {"default_pending_frames": 1, "default_ending_frames": 1},
@@ -84,16 +97,21 @@ def _write_legacy_rules(path: Path):
                     }
                 ],
                 "confirm": {"pending_frames": 1, "ending_frames": 1},
-                "action": {"type": "mouse_move", "params": {"at": "index.tip", "space": "camera"}},
+                "action": (
+                    {"type": "macro", "params": {"keys": ["left_ctrl", "c"]}}
+                    if macro_action_type
+                    else {"type": "mouse_move", "params": {"at": "index.tip", "space": "camera"}}
+                ),
             }
         ],
-        "custom_macros": [],
     }
+    if include_custom_macros:
+        payload["custom_macros"] = []
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def _write_ui_macro(config):
-    macro_store = MacroStore.from_config(config)
+    macro_store = MacroStore.from_config(config, target_os="Windows")
     macro_store.upsert(
         MacroRecord.build_new(
             name="UI Macro",
@@ -102,13 +120,17 @@ def _write_ui_macro(config):
             point_trigger=None,
             rule_trigger=MacroRuleTrigger(
                 hand="either",
+                trigger_type=RULE_TRIGGER_TYPE_POSE,
                 rule_override=GestureRuleOverride(
                     conditions=[{"op": "hand_count_eq", "value": 1}],
                     pending_frames=1,
                     ending_frames=1,
                 ),
+                start_rule_override=None,
+                swipe_config=None,
             ),
-            action_steps=[MacroActionStep.from_dict({"type": "left_click", "params": {}})],
+            shortcut_keys=["left_ctrl", "c"],
+            target_os="Windows",
         )
     )
 
@@ -148,10 +170,28 @@ class LegacyCustomRulesLoadingTests(unittest.TestCase):
                 load_legacy_custom_rules=True,
             )
 
-            mouse_names = [getattr(gesture, "debug_name", gesture.__class__.__name__) for gesture in strategizer.mouse_mode_gestures]
-            self.assertIn("RuleSnapshotGesture", mouse_names)
+            mouse_class_names = [gesture.__class__.__name__ for gesture in strategizer.mouse_mode_gestures]
+            mouse_macro_names = [getattr(gesture, "name", "") for gesture in strategizer.mouse_mode_gestures]
+            self.assertIn("RuleSnapshotGesture", mouse_class_names)
+            self.assertIn("UI Macro", mouse_macro_names)
             self.assertEqual(len(strategizer.mouse_mode_gestures), 6)
             self.assertEqual(len(strategizer._custom_gesture_instances), 2)
+
+    def test_loader_rejects_legacy_custom_macros_field(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            rules_path = Path(tmp_dir) / "gesture_custom_rules.json"
+            _write_legacy_rules(rules_path, include_custom_macros=True)
+
+            with self.assertRaisesRegex(ValueError, "custom_macros"):
+                RuleLoader(str(rules_path)).load()
+
+    def test_loader_rejects_legacy_macro_action_type(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            rules_path = Path(tmp_dir) / "gesture_custom_rules.json"
+            _write_legacy_rules(rules_path, macro_action_type=True)
+
+            with self.assertRaisesRegex(ValueError, "action.type='macro'"):
+                RuleLoader(str(rules_path)).load()
 
 
 class MainLegacyFlagWiringTests(unittest.TestCase):

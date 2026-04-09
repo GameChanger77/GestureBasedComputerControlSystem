@@ -4,8 +4,11 @@ from typing import Any, Dict
 
 from backend.custom_rules.ConditionEvaluator import ConditionEvaluator
 from backend.custom_rules.RuleGestures import RuleSnapshotGesture, RuleContinuousGesture
-from backend.custom_rules.MacroChainRecognizer import MacroChainRecognizer
-from backend.macros.macro_recognizers import PointMacroTriggerRecognizer, RuleMacroTriggerRecognizer
+from backend.macros.macro_recognizers import (
+    PointMacroTriggerRecognizer,
+    RuleMacroTriggerRecognizer,
+    SwipeMacroTriggerRecognizer,
+)
 
 
 class RuleCompiler:
@@ -77,68 +80,28 @@ class RuleCompiler:
                 ending,
             )
 
-    def compile_macro(
-            self,
-            action,
-            macro_rule: Dict[str, Any],
-            gesture_rule_by_id: Dict[str, Any],
-            global_cfg: Dict[str, Any],
-    ):
-        """
-        Compile a macro rule into a MacroChainRecognizer.
-
-        Key behavior:
-        - Each step compiles into a SILENT recognizer (execute_action is replaced with no-op)
-          so steps do not trigger their own actions during macro evaluation.
-        """
-        default_step_timeout = int(global_cfg.get("macro_step_timeout_ms", 900))
-        cooldown_ms = int(macro_rule.get("cooldown_ms", global_cfg.get("macro_cooldown_ms", 800)))
-
-        steps_compiled = []
-        for step in macro_rule["steps"]:
-            gid = step["gesture_id"]
-            if gid not in gesture_rule_by_id:
-                raise ValueError(f"Macro step references unknown gesture_id: {gid}")
-
-            # Compile the primitive rule into a recognizer
-            rec = self.compile_gesture(action, gesture_rule_by_id[gid], global_cfg)
-
-            # Make step recognizer "silent" (do not execute its own action)
-            rec.execute_action = lambda data: None
-
-            steps_compiled.append({
-                "gesture_id": gid,
-                "recognizer": rec,
-                "max_delay_ms": int(step.get("max_delay_ms", default_step_timeout)),
-            })
-
-        return MacroChainRecognizer(
-            action=action,
-            priority=int(macro_rule["priority"]),
-            steps=steps_compiled,
-            macro_action=macro_rule["action"],
-            config=self.config,
-            screen_width=self.screen_width,
-            screen_height=self.screen_height,
-            cooldown_ms=cooldown_ms,
-            sequence_rules=macro_rule.get("sequence_rules", {}),
-            name=macro_rule.get("name", macro_rule.get("id", "Macro")),
-        )
-
     def compile_ui_macro(self, action, macro_record):
+        if macro_record.is_rule_trigger and macro_record.rule_trigger.is_swipe_trigger:
+            return SwipeMacroTriggerRecognizer(
+                action,
+                name=macro_record.name,
+                trigger=macro_record.rule_trigger,
+                shortcut_keys=macro_record.shortcut_keys,
+            )
+
         if macro_record.is_rule_trigger:
             return RuleMacroTriggerRecognizer(
                 action,
                 name=macro_record.name,
                 trigger=macro_record.rule_trigger,
-                action_steps=macro_record.action_steps,
+                shortcut_keys=macro_record.shortcut_keys,
             )
 
         return PointMacroTriggerRecognizer(
             action,
             name=macro_record.name,
             trigger=macro_record.point_trigger,
-            action_steps=macro_record.action_steps,
+            shortcut_keys=macro_record.shortcut_keys,
             pending_frames=int(self.config.get("click_pending_frames", 3)),
             ending_frames=int(self.config.get("ending_frames", 2)),
         )

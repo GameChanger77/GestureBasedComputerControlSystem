@@ -35,7 +35,7 @@ CONDITION_DEFINITIONS = {
             {"name": "threshold_deg", "label": "Threshold (deg)", "type": "float", "min": 0.0, "max": 180.0, "step": 0.5, "decimals": 1, "default": 155.0},
         ],
     },
-    "only_fingers_extended.json": {
+    "only_fingers_extended": {
         "label": "Only Specific Fingers Extended",
         "fields": [
             {"name": "fingers", "label": "Extended Fingers", "type": "multi_enum", "options": FINGER_OPTIONS[1:], "default": ["index"]},

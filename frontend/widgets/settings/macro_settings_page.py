@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -12,9 +13,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from backend.gesture_remap.builtins import BuiltInGestureRegistry
 from backend.gesture_remap.rule_overrides import POINT_OVERRIDE_KIND
-from backend.macros.macro_step_catalog import STEP_DEFINITIONS
 from backend.macros.macro_store import MacroStore
+from backend.platforms.KeyMappings import summarize_shortcut_keys
 from frontend.widgets.editors.macro_editor_dialog import MacroEditorDialog
 from frontend.widgets.settings.settings_theme import (
     EmptyStateCard,
@@ -30,6 +32,8 @@ from frontend.widgets.settings.settings_theme import (
 
 
 class MacroSettingsPage(QWidget):
+    macros_changed = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._config = None
@@ -45,7 +49,7 @@ class MacroSettingsPage(QWidget):
 
         self.header = SettingsPageHeader(
             "Macros",
-            "Build standalone macros with one trigger gesture and an ordered chain of key, mouse, scroll, and delay steps.",
+            "Build standalone gesture macros that fire one shortcut chord from a rule-based, swipe, or 3D hand-model trigger.",
             parent=self,
         )
         self.create_button = QPushButton("Create Macro")
@@ -88,7 +92,7 @@ class MacroSettingsPage(QWidget):
             self.cards_layout.addWidget(
                 EmptyStateCard(
                     "No Macros Yet",
-                    "Create your first macro to chain keyboard, mouse, and scroll actions behind a custom trigger gesture.",
+                    "Create your first macro to map a custom gesture directly to a shortcut chord.",
                     parent=self.cards_container,
                 )
             )
@@ -102,6 +106,7 @@ class MacroSettingsPage(QWidget):
                 "mode": record.mode.title(),
                 "trigger": trigger_label,
                 "state": state_text,
+                "shortcut": self._shortcut_summary(record),
             }
             self.cards_layout.addWidget(self._build_macro_card(record, trigger_label, state_text))
 
@@ -114,14 +119,26 @@ class MacroSettingsPage(QWidget):
             if widget is not None:
                 widget.deleteLater()
 
-    def _step_summary(self, record) -> str:
-        arrow = "  \u2192  "
-        labels = [STEP_DEFINITIONS.get(step.step_type, {}).get("label", step.step_type) for step in record.action_steps]
-        if not labels:
-            return "No actions"
-        if len(labels) <= 3:
-            return arrow.join(labels)
-        return f"{arrow.join(labels[:3])}{arrow}+{len(labels) - 3} more"
+    def _shortcut_summary(self, record) -> str:
+        return summarize_shortcut_keys(record.shortcut_keys, self.macro_store.target_os)
+
+    def _validate_candidate(
+        self,
+        *,
+        macro_id: str | None,
+        mode: str,
+        hand: str,
+        candidate_template,
+        matcher_config,
+    ):
+        return self.macro_store.validate_point_trigger(
+            BuiltInGestureRegistry,
+            macro_id=macro_id,
+            mode=mode,
+            hand=hand,
+            pose_template=candidate_template,
+            matcher_config=matcher_config,
+        )
 
     def _build_macro_card(self, record, trigger_label: str, state_text: str):
         card = SettingsCard(surface="card", parent=self.cards_container)
@@ -138,11 +155,11 @@ class MacroSettingsPage(QWidget):
         title_row.addWidget(SettingsBadge(state_text, "success" if record.enabled else "warning", parent=card))
         card.body_layout.addLayout(title_row)
 
-        summary_label = QLabel(self._step_summary(record))
+        summary_label = QLabel(self._shortcut_summary(record))
         summary_label.setWordWrap(True)
         card.body_layout.addWidget(summary_label)
 
-        helper_label = QLabel("Trigger and action chain are edited together. The macro fires once per activation and must disengage before firing again.")
+        helper_label = QLabel("Trigger and shortcut are edited together. The macro fires once per activation and must disengage before firing again.")
         helper_label.setWordWrap(True)
         set_label_tone(helper_label, "muted")
         card.body_layout.addWidget(helper_label)
@@ -181,21 +198,34 @@ class MacroSettingsPage(QWidget):
         return self._config.config if self._config is not None else {}
 
     def _on_create_clicked(self):
-        dialog = MacroEditorDialog(config_source=self._config_source(), parent=self)
+        dialog = MacroEditorDialog(
+            config_source=self._config_source(),
+            validate_point_trigger_callback=self._validate_candidate,
+            target_os=self.macro_store.target_os,
+            parent=self,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted or dialog.result_record is None:
             return
         self.macro_store.upsert(dialog.result_record)
         self.refresh()
+        self.macros_changed.emit()
 
     def _on_edit_clicked(self, macro_id: str):
         record = self.macro_store.get(macro_id)
         if record is None:
             return
-        dialog = MacroEditorDialog(config_source=self._config_source(), existing_record=record, parent=self)
+        dialog = MacroEditorDialog(
+            config_source=self._config_source(),
+            existing_record=record,
+            validate_point_trigger_callback=self._validate_candidate,
+            target_os=self.macro_store.target_os,
+            parent=self,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted or dialog.result_record is None:
             return
         self.macro_store.upsert(dialog.result_record)
         self.refresh()
+        self.macros_changed.emit()
 
     def _duplicate_macro(self, macro_id: str):
         record = self.macro_store.get(macro_id)
@@ -207,11 +237,13 @@ class MacroSettingsPage(QWidget):
             trigger_kind=record.trigger_kind,
             point_trigger=record.point_trigger,
             rule_trigger=record.rule_trigger,
-            action_steps=record.action_steps,
+            shortcut_keys=record.shortcut_keys,
             enabled=record.enabled,
+            target_os=self.macro_store.target_os,
         )
         self.macro_store.upsert(duplicated)
         self.refresh()
+        self.macros_changed.emit()
 
     def _toggle_macro(self, macro_id: str):
         record = self.macro_store.get(macro_id)
@@ -223,13 +255,15 @@ class MacroSettingsPage(QWidget):
             trigger_kind=record.trigger_kind,
             point_trigger=record.point_trigger,
             rule_trigger=record.rule_trigger,
-            action_steps=record.action_steps,
+            shortcut_keys=record.shortcut_keys,
             enabled=not record.enabled,
             macro_id=record.id,
             created_at=record.created_at,
+            target_os=self.macro_store.target_os,
         )
         self.macro_store.upsert(updated)
         self.refresh()
+        self.macros_changed.emit()
 
     def _delete_macro(self, macro_id: str):
         record = self.macro_store.get(macro_id)
@@ -246,3 +280,4 @@ class MacroSettingsPage(QWidget):
             return
         self.macro_store.delete(macro_id)
         self.refresh()
+        self.macros_changed.emit()

@@ -7,9 +7,9 @@ import time
 from collections import deque
 from copy import deepcopy
 
-from backend.macros.macro_models import MacroActionStep
 from backend.gestures.keyboard_mode.KeyCodes import normalize_key
 from backend.platforms import PlatformKeyboardBackend, create_keyboard_backend, normalize_os_name
+from backend.platforms.KeyMappings import normalize_shortcut_keys, summarize_shortcut_keys
 from backend.platforms.PynputKeyboardBackend import PynputKeyboardBackend
 
 try:
@@ -554,50 +554,6 @@ class Action:
     def perform_macro(self, keys: list):
         self.tap_hotkey(keys)
 
-    def execute_macro_steps(self, steps):
-        """Queue an ordered macro step chain for execution."""
-        normalized_steps = []
-        for step in steps or []:
-            if isinstance(step, MacroActionStep):
-                normalized_steps.append(step)
-            else:
-                normalized_steps.append(MacroActionStep.from_dict(step))
-        if not normalized_steps:
-            return
-
-        origin_ns = self._capture_latency_origin_for_action()
-        self._enqueue_action(self._execute_macro_steps_impl, (normalized_steps,), origin_ns=origin_ns)
-
-    def _execute_macro_steps_impl(self, steps):
-        for step in steps:
-            step_type = step.step_type
-            params = step.params
-
-            if step_type == "tap_key":
-                self._tap_key_impl(params["key"])
-            elif step_type == "key_down":
-                self._key_down(params["key"])
-            elif step_type == "key_up":
-                self._key_up(params["key"])
-            elif step_type == "tap_hotkey":
-                self._tap_hotkey_impl(params["keys"])
-            elif step_type == "left_click":
-                self._left_click_impl()
-            elif step_type == "right_click":
-                self._right_click_impl()
-            elif step_type == "left_button_down":
-                self.mouse.press(Button.left)
-            elif step_type == "left_button_up":
-                self.mouse.release(Button.left)
-            elif step_type == "right_button_down":
-                self.mouse.press(Button.right)
-            elif step_type == "right_button_up":
-                self.mouse.release(Button.right)
-            elif step_type == "scroll":
-                self._scroll_impl(params.get("delta_x", 0), params.get("delta_y", 0))
-            elif step_type == "delay_ms":
-                time.sleep(max(0, int(params.get("duration_ms", 0))) / 1000.0)
-
     def key_down(self, key_code: str):
         """Press and hold a keyboard key."""
         logical = normalize_key(key_code)
@@ -647,18 +603,44 @@ class Action:
 
     def _tap_hotkey_impl(self, logical_keys):
         if self._keyboard_backend.tap_hotkey(logical_keys):
-            self._record_action_event("tap_hotkey", keys=list(logical_keys))
+            position = self._current_cursor_snapshot()
+            try:
+                shortcut_label = summarize_shortcut_keys(logical_keys, self.detected_os)
+            except Exception:
+                shortcut_label = " + ".join(str(key) for key in logical_keys)
+            self._record_action_event(
+                "tap_hotkey",
+                keys=list(logical_keys),
+                shortcut_label=shortcut_label,
+                local_x=int(position["local_x"]),
+                local_y=int(position["local_y"]),
+                global_x=int(position["global_x"]),
+                global_y=int(position["global_y"]),
+            )
+
+    def show_feedback_message(self, text: str, *, feedback_type: str = "message"):
+        label = str(text or "").strip()
+        if not label:
+            return
+        position = self._current_cursor_snapshot()
+        self._record_action_event(
+            "overlay_feedback",
+            label=label,
+            feedback_type=str(feedback_type or "message"),
+            local_x=int(position["local_x"]),
+            local_y=int(position["local_y"]),
+            global_x=int(position["global_x"]),
+            global_y=int(position["global_y"]),
+        )
 
     def tap_hotkey(self, key_codes):
         """Press keys together as one hotkey chord, then release."""
-        if not isinstance(key_codes, (list, tuple)):
+        if not isinstance(key_codes, (list, tuple, str)):
             return
-        logical_keys = []
-        for key in key_codes:
-            logical = normalize_key(key)
-            if logical:
-                logical_keys.append(logical)
-        if not logical_keys:
+
+        try:
+            logical_keys = normalize_shortcut_keys(key_codes, self.detected_os)
+        except ValueError:
             return
 
         origin_ns = self._capture_latency_origin_for_action()

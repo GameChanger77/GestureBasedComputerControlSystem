@@ -10,8 +10,14 @@ from PySide6.QtWidgets import QApplication, QDialog
 
 from backend.gesture_remap.pose_templates import PoseMatcherConfig, build_pose_template
 from backend.gesture_remap.rule_overrides import GestureRuleOverride, POINT_OVERRIDE_KIND, RULE_OVERRIDE_KIND
-from backend.macros.macro_models import MacroActionStep, MacroPointTrigger, MacroRecord, MacroRuleTrigger
+from backend.macros.macro_models import (
+    MacroPointTrigger,
+    MacroRecord,
+    MacroRuleTrigger,
+    RULE_TRIGGER_TYPE_POSE,
+)
 from backend.macros.macro_store import MacroStore
+from backend.platforms.KeyboardBackendFactory import normalize_os_name
 from frontend.widgets.settings.settings_panel import SettingsPanel
 
 
@@ -51,10 +57,10 @@ class SettingsPanelMacrosTests(unittest.TestCase):
             page_names = [panel._submenu_list.item(i).text() for i in range(panel._submenu_list.count())]
             self.assertIn("Macros", page_names)
 
-    def test_macro_page_reflects_trigger_kind(self):
+    def test_macro_page_reflects_trigger_kind_and_shortcut(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "gesture_config.json"
-            store = MacroStore(config_path.with_name("gesture_macros.json"))
+            store = MacroStore(config_path.with_name("gesture_macros.json"), target_os="Windows")
             store.upsert(
                 MacroRecord.build_new(
                     name="Rule Macro",
@@ -63,13 +69,17 @@ class SettingsPanelMacrosTests(unittest.TestCase):
                     point_trigger=None,
                     rule_trigger=MacroRuleTrigger(
                         hand="right",
+                        trigger_type=RULE_TRIGGER_TYPE_POSE,
                         rule_override=GestureRuleOverride(
                             conditions=[{"op": "hand_count_eq", "value": 1}],
                             pending_frames=1,
                             ending_frames=1,
                         ),
+                        start_rule_override=None,
+                        swipe_config=None,
                     ),
-                    action_steps=[MacroActionStep.from_dict({"type": "left_click", "params": {}})],
+                    shortcut_keys=["left_ctrl", "c"],
+                    target_os="Windows",
                 )
             )
             store.upsert(
@@ -88,7 +98,8 @@ class SettingsPanelMacrosTests(unittest.TestCase):
                         matcher_config=PoseMatcherConfig(),
                     ),
                     rule_trigger=None,
-                    action_steps=[MacroActionStep.from_dict({"type": "tap_key", "params": {"key": "a"}})],
+                    shortcut_keys=["left_ctrl", "left_shift", "s"],
+                    target_os="Windows",
                 )
             )
 
@@ -97,8 +108,9 @@ class SettingsPanelMacrosTests(unittest.TestCase):
 
             self.assertEqual(panel._macro_settings_page.snapshot_for("Rule Macro")["trigger"], "Rule-Based")
             self.assertEqual(panel._macro_settings_page.snapshot_for("Point Macro")["trigger"], "3D Hand Model")
+            self.assertTrue(panel._macro_settings_page.snapshot_for("Rule Macro")["shortcut"])
 
-    def test_create_macro_launches_editor(self):
+    def test_create_macro_launches_editor_with_validation_and_target_os(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "gesture_config.json"
             panel = SettingsPanel(ui_mode="dev")
@@ -106,9 +118,11 @@ class SettingsPanelMacrosTests(unittest.TestCase):
             captured = {}
 
             class _DialogStub:
-                def __init__(self, config_source, existing_record=None, parent=None):
+                def __init__(self, config_source, existing_record=None, validate_point_trigger_callback=None, target_os=None, parent=None):
                     captured["config_source"] = config_source
                     captured["existing_record"] = existing_record
+                    captured["validate_callback"] = validate_point_trigger_callback
+                    captured["target_os"] = target_os
                     self.result_record = None
 
                 def exec(self):
@@ -119,11 +133,49 @@ class SettingsPanelMacrosTests(unittest.TestCase):
 
             self.assertIsInstance(captured["config_source"], dict)
             self.assertIsNone(captured["existing_record"])
+            self.assertTrue(callable(captured["validate_callback"]))
+            self.assertEqual(captured["target_os"], normalize_os_name())
 
     def test_macro_page_uses_card_empty_state_when_no_macros(self):
         panel = SettingsPanel(ui_mode="prod")
         snapshot = panel._macro_settings_page.snapshot_for("Missing")
         self.assertIsNone(snapshot)
+
+    def test_toggle_macro_emits_settings_panel_signal(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "gesture_config.json"
+            store = MacroStore(config_path.with_name("gesture_macros.json"), target_os="Windows")
+            record = store.upsert(
+                MacroRecord.build_new(
+                    name="Toggle Macro",
+                    mode="mouse",
+                    trigger_kind=RULE_OVERRIDE_KIND,
+                    point_trigger=None,
+                    rule_trigger=MacroRuleTrigger(
+                        hand="right",
+                        trigger_type=RULE_TRIGGER_TYPE_POSE,
+                        rule_override=GestureRuleOverride(
+                            conditions=[{"op": "hand_count_eq", "value": 1}],
+                            pending_frames=1,
+                            ending_frames=1,
+                        ),
+                        start_rule_override=None,
+                        swipe_config=None,
+                    ),
+                    shortcut_keys=["left_ctrl", "x"],
+                    target_os="Windows",
+                )
+            )
+
+            panel = SettingsPanel(ui_mode="prod")
+            panel.load_from_config(_ConfigStub(config_path))
+            signals = []
+            panel.macro_settings_changed.connect(lambda: signals.append("changed"))
+
+            panel._macro_settings_page._toggle_macro(record.id)
+
+            self.assertEqual(signals, ["changed"])
+            self.assertEqual(panel._macro_settings_page.snapshot_for("Toggle Macro")["state"], "Disabled")
 
 
 if __name__ == "__main__":

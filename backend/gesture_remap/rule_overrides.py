@@ -53,6 +53,8 @@ class GestureRuleOverride:
             raise ValueError("rule condition must be an object")
 
         op = str(condition.get("op", "")).strip()
+        if op == "only_fingers_extended.json":
+            op = "only_fingers_extended"
         if op not in CONDITION_DEFINITIONS:
             raise ValueError(f"unsupported rule condition op '{op}'")
 

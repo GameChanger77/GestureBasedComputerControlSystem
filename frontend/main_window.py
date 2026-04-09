@@ -10,10 +10,10 @@ from PySide6.QtWidgets import (
     QLabel,
     QStackedWidget,
 )
-from PySide6.QtCore import Qt, Slot, Signal
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, Slot, Signal, QTimer
 
 from frontend.widgets.display.video_widget import VideoWidget
+from frontend.widgets.display.shortcut_feedback_overlay import ShortcutFeedbackOverlay
 from frontend.production_keyboard_window import ProductionKeyboardWindow
 from frontend.widgets.display.gesture_debug_widget import GestureDebugWidget
 from frontend.widgets.display.stats_widget import PerformanceStatsWidget
@@ -56,12 +56,14 @@ class MainWindow(QMainWindow):
         self.is_dev_mode = self.ui_mode == "dev"
         self.component_factory = component_factory
         self.production_keyboard_window = ProductionKeyboardWindow() if not self.is_dev_mode else None
+        self.shortcut_feedback_overlay = ShortcutFeedbackOverlay()
 
         # Component references (will be injected)
         self.hand_tracker = None
         self.strategizer = None
         self.action = None
         self.config = None
+        self._last_shortcut_feedback_sequence = 0
 
         # Display state
         self.display_enabled = self.is_dev_mode
@@ -86,6 +88,10 @@ class MainWindow(QMainWindow):
 
         # Create UI
         self._create_ui()
+        self._shortcut_feedback_timer = QTimer(self)
+        self._shortcut_feedback_timer.setInterval(50)
+        self._shortcut_feedback_timer.timeout.connect(self._refresh_shortcut_feedback_overlay)
+        self._shortcut_feedback_timer.start()
 
     def _create_ui(self):
         """Create the user interface"""
@@ -129,6 +135,7 @@ class MainWindow(QMainWindow):
         self.settings_panel = SettingsPanel(ui_mode=self.ui_mode)
         self.settings_panel.settings_saved.connect(self.on_settings_saved)
         self.settings_panel.gesture_overrides_changed.connect(self.on_gesture_overrides_changed)
+        self.settings_panel.macro_settings_changed.connect(self.on_macro_settings_changed)
 
         if self.is_dev_mode:
             self.page_stack = QStackedWidget()
@@ -457,6 +464,9 @@ class MainWindow(QMainWindow):
         self.strategizer = strategizer
         self.action = action
         self.config = config
+        self._last_shortcut_feedback_sequence = 0
+        if self.shortcut_feedback_overlay:
+            self.shortcut_feedback_overlay.hide_feedback()
 
         if config is not None:
             self.settings_panel.load_from_config(config)
@@ -730,6 +740,42 @@ class MainWindow(QMainWindow):
             return self.strategizer.get_keyboard_overlay_data()
         return None
 
+    def _refresh_shortcut_feedback_overlay(self):
+        if not self.shortcut_feedback_overlay or not self.action or not hasattr(self.action, "get_action_events"):
+            return
+
+        try:
+            events = self.action.get_action_events(after_sequence=self._last_shortcut_feedback_sequence)
+        except Exception:
+            return
+
+        if not events:
+            return
+
+        self._last_shortcut_feedback_sequence = max(
+            self._last_shortcut_feedback_sequence,
+            max(int(event.get("sequence", 0)) for event in events),
+        )
+
+        for event in events:
+            event_type = str(event.get("type", "") or "").strip()
+            if event_type == "tap_hotkey":
+                label = str(event.get("shortcut_label", "") or "").strip()
+                if not label:
+                    keys = event.get("keys") or []
+                    label = " + ".join(str(key) for key in keys if str(key).strip())
+            elif event_type == "overlay_feedback":
+                label = str(event.get("label", "") or "").strip()
+            else:
+                continue
+            if not label:
+                continue
+            self.shortcut_feedback_overlay.show_shortcut(
+                label,
+                int(event.get("global_x", 0) or 0),
+                int(event.get("global_y", 0) or 0),
+            )
+
     def _should_flip_preview(self):
         if self.strategizer and hasattr(self.strategizer, "config"):
             return bool(self.strategizer.config.get("preview_flip_horizontal", True))
@@ -798,6 +844,19 @@ class MainWindow(QMainWindow):
             self._set_status_text("Status: Restarting with updated gestures...")
         else:
             self._set_status_text("Status: Gesture overrides saved")
+        self.show_main_page()
+
+    @Slot()
+    def on_macro_settings_changed(self):
+        """Persisted macros changed; rebuild runtime recognizers."""
+        was_running = bool(self.hand_tracker and self.hand_tracker.isRunning())
+        rebuilt = self._rebuild_backend_components(restart_tracking=was_running)
+        if not rebuilt:
+            return
+        if was_running:
+            self._set_status_text("Status: Restarting with updated macros...")
+        else:
+            self._set_status_text("Status: Macros saved")
         self.show_main_page()
 
     def _rebuild_backend_components(self, restart_tracking: bool):
@@ -1195,6 +1254,8 @@ class MainWindow(QMainWindow):
             self.gesture_debug_widget.reset()
         if self.production_keyboard_window:
             self.production_keyboard_window.set_overlay_data(None)
+        if self.shortcut_feedback_overlay:
+            self.shortcut_feedback_overlay.hide_feedback()
         self._update_mode_label()
 
     @Slot(str)
@@ -1208,6 +1269,8 @@ class MainWindow(QMainWindow):
             self.gesture_debug_widget.reset()
         if self.production_keyboard_window:
             self.production_keyboard_window.set_overlay_data(None)
+        if self.shortcut_feedback_overlay:
+            self.shortcut_feedback_overlay.hide_feedback()
         self._update_mode_label()
 
     def closeEvent(self, event):
@@ -1215,6 +1278,8 @@ class MainWindow(QMainWindow):
         # Stop tracking when window closes
         if self.tutorial_dialog is not None:
             self.tutorial_dialog.close()
+        if self.shortcut_feedback_overlay:
+            self.shortcut_feedback_overlay.close()
         if self.production_keyboard_window:
             self.production_keyboard_window.close()
         if self.hand_tracker and self.hand_tracker.isRunning():
