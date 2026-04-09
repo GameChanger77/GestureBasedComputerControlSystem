@@ -1,4 +1,5 @@
 import cv2
+import platform
 import time
 from PySide6.QtWidgets import (
     QFrame,
@@ -33,6 +34,15 @@ from frontend.widgets.settings.settings_theme import (
 from frontend.widgets.tutorial import TutorialDialog
 from backend.camera_devices import resolve_camera_selection
 from backend.gestures.keyboard_mode.KeyboardThemes import KeyboardThemeRegistry
+from backend.macos_camera_permissions import (
+    CAMERA_PERMISSION_AUTHORIZED,
+    CAMERA_PERMISSION_DENIED,
+    CAMERA_PERMISSION_ERROR,
+    CAMERA_PERMISSION_NOT_DETERMINED,
+    CAMERA_PERMISSION_RESTRICTED,
+    get_camera_permission_status,
+    request_camera_permission,
+)
 
 
 class MainWindow(QMainWindow):
@@ -43,6 +53,7 @@ class MainWindow(QMainWindow):
 
     # Signal to pass frame to video widget (thread-safe marshalling)
     frame_ready = Signal(object)
+    camera_permission_resolved = Signal(bool)
 
     def __init__(self, ui_mode="dev", component_factory=None):
         super().__init__()
@@ -69,6 +80,7 @@ class MainWindow(QMainWindow):
         self._preview_interval_ns = int(1_000_000_000 / 30)
         self._last_preview_emit_ns = 0
         self._auto_start_requested = False
+        self._camera_permission_request_pending = False
 
         # Hand landmark connections (for drawing)
         self.HAND_CONNECTIONS = [
@@ -86,6 +98,7 @@ class MainWindow(QMainWindow):
 
         # Create UI
         self._create_ui()
+        self.camera_permission_resolved.connect(self._on_camera_permission_resolved)
 
     def _create_ui(self):
         """Create the user interface"""
@@ -524,6 +537,10 @@ class MainWindow(QMainWindow):
         if self.hand_tracker.isRunning():
             return True
 
+        permission_state = self._preflight_macos_camera_permission()
+        if permission_state != CAMERA_PERMISSION_AUTHORIZED:
+            return False
+
         camera_index, camera_backend = self._get_selected_camera_selection()
         cam_w, cam_h = self._get_camera_start_dimensions()
         if self.hand_tracker.start_tracking(
@@ -538,6 +555,55 @@ class MainWindow(QMainWindow):
 
         self._set_status_text("Status: Failed to start")
         return False
+
+    def _preflight_macos_camera_permission(self) -> str:
+        """Gate tracker startup on macOS camera authorization."""
+        if platform.system() != "Darwin":
+            return CAMERA_PERMISSION_AUTHORIZED
+
+        status = get_camera_permission_status()
+        if status == CAMERA_PERMISSION_AUTHORIZED:
+            self._camera_permission_request_pending = False
+            return status
+
+        self._set_start_button_running(False)
+        if status == CAMERA_PERMISSION_NOT_DETERMINED:
+            if not self._camera_permission_request_pending:
+                self._camera_permission_request_pending = True
+                self._set_status_text("Status: Waiting for camera permission...")
+                if not request_camera_permission(self.camera_permission_resolved.emit):
+                    self._camera_permission_request_pending = False
+                    self._set_status_text(
+                        "Status: Error - Unable to request camera permission on macOS"
+                    )
+                    return CAMERA_PERMISSION_ERROR
+            return status
+
+        self._camera_permission_request_pending = False
+        self._set_status_text(f"Status: Error - {self._camera_permission_error_text(status)}")
+        return status
+
+    def _camera_permission_error_text(self, status: str) -> str:
+        if status == CAMERA_PERMISSION_DENIED:
+            return (
+                "Camera access denied. Enable GBCCS in System Settings > Privacy & Security > Camera."
+            )
+        if status == CAMERA_PERMISSION_RESTRICTED:
+            return "Camera access is restricted by macOS and cannot be granted for GBCCS."
+        return "Unable to determine camera permission status on macOS."
+
+    @Slot(bool)
+    def _on_camera_permission_resolved(self, granted: bool):
+        self._camera_permission_request_pending = False
+        if not granted:
+            self._set_start_button_running(False)
+            self._set_status_text(
+                "Status: Error - "
+                + self._camera_permission_error_text(CAMERA_PERMISSION_DENIED)
+            )
+            return
+
+        self.ensure_tracking_running()
 
     @Slot()
     def open_tutorial(self):
@@ -1202,13 +1268,25 @@ class MainWindow(QMainWindow):
         """Handle tracking error signal"""
         if not self._is_current_tracker_signal():
             return
+        normalized_error = self._normalize_tracking_error_message(error_message)
         self._set_start_button_running(False)
-        self._set_status_text(f"Status: Error - {error_message}")
+        self._set_status_text(f"Status: Error - {normalized_error}")
         if self.gesture_debug_widget:
             self.gesture_debug_widget.reset()
         if self.production_keyboard_window:
             self.production_keyboard_window.set_overlay_data(None)
         self._update_mode_label()
+
+    def _normalize_tracking_error_message(self, error_message: str) -> str:
+        text = str(error_message or "")
+        normalized = text.lower()
+        if "camera access denied" in normalized or "camera permission denied" in normalized:
+            return self._camera_permission_error_text(CAMERA_PERMISSION_DENIED)
+        if "camera access is restricted" in normalized or "camera permission restricted" in normalized:
+            return self._camera_permission_error_text(CAMERA_PERMISSION_RESTRICTED)
+        if "webcam unavailable" in normalized or "already in use" in normalized:
+            return "Camera is unavailable or already in use."
+        return text
 
     def closeEvent(self, event):
         """Handle window close event"""

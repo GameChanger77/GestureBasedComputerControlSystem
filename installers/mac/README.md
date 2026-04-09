@@ -1,26 +1,44 @@
-To generate the dmg (run from installers/mac):
+Build macOS installers from `installers/mac` or the repo root.
 
-./build_mac.sh
+## Outputs
+- `installers/mac/installer_out/gbccs-macos-arm64.dmg`
+- `installers/mac/installer_out/gbccs-macos-x86_64.dmg`
 
-To Install (no terminal needed):
-1) Download the file: gbccs.dmg
-2) Double-click gbccs.dmg to open (mount) it.
-3) In the window that appears, drag “gbccs.app” into the “Applications” folder.
-4) Eject the mounted disk image (click the eject icon next to “gbccs” in Finder).
+## Build Apple Silicon
+```bash
+TARGET_ARCH=arm64 ./installers/mac/build_mac.sh
+```
 
-Run
-1) Open Finder → Applications.
-2) Double-click “gbccs” to launch.
+## Build Intel
+```bash
+TARGET_ARCH=x86_64 ./installers/mac/build_mac.sh
+```
 
-If macOS blocks the app (“Unidentified Developer”)
-Because this build isn’t notarized, macOS Gatekeeper may warn or block it the first time.
+## Build Intel On Apple Silicon Under Rosetta
+```bash
+arch -x86_64 /usr/local/bin/python3.11 -m venv .venv-macos-x86_64
+uv export --format requirements.txt --no-hashes --frozen --all-groups --no-emit-project -o /tmp/gbccs-x86-requirements.txt
+grep -Ev '^(jax|jaxlib)==' /tmp/gbccs-x86-requirements.txt > /tmp/gbccs-x86-requirements-nojax.txt
+arch -x86_64 .venv-macos-x86_64/bin/python -m pip install --upgrade pip setuptools wheel
+arch -x86_64 .venv-macos-x86_64/bin/python -m pip install --no-deps -r /tmp/gbccs-x86-requirements-nojax.txt
+arch -x86_64 env BUILD_PYTHON="$PWD/.venv-macos-x86_64/bin/python" SKIP_UV_SYNC=1 TARGET_ARCH=x86_64 ./installers/mac/build_mac.sh
+```
 
-Option A (recommended)
-1) In Applications, right-click (or Control-click) “gbccs”.
-2) Click “Open”.
-3) Click “Open” again in the confirmation dialog.
+## Notes
+- The build environment must match `TARGET_ARCH`.
+- Intel builds require an `x86_64` Python environment with `x86_64` native wheels.
+- Apple Silicon builds require an `arm64` Python environment with `arm64` native wheels.
+- The script verifies native extension architectures before packaging and will fail early on a mismatch.
+- The app bundle carries `NSCameraUsageDescription` inside the signed bundle definition; the script does not edit `Info.plist` after build.
+- `BUILD_PYTHON` can point the build script at a separate Python/PyInstaller environment, and `SKIP_UV_SYNC=1` skips syncing the default project environment when using that external interpreter.
+- The current dependency set includes `jax` and `jaxlib`, but `jaxlib==0.8.0` does not ship a macOS `x86_64` wheel. The Rosetta flow above omits those two packages because they are not imported by the application.
 
-Option B
-1) Open System Settings → Privacy & Security.
-2) Scroll down to the Security section.
-3) Click “Open Anyway” next to the blocked app message, then confirm.
+## Install
+1. Open the generated DMG.
+2. Drag `gbccs.app` into `Applications`.
+3. Eject the mounted disk image.
+
+## First launch on macOS
+- The app will request camera permission the first time tracking starts.
+- If camera access is denied, enable it in `System Settings > Privacy & Security > Camera`.
+- These builds are local distribution artifacts and are not notarized in this phase, so Gatekeeper may still require the standard “Open Anyway” flow.

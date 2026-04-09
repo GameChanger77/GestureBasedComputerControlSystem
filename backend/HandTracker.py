@@ -10,6 +10,13 @@ import numpy as np
 from PySide6.QtCore import QThread, Signal
 from paths import resource
 from backend.HandsData import HandsData
+from backend.macos_camera_permissions import (
+    CAMERA_PERMISSION_AUTHORIZED,
+    CAMERA_PERMISSION_DENIED,
+    CAMERA_PERMISSION_NOT_DETERMINED,
+    CAMERA_PERMISSION_RESTRICTED,
+    get_camera_permission_status,
+)
 
 
 class HandTracker(QThread):
@@ -156,8 +163,13 @@ class HandTracker(QThread):
         try:
             is_windows = platform.system() == "Windows"
             is_linux = platform.system() == "Linux"
+            is_macos = platform.system() == "Darwin"
             using_dshow = False
             using_v4l2 = False
+            macos_permission_status = None
+
+            if is_macos:
+                macos_permission_status = get_camera_permission_status()
 
             if camera_backend:
                 self.cap = cv2.VideoCapture(camera_index, camera_backend)
@@ -181,6 +193,15 @@ class HandTracker(QThread):
                     self.cap = cv2.VideoCapture(camera_index)
 
             if (not self.cap) or (not self.cap.isOpened()):
+                if is_macos:
+                    if macos_permission_status == CAMERA_PERMISSION_DENIED:
+                        raise Exception('Camera access denied by macOS permissions')
+                    if macos_permission_status == CAMERA_PERMISSION_RESTRICTED:
+                        raise Exception('Camera access is restricted by macOS')
+                    if macos_permission_status == CAMERA_PERMISSION_NOT_DETERMINED:
+                        raise Exception('Camera access has not been granted yet')
+                    if macos_permission_status == CAMERA_PERMISSION_AUTHORIZED:
+                        raise Exception('Webcam unavailable or already in use')
                 raise Exception('Could not open webcam')
 
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
