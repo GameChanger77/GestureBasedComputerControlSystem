@@ -100,6 +100,50 @@ class ActionTutorialScopeTests(unittest.TestCase):
         self.assertEqual(event["global_y"], 88)
         action.close()
 
+    def test_tap_hotkey_uses_live_mouse_position_for_overlay_feedback(self):
+        mouse = _FakeMouse()
+        keyboard = _FakeKeyboard()
+        action = Action(
+            mouse=mouse,
+            keyboard_test=keyboard,
+            osType="Windows",
+            screen_origin_x=10,
+            screen_origin_y=20,
+        )
+
+        mouse.position = (150, 260)
+        action.tap_hotkey(["left_ctrl", "c"])
+        action._action_queue.join()
+
+        event = action.get_action_events()[-1]
+        self.assertEqual(event["type"], "tap_hotkey")
+        self.assertEqual(event["global_x"], 150)
+        self.assertEqual(event["global_y"], 260)
+        self.assertEqual(event["local_x"], 140)
+        self.assertEqual(event["local_y"], 240)
+        action.close()
+
+    def test_show_feedback_message_uses_live_mouse_position_for_overlay_feedback(self):
+        mouse = _FakeMouse()
+        action = Action(
+            mouse=mouse,
+            keyboard_test=_FakeKeyboard(),
+            osType="Test",
+            screen_origin_x=25,
+            screen_origin_y=40,
+        )
+
+        mouse.position = (225, 340)
+        action.show_feedback_message("Mouse", feedback_type="mode")
+
+        event = action.get_action_events()[-1]
+        self.assertEqual(event["type"], "overlay_feedback")
+        self.assertEqual(event["global_x"], 225)
+        self.assertEqual(event["global_y"], 340)
+        self.assertEqual(event["local_x"], 200)
+        self.assertEqual(event["local_y"], 300)
+        action.close()
+
 
 if __name__ == "__main__":
     unittest.main()

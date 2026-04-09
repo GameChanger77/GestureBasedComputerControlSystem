@@ -1,6 +1,5 @@
 from enum import Enum
 import time
-from pathlib import Path
 
 from backend.HandsData import HandsData
 from backend.macros.macro_store import MacroStore
@@ -25,7 +24,6 @@ class Strategizer:
         screen_width,
         screen_height,
         ui_mode="dev",
-        load_legacy_custom_rules=False,
     ):
         """
         Initialize the Strategizer.
@@ -61,13 +59,12 @@ class Strategizer:
             target_os=getattr(self.action, "detected_os", None),
         )
         self._debug_snapshot = self._empty_debug_snapshot()
-        self.load_legacy_custom_rules = bool(load_legacy_custom_rules)
 
         # Initialize built-in mode-specific gestures before loading JSON rules.
         self._initialize_mouse_mode()
         self._initialize_keyboard_mode()
         self._initialize_switch_mode()
-        self._reload_customizations(load_legacy_rules=self.load_legacy_custom_rules)
+        self._reload_customizations()
 
     def _initialize_mouse_mode(self):
         """Initialize gesture recognizers for mouse mode."""
@@ -313,12 +310,6 @@ class Strategizer:
             "action_debug": None,
         }
 
-    def _resolve_legacy_rules_path(self):
-        config_path = getattr(self.config, "config_path", None)
-        if config_path is None:
-            return "gesture_custom_rules.json"
-        return str(Path(config_path).with_name("gesture_custom_rules.json"))
-
     def _gesture_display_name(self, gesture):
         return (
             getattr(gesture, "debug_name", None)
@@ -525,9 +516,8 @@ class Strategizer:
             self.hotkey_mode_gestures.remove(gesture)
             self._rebuild_sorted_gestures(ControlMode.HOTKEY)
 
-    def _reload_customizations(self, *, legacy_rules_path=None, load_legacy_rules=False):
+    def _reload_customizations(self):
         from backend.custom_rules.RuleCompiler import RuleCompiler
-        from backend.custom_rules.RuleLoader import RuleLoader
 
         for gesture in getattr(self, "_custom_gesture_instances", []):
             if gesture in self.mouse_mode_gestures:
@@ -543,35 +533,6 @@ class Strategizer:
         self._rebuild_sorted_gestures(ControlMode.HOTKEY)
 
         compiler = RuleCompiler(self.config, self.screen_width, self.screen_height)
-        if load_legacy_rules:
-            path = legacy_rules_path or self._resolve_legacy_rules_path()
-            try:
-                rules = RuleLoader(path).load()
-            except Exception as exc:
-                print(f"[WARN] Failed to load custom rules: {exc}")
-                rules = {}
-
-            global_cfg = rules.get("global", {})
-
-            for rule in rules.get("custom_gestures", []):
-                if not rule.get("enabled", False):
-                    continue
-
-                mode_str = rule.get("mode", "mouse")
-                if mode_str == "mouse":
-                    mode = ControlMode.MOUSE
-                elif mode_str == "keyboard":
-                    mode = ControlMode.KEYBOARD
-                else:
-                    mode = ControlMode.HOTKEY
-
-                try:
-                    recognizer = compiler.compile_gesture(self.action, rule, global_cfg)
-                    self.add_custom_gesture(recognizer, mode=mode)
-                    self._custom_gesture_instances.append(recognizer)
-                    print(f"[OK] Loaded custom gesture: {rule.get('id')} ({mode_str})")
-                except Exception as exc:
-                    print(f"[WARN] Skipped custom gesture {rule.get('id')}: {exc}")
 
         for macro_record in self.macro_store.list_records():
             if not macro_record.enabled:
@@ -591,9 +552,6 @@ class Strategizer:
                 print(f"[OK] Loaded UI macro: {macro_record.name} ({macro_record.mode})")
             except Exception as exc:
                 print(f"[WARN] Skipped UI macro {macro_record.name}: {exc}")
-
-    def load_custom_rules(self, path=None):
-        self._reload_customizations(legacy_rules_path=path, load_legacy_rules=True)
 
     def shutdown(self):
         """Reset all gestures and release held state before process/UI shutdown."""

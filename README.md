@@ -39,25 +39,11 @@ uv run python main.py --dev
 uv run python main.py --prod
 ```
 
-Legacy JSON custom rules are **off by default**. To explicitly load
-`gesture_custom_rules.json` from the same directory as `gesture_config.json`,
-start the app with:
-```powershell
-uv run python main.py --load-legacy-custom-rules
-```
-
-You can combine it with either UI mode flag:
-```powershell
-uv run python main.py --dev --load-legacy-custom-rules
-uv run python main.py --prod --load-legacy-custom-rules
-```
-
 Bundled installer builds always run `prod` mode, even if `--dev` is passed.
 
-Custom gesture macros are separate from the legacy JSON rule path. They are
-created in the app's `Macros` settings page, stored in `gesture_macros.json`,
-and load automatically on startup. Each macro is exactly one gesture trigger
-mapped to exactly one shortcut chord, with support for:
+Custom gesture macros are created in the app's `Macros` settings page, stored
+in `gesture_macros.json`, and load automatically on startup. Each macro is
+exactly one gesture trigger mapped to exactly one shortcut chord, with support for:
 - Rule-based pose triggers
 - Rule-based swipe triggers
 - 3D hand-model pose triggers
@@ -156,7 +142,7 @@ If prompted by your OS, allow camera access for Python/terminal.
 
 ## Custom Gesture Macros
 
-- Created from the `Macros` settings page, not from `gesture_custom_rules.json`
+- Created from the `Macros` settings page
 - Each macro fires one shortcut chord such as `Ctrl + V` or `Cmd + Shift + 4`
 - Macros can be assigned to `mouse`, `keyboard`, or `hotkey` mode
 - Rule-based macros can use either a static pose or a swipe motion

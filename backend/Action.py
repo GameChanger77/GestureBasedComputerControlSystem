@@ -257,6 +257,26 @@ class Action:
                 "global_y": int(self._last_cursor_global[1]),
             }
 
+    def _live_cursor_snapshot(self):
+        try:
+            position = tuple(self.mouse.position)
+            if len(position) != 2:
+                raise ValueError("Mouse position must contain x and y")
+            global_x = int(position[0])
+            global_y = int(position[1])
+        except Exception:
+            return self._current_cursor_snapshot()
+
+        local_x = int(global_x - self.screen_origin_x)
+        local_y = int(global_y - self.screen_origin_y)
+        self._update_committed_cursor_position(local_x, local_y, global_x, global_y)
+        return {
+            "local_x": local_x,
+            "local_y": local_y,
+            "global_x": global_x,
+            "global_y": global_y,
+        }
+
     def _invalidate_pending_move_actions(self):
         with self._move_generation_lock:
             self._move_generation += 1
@@ -603,7 +623,7 @@ class Action:
 
     def _tap_hotkey_impl(self, logical_keys):
         if self._keyboard_backend.tap_hotkey(logical_keys):
-            position = self._current_cursor_snapshot()
+            position = self._live_cursor_snapshot()
             try:
                 shortcut_label = summarize_shortcut_keys(logical_keys, self.detected_os)
             except Exception:
@@ -622,7 +642,7 @@ class Action:
         label = str(text or "").strip()
         if not label:
             return
-        position = self._current_cursor_snapshot()
+        position = self._live_cursor_snapshot()
         self._record_action_event(
             "overlay_feedback",
             label=label,
