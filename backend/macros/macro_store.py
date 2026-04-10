@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.GestureConfig import GestureConfig
@@ -9,17 +10,34 @@ from backend.gesture_remap.pose_templates import (
     PoseMatcherConfig,
     compare_pose_templates,
 )
-from backend.macros.macro_models import MacroRecord
+from backend.gesture_remap.rule_overrides import RULE_OVERRIDE_KIND, GestureRuleOverride
+from backend.macros.macro_models import (
+    MacroRecord,
+    MacroRuleTrigger,
+    RULE_TRIGGER_TYPE_POSE,
+)
 from backend.platforms.KeyboardBackendFactory import normalize_os_name
 
 
 class MacroStore:
     VERSION = 2
     FILENAME = "gesture_macros.json"
+    _STARTER_MACRO_SPECS = (
+        ("starter_hotkey_copy", "Copy", "middle.tip", "c"),
+        ("starter_hotkey_paste", "Paste", "ring.tip", "v"),
+        ("starter_hotkey_undo", "Undo", "pinky.tip", "z"),
+    )
 
-    def __init__(self, path: Path | str | None = None, *, target_os: str | None = None):
+    def __init__(
+        self,
+        path: Path | str | None = None,
+        *,
+        target_os: str | None = None,
+        seed_defaults: bool = False,
+    ):
         self.path = self.resolve_path(path)
         self.target_os = normalize_os_name(target_os)
+        self.seed_defaults = bool(seed_defaults)
         self.records: dict[str, MacroRecord] = {}
         self.load()
 
@@ -36,14 +54,22 @@ class MacroStore:
         config: GestureConfig | None,
         *,
         target_os: str | None = None,
+        seed_defaults: bool = True,
     ) -> "MacroStore":
         if config is None:
-            return cls(target_os=target_os)
-        return cls(config.config_path.with_name(cls.FILENAME), target_os=target_os)
+            return cls(target_os=target_os, seed_defaults=seed_defaults)
+        return cls(
+            config.config_path.with_name(cls.FILENAME),
+            target_os=target_os,
+            seed_defaults=seed_defaults,
+        )
 
     def load(self):
         self.records = {}
         if not self.path.exists():
+            if self.seed_defaults:
+                self.records = self._build_starter_macros()
+                self.save()
             return
         try:
             with self.path.open("r", encoding="utf-8") as handle:
@@ -65,6 +91,45 @@ class MacroStore:
         except Exception as exc:
             print(f"[WARN] Failed to load gesture macros from {self.path}: {exc}")
             self.records = {}
+
+    def _default_shortcut_keys(self, key_name: str) -> list[str]:
+        modifier = "left_cmd" if self.target_os == "Darwin" else "left_ctrl"
+        return [modifier, str(key_name).strip().lower()]
+
+    def _build_starter_macros(self) -> dict[str, MacroRecord]:
+        created_at = datetime.now(timezone.utc).isoformat()
+        records: dict[str, MacroRecord] = {}
+        for macro_id, name, pinch_target, key_name in self._STARTER_MACRO_SPECS:
+            records[macro_id] = MacroRecord.build_new(
+                name=name,
+                mode="hotkey",
+                trigger_kind=RULE_OVERRIDE_KIND,
+                point_trigger=None,
+                rule_trigger=MacroRuleTrigger(
+                    hand="right",
+                    trigger_type=RULE_TRIGGER_TYPE_POSE,
+                    rule_override=GestureRuleOverride(
+                        conditions=[
+                            {
+                                "op": "pinch_distance_lt",
+                                "a": "thumb.tip",
+                                "b": pinch_target,
+                                "value": 0.3,
+                                "space": "wrist",
+                            }
+                        ],
+                        pending_frames=3,
+                        ending_frames=2,
+                    ),
+                    start_rule_override=None,
+                    swipe_config=None,
+                ),
+                shortcut_keys=self._default_shortcut_keys(key_name),
+                macro_id=macro_id,
+                created_at=created_at,
+                target_os=self.target_os,
+            )
+        return records
 
     def save(self):
         payload = {

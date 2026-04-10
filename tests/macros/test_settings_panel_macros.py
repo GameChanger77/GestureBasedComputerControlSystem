@@ -141,6 +141,17 @@ class SettingsPanelMacrosTests(unittest.TestCase):
         snapshot = panel._macro_settings_page.snapshot_for("Missing")
         self.assertIsNone(snapshot)
 
+    def test_load_from_config_seeds_starter_macros_for_new_users(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "gesture_config.json"
+            panel = SettingsPanel(ui_mode="prod")
+
+            panel.load_from_config(_ConfigStub(config_path))
+
+            self.assertEqual(panel._macro_settings_page.snapshot_for("Copy")["mode"], "Hotkey")
+            self.assertTrue(panel._macro_settings_page.snapshot_for("Paste")["shortcut"])
+            self.assertTrue(panel._macro_settings_page.snapshot_for("Undo")["shortcut"])
+
     def test_toggle_macro_emits_settings_panel_signal(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "gesture_config.json"

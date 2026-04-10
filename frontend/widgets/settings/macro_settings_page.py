@@ -37,7 +37,7 @@ class MacroSettingsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._config = None
-        self.macro_store = MacroStore()
+        self.macro_store = MacroStore(seed_defaults=False)
         self._snapshots_by_name: dict[str, dict] = {}
         self._create_ui()
         self.refresh()

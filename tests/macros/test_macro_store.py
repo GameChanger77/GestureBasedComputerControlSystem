@@ -17,6 +17,48 @@ from backend.macros.macro_store import MacroStore
 
 
 class MacroStoreTests(unittest.TestCase):
+    def test_missing_store_seeds_default_hotkey_macros_once(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "gesture_macros.json"
+
+            store = MacroStore(path, target_os="Windows", seed_defaults=True)
+
+            records = store.list_records()
+            self.assertTrue(path.exists())
+            self.assertEqual([record.name for record in records], ["Copy", "Paste", "Undo"])
+            self.assertEqual([record.shortcut_keys for record in records], [
+                ["left_ctrl", "c"],
+                ["left_ctrl", "v"],
+                ["left_ctrl", "z"],
+            ])
+            self.assertTrue(all(record.mode == "hotkey" for record in records))
+            self.assertTrue(all(record.rule_trigger is not None for record in records))
+            self.assertEqual(
+                [
+                    record.rule_trigger.rule_override.conditions[0]["b"]
+                    for record in records
+                ],
+                ["middle.tip", "ring.tip", "pinky.tip"],
+            )
+
+    def test_missing_store_seeds_platform_specific_shortcuts(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            store = MacroStore(Path(tmp_dir) / "gesture_macros.json", target_os="Darwin", seed_defaults=True)
+
+            self.assertEqual(
+                [record.shortcut_keys for record in store.list_records()],
+                [["left_cmd", "c"], ["left_cmd", "v"], ["left_cmd", "z"]],
+            )
+
+    def test_existing_store_is_not_reseeded_when_file_already_exists(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "gesture_macros.json"
+            path.write_text('{"version": 2, "macros": {}}', encoding="utf-8")
+
+            store = MacroStore(path, target_os="Windows", seed_defaults=True)
+
+            self.assertEqual(store.list_records(), [])
+
     def test_rule_macro_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             store = MacroStore(Path(tmp_dir) / "gesture_macros.json", target_os="Windows")

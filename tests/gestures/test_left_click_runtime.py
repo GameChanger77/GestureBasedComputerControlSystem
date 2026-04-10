@@ -7,10 +7,26 @@ from backend.gestures.mouse_mode.LeftClickGesture import LeftClickGesture
 class _ActionStub:
     def __init__(self):
         self.left_clicks = []
+        self.double_clicks = []
+        self.moves = []
+        self.left_button_down = 0
+        self.left_button_up = 0
         self.pending_latency = []
 
     def left_click(self, x, y):
         self.left_clicks.append((x, y))
+
+    def double_click(self, x, y):
+        self.double_clicks.append((x, y))
+
+    def move_cursor(self, x, y):
+        self.moves.append((x, y))
+
+    def hold_left_click(self):
+        self.left_button_down += 1
+
+    def release_left_click(self):
+        self.left_button_up += 1
 
     def set_pending_latency_origin_ts_ns(self, ts):
         self.pending_latency.append(ts)
@@ -28,15 +44,14 @@ class _ScriptedLeftClickGesture(LeftClickGesture):
 
 
 class LeftClickRuntimeTests(unittest.TestCase):
-    def test_left_click_triggers_on_confirm_and_once_more_on_hold(self):
+    def test_left_click_triggers_once_on_release(self):
         action = _ActionStub()
         gesture = _ScriptedLeftClickGesture(
             action,
             responses=[
                 (True, (100, 200)),
                 (True, (100, 200)),
-                (True, (100, 200)),
-                (True, (100, 200)),
+                (False, None),
                 (False, None),
             ],
             screen_width=1920,
@@ -47,16 +62,90 @@ class LeftClickRuntimeTests(unittest.TestCase):
             pending_frames=1,
             ending_frames=1,
             double_click_hold_time=0.5,
+            drag_deadzone_px=24,
         )
 
-        with patch("backend.gestures.mouse_mode.LeftClickGesture.time.time", side_effect=[100.0, 100.1, 100.7]):
+        with patch("backend.gestures.mouse_mode.LeftClickGesture.time.time", side_effect=[100.0, 100.1]):
             self.assertFalse(gesture.update(object(), frame_capture_ts_ns=1))
-            self.assertTrue(gesture.update(object(), frame_capture_ts_ns=2))
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=2))
             self.assertFalse(gesture.update(object(), frame_capture_ts_ns=3))
             self.assertTrue(gesture.update(object(), frame_capture_ts_ns=4))
+
+        self.assertEqual(action.left_clicks, [(100, 200)])
+        self.assertEqual(action.double_clicks, [])
+        self.assertEqual(action.left_button_down, 0)
+        self.assertEqual(action.left_button_up, 0)
+
+    def test_left_click_hold_triggers_double_click_without_release_click(self):
+        action = _ActionStub()
+        gesture = _ScriptedLeftClickGesture(
+            action,
+            responses=[
+                (True, (100, 200)),
+                (True, (100, 200)),
+                (True, (100, 200)),
+                (False, None),
+                (False, None),
+            ],
+            screen_width=1920,
+            screen_height=1080,
+            priority=10,
+            pinch_threshold=0.3,
+            extension_threshold=155.0,
+            pending_frames=1,
+            ending_frames=1,
+            double_click_hold_time=0.5,
+            drag_deadzone_px=24,
+        )
+
+        with patch("backend.gestures.mouse_mode.LeftClickGesture.time.time", side_effect=[100.0, 100.7]):
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=1))
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=2))
+            self.assertTrue(gesture.update(object(), frame_capture_ts_ns=3))
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=4))
             self.assertFalse(gesture.update(object(), frame_capture_ts_ns=5))
 
-        self.assertEqual(action.left_clicks, [(100, 200), (100, 200)])
+        self.assertEqual(action.left_clicks, [])
+        self.assertEqual(action.double_clicks, [(100, 200)])
+        self.assertEqual(action.left_button_down, 0)
+        self.assertEqual(action.left_button_up, 0)
+
+    def test_left_click_drag_holds_moves_and_releases(self):
+        action = _ActionStub()
+        gesture = _ScriptedLeftClickGesture(
+            action,
+            responses=[
+                (True, (100, 200)),
+                (True, (100, 200)),
+                (True, (150, 240)),
+                (True, (180, 260)),
+                (False, None),
+                (False, None),
+            ],
+            screen_width=1920,
+            screen_height=1080,
+            priority=10,
+            pinch_threshold=0.3,
+            extension_threshold=155.0,
+            pending_frames=1,
+            ending_frames=1,
+            double_click_hold_time=0.5,
+            drag_deadzone_px=24,
+        )
+
+        with patch("backend.gestures.mouse_mode.LeftClickGesture.time.time", side_effect=[100.0, 100.1, 100.2]):
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=1))
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=2))
+            self.assertTrue(gesture.update(object(), frame_capture_ts_ns=3))
+            self.assertTrue(gesture.update(object(), frame_capture_ts_ns=4))
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=5))
+            self.assertTrue(gesture.update(object(), frame_capture_ts_ns=6))
+
+        self.assertEqual(action.left_clicks, [])
+        self.assertEqual(action.double_clicks, [])
+        self.assertEqual(action.left_button_down, 1)
+        self.assertEqual(action.left_button_up, 1)
+        self.assertEqual(action.moves, [(100, 200), (150, 240), (180, 260)])
 
 
 if __name__ == "__main__":

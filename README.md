@@ -93,7 +93,7 @@ If prompted by your OS, allow camera access for Python/terminal.
    - Trigger: Right thumb + middle finger pinch
    - Action: Performs a left click at the index fingertip cursor position
    - Priority: 10 (high)
-   - Notes: A confirmed pinch performs a single click immediately; holding the pinch for about 1 second emits one additional click
+   - Notes: Releasing the pinch performs a single click, holding it steady triggers a double click, and moving while still pinched turns it into a left-click drag
 
 4. **RightClickGesture** (`backend/gestures/mouse_mode/RightClickGesture.py`)
    - Trigger: Right thumb + ring finger pinch
