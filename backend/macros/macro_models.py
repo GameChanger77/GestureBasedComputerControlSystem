@@ -5,77 +5,23 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from backend.custom_rules.condition_catalog import LANDMARK_OPTIONS
 from backend.gesture_remap.pose_templates import HandPoseTemplate, PoseMatcherConfig
 from backend.gesture_remap.rule_overrides import (
     GestureRuleOverride,
     POINT_OVERRIDE_KIND,
     RULE_OVERRIDE_KIND,
 )
-from backend.gestures.keyboard_mode.KeyCodes import normalize_key
-from backend.macros.macro_step_catalog import STEP_DEFINITIONS
+from backend.platforms.KeyMappings import normalize_shortcut_keys
 
 
 VALID_MACRO_MODES = {"mouse", "keyboard", "hotkey"}
 VALID_TRIGGER_HANDS = {"left", "right", "either"}
-
-
-@dataclass(frozen=True)
-class MacroActionStep:
-    step_type: str
-    params: dict
-
-    def to_dict(self) -> dict:
-        return {
-            "type": self.step_type,
-            "params": copy.deepcopy(self.params),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "MacroActionStep":
-        if not isinstance(data, dict):
-            raise ValueError("macro step must be an object")
-
-        step_type = str(data.get("type", "")).strip()
-        if step_type not in STEP_DEFINITIONS:
-            raise ValueError(f"unsupported macro step type '{step_type}'")
-
-        params = data.get("params", {})
-        if params is None:
-            params = {}
-        if not isinstance(params, dict):
-            raise ValueError("macro step params must be an object")
-
-        normalized_params = {}
-        for field in STEP_DEFINITIONS[step_type]["fields"]:
-            name = field["name"]
-            raw_value = params.get(name, copy.deepcopy(field.get("default")))
-            normalized_params[name] = cls._coerce_field_value(field, raw_value)
-        return cls(step_type=step_type, params=normalized_params)
-
-    @staticmethod
-    def _coerce_field_value(field: dict, value):
-        field_type = field["type"]
-        if field_type == "int":
-            return int(value)
-        if field_type == "float":
-            return float(value)
-        if field_type == "key":
-            normalized = normalize_key(value)
-            if not normalized:
-                raise ValueError(f"{field['name']} must be a valid key")
-            return normalized
-        if field_type == "key_list":
-            if isinstance(value, str):
-                raw_items = [item.strip() for item in value.split(",")]
-            elif isinstance(value, (list, tuple)):
-                raw_items = [str(item).strip() for item in value]
-            else:
-                raise ValueError(f"{field['name']} must be a list of keys")
-            normalized_items = [normalize_key(item) for item in raw_items if normalize_key(item)]
-            if not normalized_items:
-                raise ValueError(f"{field['name']} must contain at least one key")
-            return normalized_items
-        raise ValueError(f"unsupported macro step field type '{field_type}'")
+RULE_TRIGGER_TYPE_POSE = "pose"
+RULE_TRIGGER_TYPE_SWIPE = "swipe"
+VALID_RULE_TRIGGER_TYPES = {RULE_TRIGGER_TYPE_POSE, RULE_TRIGGER_TYPE_SWIPE}
+VALID_SWIPE_DIRECTIONS = {"left", "right", "up", "down"}
+VALID_TRACKED_POINTS = {value for value, _label in LANDMARK_OPTIONS}
 
 
 @dataclass(frozen=True)
@@ -117,15 +63,91 @@ class MacroPointTrigger:
 
 
 @dataclass(frozen=True)
-class MacroRuleTrigger:
-    hand: str
-    rule_override: GestureRuleOverride
+class MacroSwipeConfig:
+    tracked_point: str
+    direction: str
+    min_displacement: float
+    min_speed: float
+    min_smoothness: float
+    start_confirm_frames: int
+    timeout_frames: int
 
     def to_dict(self) -> dict:
         return {
-            "hand": self.hand,
-            "rule_override": self.rule_override.to_dict(),
+            "tracked_point": self.tracked_point,
+            "direction": self.direction,
+            "min_displacement": float(self.min_displacement),
+            "min_speed": float(self.min_speed),
+            "min_smoothness": float(self.min_smoothness),
+            "start_confirm_frames": int(self.start_confirm_frames),
+            "timeout_frames": int(self.timeout_frames),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MacroSwipeConfig":
+        if not isinstance(data, dict):
+            raise ValueError("macro swipe config must be an object")
+
+        tracked_point = str(data.get("tracked_point", "index.tip")).strip()
+        if tracked_point not in VALID_TRACKED_POINTS:
+            raise ValueError(f"invalid swipe tracked_point '{tracked_point}'")
+
+        direction = str(data.get("direction", "right")).strip()
+        if direction not in VALID_SWIPE_DIRECTIONS:
+            raise ValueError(f"invalid swipe direction '{direction}'")
+
+        min_displacement = float(data.get("min_displacement", 0.18))
+        min_speed = float(data.get("min_speed", 0.65))
+        min_smoothness = float(data.get("min_smoothness", 0.72))
+        start_confirm_frames = max(1, int(data.get("start_confirm_frames", 2)))
+        timeout_frames = max(2, int(data.get("timeout_frames", 18)))
+
+        if min_displacement <= 0.0:
+            raise ValueError("swipe min_displacement must be greater than 0")
+        if min_speed <= 0.0:
+            raise ValueError("swipe min_speed must be greater than 0")
+        if not 0.0 <= min_smoothness <= 1.0:
+            raise ValueError("swipe min_smoothness must be between 0 and 1")
+
+        return cls(
+            tracked_point=tracked_point,
+            direction=direction,
+            min_displacement=min_displacement,
+            min_speed=min_speed,
+            min_smoothness=min_smoothness,
+            start_confirm_frames=start_confirm_frames,
+            timeout_frames=timeout_frames,
+        )
+
+
+@dataclass(frozen=True)
+class MacroRuleTrigger:
+    hand: str
+    trigger_type: str
+    rule_override: GestureRuleOverride | None
+    start_rule_override: GestureRuleOverride | None
+    swipe_config: MacroSwipeConfig | None
+
+    @property
+    def is_pose_trigger(self) -> bool:
+        return self.trigger_type == RULE_TRIGGER_TYPE_POSE
+
+    @property
+    def is_swipe_trigger(self) -> bool:
+        return self.trigger_type == RULE_TRIGGER_TYPE_SWIPE
+
+    def to_dict(self) -> dict:
+        payload = {
+            "hand": self.hand,
+            "trigger_type": self.trigger_type,
+        }
+        if self.rule_override is not None:
+            payload["rule_override"] = self.rule_override.to_dict()
+        if self.start_rule_override is not None:
+            payload["start_rule_override"] = self.start_rule_override.to_dict()
+        if self.swipe_config is not None:
+            payload["swipe_config"] = self.swipe_config.to_dict()
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict) -> "MacroRuleTrigger":
@@ -134,11 +156,35 @@ class MacroRuleTrigger:
         hand = str(data.get("hand", "right")).strip()
         if hand not in VALID_TRIGGER_HANDS:
             raise ValueError(f"invalid macro trigger hand '{hand}'")
-        if not isinstance(data.get("rule_override"), dict):
-            raise ValueError("macro rule trigger rule_override is required")
+
+        trigger_type = str(data.get("trigger_type", "")).strip()
+        if trigger_type not in VALID_RULE_TRIGGER_TYPES:
+            if isinstance(data.get("swipe_config"), dict):
+                trigger_type = RULE_TRIGGER_TYPE_SWIPE
+            else:
+                trigger_type = RULE_TRIGGER_TYPE_POSE
+
+        if trigger_type == RULE_TRIGGER_TYPE_POSE:
+            if not isinstance(data.get("rule_override"), dict):
+                raise ValueError("macro rule trigger rule_override is required")
+            return cls(
+                hand=hand,
+                trigger_type=trigger_type,
+                rule_override=GestureRuleOverride.from_dict(data["rule_override"]),
+                start_rule_override=None,
+                swipe_config=None,
+            )
+
+        if not isinstance(data.get("start_rule_override"), dict):
+            raise ValueError("macro swipe trigger start_rule_override is required")
+        if not isinstance(data.get("swipe_config"), dict):
+            raise ValueError("macro swipe trigger swipe_config is required")
         return cls(
             hand=hand,
-            rule_override=GestureRuleOverride.from_dict(data["rule_override"]),
+            trigger_type=trigger_type,
+            rule_override=None,
+            start_rule_override=GestureRuleOverride.from_dict(data["start_rule_override"]),
+            swipe_config=MacroSwipeConfig.from_dict(data["swipe_config"]),
         )
 
 
@@ -151,7 +197,7 @@ class MacroRecord:
     trigger_kind: str
     point_trigger: MacroPointTrigger | None
     rule_trigger: MacroRuleTrigger | None
-    action_steps: list[MacroActionStep]
+    shortcut_keys: list[str]
     created_at: str
     updated_at: str
 
@@ -170,7 +216,7 @@ class MacroRecord:
             "enabled": bool(self.enabled),
             "mode": self.mode,
             "trigger_kind": self.trigger_kind,
-            "action_steps": [step.to_dict() for step in self.action_steps],
+            "shortcut_keys": list(self.shortcut_keys),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -181,7 +227,7 @@ class MacroRecord:
         return payload
 
     @classmethod
-    def from_dict(cls, data: dict) -> "MacroRecord":
+    def from_dict(cls, data: dict, *, target_os: str | None = None) -> "MacroRecord":
         if not isinstance(data, dict):
             raise ValueError("macro record must be an object")
 
@@ -213,10 +259,12 @@ class MacroRecord:
         if trigger_kind == RULE_OVERRIDE_KIND and rule_trigger is None:
             raise ValueError("rule macro trigger payload is required")
 
-        action_steps_raw = data.get("action_steps", [])
-        if not isinstance(action_steps_raw, list) or not action_steps_raw:
-            raise ValueError("macro action_steps must be a non-empty list")
-        action_steps = [MacroActionStep.from_dict(item) for item in action_steps_raw]
+        if "action_steps" in data:
+            raise ValueError("legacy macro action_steps are no longer supported")
+        raw_shortcut_keys = data.get("shortcut_keys")
+        if raw_shortcut_keys is None:
+            raise ValueError("macro shortcut_keys are required")
+        shortcut_keys = normalize_shortcut_keys(raw_shortcut_keys, target_os=target_os)
 
         created_at = str(data.get("created_at", "")).strip() or datetime.now(timezone.utc).isoformat()
         updated_at = str(data.get("updated_at", "")).strip() or created_at
@@ -229,7 +277,7 @@ class MacroRecord:
             trigger_kind=trigger_kind,
             point_trigger=point_trigger,
             rule_trigger=rule_trigger,
-            action_steps=action_steps,
+            shortcut_keys=shortcut_keys,
             created_at=created_at,
             updated_at=updated_at,
         )
@@ -243,10 +291,11 @@ class MacroRecord:
         trigger_kind: str,
         point_trigger: MacroPointTrigger | None,
         rule_trigger: MacroRuleTrigger | None,
-        action_steps: list[MacroActionStep],
+        shortcut_keys: list[str],
         enabled: bool = True,
         macro_id: str | None = None,
         created_at: str | None = None,
+        target_os: str | None = None,
     ) -> "MacroRecord":
         now = datetime.now(timezone.utc).isoformat()
         return cls.from_dict(
@@ -258,8 +307,9 @@ class MacroRecord:
                 "trigger_kind": trigger_kind,
                 "point_trigger": point_trigger.to_dict() if point_trigger else None,
                 "rule_trigger": rule_trigger.to_dict() if rule_trigger else None,
-                "action_steps": [step.to_dict() for step in action_steps],
+                "shortcut_keys": copy.deepcopy(shortcut_keys),
                 "created_at": created_at or now,
                 "updated_at": now,
-            }
+            },
+            target_os=target_os,
         )

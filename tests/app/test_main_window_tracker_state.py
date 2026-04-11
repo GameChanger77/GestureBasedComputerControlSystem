@@ -49,6 +49,22 @@ class _FakeProductionKeyboardWindow:
         self.closed = True
 
 
+class _FakeShortcutFeedbackOverlay:
+    def __init__(self):
+        self.show_calls = []
+        self.hide_calls = 0
+        self.closed = False
+
+    def show_shortcut(self, text, global_x, global_y):
+        self.show_calls.append((text, global_x, global_y))
+
+    def hide_feedback(self):
+        self.hide_calls += 1
+
+    def close(self):
+        self.closed = True
+
+
 class MainWindowTrackerStateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -153,6 +169,71 @@ class MainWindowTrackerStateTests(unittest.TestCase):
         self.assertEqual(window.mode_label.property("badgeTone"), "warning")
         self.assertEqual(fake_window.overlay_calls, [overlay])
         window.close()
+
+    def test_shortcut_feedback_overlay_shows_for_new_hotkey_event(self):
+        window = _TestableMainWindow(ui_mode="prod")
+        fake_overlay = _FakeShortcutFeedbackOverlay()
+        window.shortcut_feedback_overlay = fake_overlay
+        window.action = SimpleNamespace(
+            get_action_events=lambda after_sequence=0: (
+                []
+                if after_sequence >= 5
+                else [
+                    {
+                        "sequence": 5,
+                        "type": "tap_hotkey",
+                        "shortcut_label": "Ctrl + Shift + S",
+                        "global_x": 640,
+                        "global_y": 360,
+                    }
+                ]
+            )
+        )
+
+        window._refresh_shortcut_feedback_overlay()
+        window._refresh_shortcut_feedback_overlay()
+
+        self.assertEqual(fake_overlay.show_calls, [("Ctrl + Shift + S", 640, 360)])
+        window.close()
+
+    def test_shortcut_feedback_overlay_shows_for_mode_change_event(self):
+        window = _TestableMainWindow(ui_mode="prod")
+        fake_overlay = _FakeShortcutFeedbackOverlay()
+        window.shortcut_feedback_overlay = fake_overlay
+        window.action = SimpleNamespace(
+            get_action_events=lambda after_sequence=0: (
+                []
+                if after_sequence >= 9
+                else [
+                    {
+                        "sequence": 9,
+                        "type": "overlay_feedback",
+                        "label": "Hotkey",
+                        "feedback_type": "mode",
+                        "global_x": 512,
+                        "global_y": 288,
+                    }
+                ]
+            )
+        )
+
+        window._refresh_shortcut_feedback_overlay()
+        window._refresh_shortcut_feedback_overlay()
+
+        self.assertEqual(fake_overlay.show_calls, [("Hotkey", 512, 288)])
+        window.close()
+
+    def test_tracking_stopped_hides_shortcut_feedback_overlay(self):
+        window = _TestableMainWindow(ui_mode="prod")
+        current_tracker = _FakeTracker()
+        fake_overlay = _FakeShortcutFeedbackOverlay()
+        window.hand_tracker = current_tracker
+        window.shortcut_feedback_overlay = fake_overlay
+        window._test_sender = current_tracker
+
+        window.on_tracking_stopped()
+
+        self.assertEqual(fake_overlay.hide_calls, 1)
 
     def test_macos_authorized_preflight_starts_tracking(self):
         window = _TestableMainWindow(ui_mode="prod")

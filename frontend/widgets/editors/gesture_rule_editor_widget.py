@@ -34,14 +34,15 @@ class RuleConditionEditor(SettingsCard):
     changed = Signal()
     remove_requested = Signal(QWidget)
 
-    def __init__(self, condition: dict | None = None, parent=None):
+    def __init__(self, condition: dict | None = None, *, allowed_ops: list[str] | tuple[str, ...] | None = None, parent=None):
         super().__init__(surface="subtle-card", parent=parent)
+        self._allowed_ops = list(allowed_ops or CONDITION_DEFINITIONS.keys())
         self._field_widgets = {}
         self._field_layout = None
         self._condition_data = dict(condition or {})
         self._create_ui()
         initial_op = self._condition_data.get("op")
-        if initial_op in CONDITION_DEFINITIONS:
+        if initial_op in self._allowed_ops:
             self.op_combo.setCurrentIndex(self.op_combo.findData(initial_op))
         self._rebuild_fields()
 
@@ -52,7 +53,8 @@ class RuleConditionEditor(SettingsCard):
         header.setSpacing(6)
         header.addWidget(QLabel("Condition"))
         self.op_combo = QComboBox()
-        for op, definition in CONDITION_DEFINITIONS.items():
+        for op in self._allowed_ops:
+            definition = CONDITION_DEFINITIONS[op]
             self.op_combo.addItem(definition["label"], op)
         self.op_combo.currentIndexChanged.connect(self._rebuild_fields)
         header.addWidget(self.op_combo, 1)
@@ -166,6 +168,7 @@ class GestureRuleEditorWidget(QWidget):
         initial_rule_override: GestureRuleOverride | None = None,
         default_rule_override: GestureRuleOverride | None = None,
         title_html: str | None = None,
+        allowed_ops: list[str] | tuple[str, ...] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -174,6 +177,7 @@ class GestureRuleEditorWidget(QWidget):
         self.gesture_definition = gesture_definition
         self._title_html = title_html
         self._default_rule_override = default_rule_override or initial_rule_override
+        self._allowed_ops = list(allowed_ops or CONDITION_DEFINITIONS.keys())
         self._condition_editors: list[RuleConditionEditor] = []
         self._can_save = False
         self._create_ui()
@@ -267,7 +271,7 @@ class GestureRuleEditorWidget(QWidget):
         root.addWidget(scroll_area, 1)
 
     def _add_condition_editor(self, condition: dict | None = None):
-        editor = RuleConditionEditor(condition=condition, parent=self)
+        editor = RuleConditionEditor(condition=condition, allowed_ops=self._allowed_ops, parent=self)
         editor.changed.connect(self._refresh_status)
         editor.remove_requested.connect(self._remove_condition_editor)
         self._condition_editors.append(editor)

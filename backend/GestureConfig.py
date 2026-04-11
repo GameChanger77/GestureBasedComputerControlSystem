@@ -73,7 +73,8 @@ class GestureConfig:
 
         # Click/Pinch detection
         "pinch_threshold": 0.45,  # Maximum distance for pinch detection (wrist-relative units)
-        "left_click_hold_time_sec": 1.0,  # Hold duration before emitting a second click
+        "left_click_hold_time_sec": 0.55,  # Hold duration before converting the pinch into a double-click
+        "left_click_drag_deadzone_px": 32,  # Movement required before a left-click pinch becomes a drag
 
         # Debouncing (gesture confirmation)
         "mouse_tracking_pending_frames": 1,  # Frames to confirm mouse tracking
@@ -83,6 +84,7 @@ class GestureConfig:
 
         # Mode switching
         "keyboard_mode_entry_pending_frames": 6,
+        "hotkey_mode_entry_pending_frames": 3,
         "keyboard_mode_exit_pending_frames": 5,
         "keyboard_mode_exit_extension_angle": 150.0,
         "keyboard_mode_exit_max_openness": 0.16,
@@ -211,12 +213,26 @@ class GestureConfig:
         },
         "left_click_hold_time_sec": {
             "group": "Click/pinch",
-            "label": "Left Click Hold Time (sec)",
+            "label": "Double Click Hold Time (sec)",
             "type": "float",
             "min": 0.1,
             "max": 3.0,
             "step": 0.05,
             "decimals": 2,
+        },
+        "left_click_drag_deadzone_px": {
+            "group": "Click/pinch",
+            "label": "Drag Deadzone (px)",
+            "type": "int",
+            "min": 4,
+            "max": 160,
+        },
+        "hotkey_mode_entry_pending_frames": {
+            "group": "Keyboard",
+            "label": "Hotkey Mode Entry Pending Frames",
+            "type": "int",
+            "min": 1,
+            "max": 30,
         },
         "mouse_tracking_pending_frames": {
             "group": "Debouncing",

@@ -11,6 +11,9 @@ from backend.Strategizer import Strategizer, ControlMode
 
 
 class _ActionStub:
+    def __init__(self):
+        self.feedback_messages = []
+
     def move_cursor(self, *_args, **_kwargs):
         pass
 
@@ -37,6 +40,9 @@ class _ActionStub:
 
     def set_pending_latency_origin_ts_ns(self, _ts):
         pass
+
+    def show_feedback_message(self, text, *, feedback_type="message"):
+        self.feedback_messages.append((text, feedback_type))
 
     def get_runtime_debug_snapshot(self):
         return {
@@ -107,7 +113,8 @@ class StrategizerDebugSnapshotTests(unittest.TestCase):
     def setUp(self):
         self._tmp_dir = tempfile.TemporaryDirectory()
         self.config = _ConfigStub(Path(self._tmp_dir.name) / "gesture_config.json")
-        self.strategizer = Strategizer(_ActionStub(), self.config, 1920, 1080)
+        self.action = _ActionStub()
+        self.strategizer = Strategizer(self.action, self.config, 1920, 1080)
         self.strategizer.mouse_mode_gestures = [
             gesture
             for gesture in self.strategizer.mouse_mode_gestures
@@ -212,6 +219,10 @@ class StrategizerDebugSnapshotTests(unittest.TestCase):
         }
         self.assertTrue(switch_entries["Switch To Mouse Mode"]["suppressed"])
         self.assertIn("Key selection pinch is still latched", switch_entries["Switch To Mouse Mode"]["note"])
+
+    def test_mode_switch_emits_overlay_feedback_message(self):
+        self.strategizer.set_mode(ControlMode.KEYBOARD)
+        self.assertIn(("Keyboard", "mode"), self.action.feedback_messages)
 
 
 if __name__ == "__main__":

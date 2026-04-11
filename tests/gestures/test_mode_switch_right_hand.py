@@ -213,6 +213,11 @@ class ModeSwitchRightHandTests(unittest.TestCase):
             detected, _ = gesture.detect_gesture(_hands(right=False, left=True))
         self.assertFalse(detected)
 
+    def test_hotkey_entry_defaults_to_three_pending_frames(self):
+        strategizer = _StrategizerStub("mouse")
+        gesture = HotkeyModeEntryGesture(_ActionStub(), strategizer=strategizer)
+        self.assertEqual(gesture.state_machine.pending_frames, 3)
+
 
 if __name__ == "__main__":
     unittest.main()

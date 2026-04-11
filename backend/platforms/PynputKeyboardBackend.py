@@ -132,6 +132,8 @@ class PynputKeyboardBackend(PlatformKeyboardBackend):
             "right_alt": getattr(Key, "alt_r", None),
             "left_win": self._pynput_meta_key("left"),
             "right_win": self._pynput_meta_key("right"),
+            "left_cmd": self._pynput_meta_key("left"),
+            "right_cmd": self._pynput_meta_key("right"),
             "insert": getattr(Key, "insert", None),
             "delete": getattr(Key, "delete", None),
             "home": getattr(Key, "home", None),

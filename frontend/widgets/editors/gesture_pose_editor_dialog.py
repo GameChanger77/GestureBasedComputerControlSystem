@@ -262,8 +262,9 @@ class GesturePoseEditorWidget(QWidget):
             conflict = self.validate_callback(candidate, self.matcher_config)
             if conflict is not None:
                 other_def, result = conflict
+                other_name = getattr(other_def, "display_name", None) or getattr(other_def, "name", "Another gesture")
                 conflict_text = (
-                    f"Too close to '{other_def.display_name}' "
+                    f"Too close to '{other_name}' "
                     f"(score {result.score:.3f} <= {self.matcher_config.conflict_threshold:.3f})."
                 )
                 can_save = False

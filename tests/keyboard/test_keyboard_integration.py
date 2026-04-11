@@ -12,7 +12,14 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 from backend.platforms import create_keyboard_backend, get_keyboard_backend_class
-from backend.platforms.KeyMappings import get_logical_to_key_mapping, get_meta_key_label
+from backend.platforms.KeyMappings import (
+    format_shortcut_key_label,
+    get_logical_to_key_mapping,
+    get_meta_key_label,
+    get_supported_shortcut_keys,
+    normalize_shortcut_key,
+    summarize_shortcut_keys,
+)
 from backend.platforms.PlatformKeyboardBackend import PlatformKeyboardBackend
 
 
@@ -238,6 +245,27 @@ class TestLogicalKeyMapping:
         assert get_meta_key_label("Windows") == "Win"
         assert get_meta_key_label("Darwin") == "Cmd"
         assert get_meta_key_label("Linux") == "Super"
+
+    def test_shortcut_catalog_is_os_specific(self):
+        assert "left_win" in get_supported_shortcut_keys("Windows")
+        assert "left_cmd" not in get_supported_shortcut_keys("Windows")
+
+        assert "left_cmd" in get_supported_shortcut_keys("Darwin")
+        assert "left_win" not in get_supported_shortcut_keys("Darwin")
+
+        assert "left_win" in get_supported_shortcut_keys("Linux")
+        assert "left_cmd" not in get_supported_shortcut_keys("Linux")
+
+    def test_shortcut_key_normalization_respects_target_os(self):
+        assert normalize_shortcut_key("cmd", "Darwin") == "left_cmd"
+        assert normalize_shortcut_key("cmd", "Windows") == "left_win"
+        assert normalize_shortcut_key("win", "Darwin") == "left_cmd"
+        assert normalize_shortcut_key("super", "Linux") == "left_win"
+
+    def test_shortcut_key_labels_and_summary_use_platform_terms(self):
+        assert format_shortcut_key_label("left_cmd", "Darwin") == "Cmd"
+        assert format_shortcut_key_label("left_win", "Windows") == "Win"
+        assert summarize_shortcut_keys(["cmd", "shift", "4"], "Darwin") == "Cmd + Shift + 4"
 
 
 class TestResourceCleanup:

@@ -40,7 +40,7 @@ class ConditionEvaluator:
 
     Notes:
     - Most "pose" conditions should use wrist space, because wrist space is scale-normalized.
-    - Actions that map to screen coordinates should use camera space (handled later in RuleGestures).
+    - Actions that map to screen coordinates should use camera space.
     """
     _STRICT_FIST_MAX_THUMB_EXTENSION_RATIO = 0.98
 

@@ -10,6 +10,21 @@ from backend.gesture_remap.rule_overrides import GestureRuleOverride
 
 
 class GestureOverrideStoreTests(unittest.TestCase):
+    def test_legacy_only_fingers_extended_json_alias_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "unsupported rule condition op 'only_fingers_extended.json'"):
+            GestureRuleOverride.from_dict(
+                {
+                    "conditions": [
+                        {
+                            "op": "only_fingers_extended.json",
+                            "fingers": ["index"],
+                            "threshold_deg": 155.0,
+                        }
+                    ],
+                    "confirm": {"pending_frames": 3, "ending_frames": 2},
+                }
+            )
+
     def test_point_override_round_trip_and_reset(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / "gesture_overrides.json"
@@ -98,6 +113,20 @@ class GestureOverrideStoreTests(unittest.TestCase):
             self.assertIsNotNone(other_def)
             self.assertEqual(other_def.id, "left_click")
             self.assertLessEqual(result.score, 0.30)
+
+    def test_builtin_rule_defaults_use_canonical_only_fingers_extended_op(self):
+        config_source = {
+            "finger_extension_angle": 155.0,
+            "mouse_tracking_pending_frames": 1,
+            "scroll_pending_frames": 2,
+            "ending_frames": 2,
+        }
+
+        mouse_move_rule = BuiltInGestureRegistry.get("mouse_move").build_default_rule_override(config_source)
+        scroll_rule = BuiltInGestureRegistry.get("scroll").build_default_rule_override(config_source)
+
+        self.assertEqual(mouse_move_rule.conditions[0]["op"], "only_fingers_extended")
+        self.assertEqual(scroll_rule.conditions[0]["op"], "only_fingers_extended")
 
 
 if __name__ == "__main__":

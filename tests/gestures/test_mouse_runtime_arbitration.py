@@ -16,14 +16,26 @@ class _ActionStub:
     def __init__(self):
         self.moves = []
         self.left_clicks = []
+        self.double_clicks = []
         self.right_clicks = []
         self.scrolls = []
+        self.left_button_down = 0
+        self.left_button_up = 0
 
     def move_cursor(self, x, y):
         self.moves.append((x, y))
 
     def left_click(self, x, y):
         self.left_clicks.append((x, y))
+
+    def double_click(self, x, y):
+        self.double_clicks.append((x, y))
+
+    def hold_left_click(self):
+        self.left_button_down += 1
+
+    def release_left_click(self):
+        self.left_button_up += 1
 
     def right_click(self, x, y):
         self.right_clicks.append((x, y))
@@ -115,7 +127,7 @@ class MouseRuntimeArbitrationTests(unittest.TestCase):
 
         snapshot = self.strategizer.get_debug_snapshot()
         mode_entries = {entry["name"]: entry for entry in snapshot["mode_candidates"]}
-        self.assertEqual(self.action.left_clicks, [(100, 200)])
+        self.assertEqual(self.action.left_clicks, [])
         self.assertTrue(mode_entries["Left Click"]["active"])
         self.assertTrue(mode_entries["Mouse Move"]["suppressed"])
 

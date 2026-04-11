@@ -79,6 +79,7 @@ class BuiltInGestureRegistry:
                 "scroll_sens": config["scroll_sensitivity"],
                 "pinch_thresh": config["pinch_threshold"],
                 "left_click_hold_time_sec": config.get("left_click_hold_time_sec", 1.0),
+                "left_click_drag_deadzone_px": config.get("left_click_drag_deadzone_px", 32),
                 "mouse_pending": config["mouse_tracking_pending_frames"],
                 "click_pending": config["click_pending_frames"],
                 "scroll_pending": config["scroll_pending_frames"],
@@ -144,6 +145,7 @@ class BuiltInGestureRegistry:
                 pending_frames=p["click_pending"],
                 ending_frames=p["ending"],
                 double_click_hold_time=p["left_click_hold_time_sec"],
+                drag_deadzone_px=p["left_click_drag_deadzone_px"],
             )
 
         def left_click_override(action, strategizer, record):
@@ -158,6 +160,7 @@ class BuiltInGestureRegistry:
                 pending_frames=p["click_pending"],
                 ending_frames=p["ending"],
                 double_click_hold_time=p["left_click_hold_time_sec"],
+                drag_deadzone_px=p["left_click_drag_deadzone_px"],
                 pose_template=record.pose_template,
                 matcher_config=record.matcher_config,
             )
@@ -174,6 +177,7 @@ class BuiltInGestureRegistry:
                 pending_frames=record.rule_override.pending_frames,
                 ending_frames=record.rule_override.ending_frames,
                 double_click_hold_time=p["left_click_hold_time_sec"],
+                drag_deadzone_px=p["left_click_drag_deadzone_px"],
                 rule_override=record.rule_override,
             )
 
