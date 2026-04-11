@@ -26,8 +26,6 @@ plans/
 gesture_config.json
 gesture_overrides.json
 gesture_macros.json
-test_macro.json
-only_fingers_extended.json
 
 # Tutorial animation scene descriptors are source-controlled assets.
 !/frontend/assets/tutorial/

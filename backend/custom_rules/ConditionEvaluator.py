@@ -104,7 +104,7 @@ class ConditionEvaluator:
             got = is_finger_extended(finger, threshold=thr)
             return got == want
 
-        if op in {"only_fingers_extended", "only_fingers_extended.json"}:
+        if op == "only_fingers_extended":
             # Example:
             # { "op": "only_fingers_extended", "fingers": ["index"], "threshold_deg": 155 }
             fingers = cond.get("fingers", [])
