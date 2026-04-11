@@ -15,7 +15,7 @@ class HotkeyModeEntryGesture(SnapshotGestureRecognizer):
         priority=20,
         pinch_threshold=0.30,
         extension_threshold=155.0,
-        pending_frames=6,
+        pending_frames=3,
         ending_frames=3,
     ):
         super().__init__(

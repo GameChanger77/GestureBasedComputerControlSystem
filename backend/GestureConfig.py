@@ -84,6 +84,7 @@ class GestureConfig:
 
         # Mode switching
         "keyboard_mode_entry_pending_frames": 6,
+        "hotkey_mode_entry_pending_frames": 3,
         "keyboard_mode_exit_pending_frames": 5,
         "keyboard_mode_exit_extension_angle": 150.0,
         "keyboard_mode_exit_max_openness": 0.16,
@@ -225,6 +226,13 @@ class GestureConfig:
             "type": "int",
             "min": 4,
             "max": 160,
+        },
+        "hotkey_mode_entry_pending_frames": {
+            "group": "Keyboard",
+            "label": "Hotkey Mode Entry Pending Frames",
+            "type": "int",
+            "min": 1,
+            "max": 30,
         },
         "mouse_tracking_pending_frames": {
             "group": "Debouncing",

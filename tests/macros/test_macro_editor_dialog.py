@@ -3,7 +3,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
@@ -77,7 +77,7 @@ class MacroEditorDialogTests(unittest.TestCase):
                 trigger_type=RULE_TRIGGER_TYPE_SWIPE,
                 rule_override=None,
                 start_rule_override=GestureRuleOverride(
-                    conditions=[{"op": "hand_count_eq", "value": 1}],
+                    conditions=[{"op": "hand_fully_open"}],
                     pending_frames=1,
                     ending_frames=1,
                 ),
@@ -115,7 +115,7 @@ class MacroEditorDialogTests(unittest.TestCase):
         dialog.name_edit.setText("New Macro")
         dialog.shortcut_editor._shortcut_keys = ["left_ctrl", "c"]
         dialog.shortcut_editor._refresh()
-        dialog.trigger_editor.rule_editor.pose_editor._add_condition_editor({"op": "hand_count_eq", "value": 1})
+        dialog.trigger_editor.rule_editor.pose_editor._add_condition_editor({"op": "hand_fully_open"})
         dialog._refresh_can_save()
         self.assertTrue(dialog.save_button.isEnabled())
         dialog.close()
@@ -130,7 +130,7 @@ class MacroEditorDialogTests(unittest.TestCase):
                 hand="right",
                 trigger_type=RULE_TRIGGER_TYPE_POSE,
                 rule_override=GestureRuleOverride(
-                    conditions=[{"op": "hand_count_eq", "value": 1}],
+                    conditions=[{"op": "hand_fully_open"}],
                     pending_frames=1,
                     ending_frames=1,
                 ),
@@ -165,6 +165,63 @@ class MacroEditorDialogTests(unittest.TestCase):
         self.assertLess(dialog.width(), 1420)
         self.assertLessEqual(dialog.width(), screen_geometry.width())
         self.assertLessEqual(dialog.height(), screen_geometry.height())
+        dialog.close()
+
+    def test_shortcut_key_combo_ignores_wheel_scrolling_but_keeps_editing(self):
+        dialog = MacroEditorDialog(
+            config_source={"click_pending_frames": 3, "ending_frames": 2},
+            target_os="Windows",
+        )
+
+        class _WheelStub:
+            def __init__(self):
+                self.ignored = False
+
+            def ignore(self):
+                self.ignored = True
+
+            def type(self):
+                return QEvent.Type.Wheel
+
+        wheel_event = _WheelStub()
+        dialog.shortcut_editor.key_combo.wheelEvent(wheel_event)
+        self.assertTrue(wheel_event.ignored)
+
+        popup_wheel_event = _WheelStub()
+        blocked = dialog.shortcut_editor.key_combo.eventFilter(
+            dialog.shortcut_editor.key_combo.view(),
+            popup_wheel_event,
+        )
+        self.assertTrue(blocked)
+        self.assertTrue(popup_wheel_event.ignored)
+        self.assertTrue(dialog.shortcut_editor.key_combo.isEditable())
+        dialog.close()
+
+    def test_macro_pose_condition_options_exclude_hand_exists_and_hand_count(self):
+        dialog = MacroEditorDialog(
+            config_source={"click_pending_frames": 3, "ending_frames": 2},
+            target_os="Windows",
+        )
+        dialog.trigger_editor.rule_editor.pose_editor._add_condition_editor({"op": "hand_fully_open"})
+        op_combo = dialog.trigger_editor.rule_editor.pose_editor._condition_editors[0].op_combo
+        options = [op_combo.itemData(index) for index in range(op_combo.count())]
+        self.assertNotIn("hand_exists", options)
+        self.assertNotIn("hand_count_eq", options)
+        self.assertIn("hand_fully_open", options)
+        dialog.close()
+
+    def test_macro_swipe_condition_options_exclude_hand_exists_and_hand_count(self):
+        dialog = MacroEditorDialog(
+            config_source={"click_pending_frames": 3, "ending_frames": 2},
+            target_os="Windows",
+        )
+        dialog.trigger_editor.rule_editor._set_selected_trigger_type(RULE_TRIGGER_TYPE_SWIPE)
+        dialog.trigger_editor.rule_editor.swipe_editor._add_condition_editor({"op": "hand_fully_open"})
+        op_combo = dialog.trigger_editor.rule_editor.swipe_editor._condition_editors[0].op_combo
+        options = [op_combo.itemData(index) for index in range(op_combo.count())]
+        self.assertNotIn("hand_exists", options)
+        self.assertNotIn("hand_count_eq", options)
+        self.assertIn("hand_fully_open", options)
         dialog.close()
 
 

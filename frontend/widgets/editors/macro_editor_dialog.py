@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QSize, Signal
+from PySide6.QtCore import QEvent, QSize, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
 )
 
-from backend.custom_rules.condition_catalog import LANDMARK_OPTIONS
+from backend.custom_rules.condition_catalog import CONDITION_DEFINITIONS, LANDMARK_OPTIONS
 from backend.gesture_remap.pose_templates import HandPoseTemplate, PoseMatcherConfig, build_pose_template
 from backend.gesture_remap.rule_overrides import (
     GestureRuleOverride,
@@ -62,11 +62,35 @@ from frontend.widgets.settings.settings_theme import (
 )
 
 
+class _NoWheelComboBox(QComboBox):
+    """Editable combo box that keeps typing/autocomplete but ignores wheel scrolling."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.view().installEventFilter(self)
+        self.view().viewport().installEventFilter(self)
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Wheel:
+            event.ignore()
+            return True
+        return super().eventFilter(watched, event)
+
+
 @dataclass(frozen=True)
 class _MacroTriggerContext:
     display_name: str
     default_description: str
     preview_pose_template: HandPoseTemplate
+
+
+_MACRO_EXCLUDED_RULE_OPS = {"hand_exists", "hand_count_eq"}
+_MACRO_ALLOWED_RULE_OPS = tuple(
+    op for op in CONDITION_DEFINITIONS.keys() if op not in _MACRO_EXCLUDED_RULE_OPS
+)
 
 
 def _build_macro_preview_template() -> HandPoseTemplate:
@@ -126,7 +150,7 @@ class ShortcutChordEditor(QWidget):
         add_row = QHBoxLayout()
         add_row.setContentsMargins(0, 0, 0, 0)
         add_row.setSpacing(8)
-        self.key_combo = QComboBox()
+        self.key_combo = _NoWheelComboBox()
         self.key_combo.setEditable(True)
         for option_value, option_label in get_shortcut_key_options(self.target_os):
             self.key_combo.addItem(option_label, option_value)
@@ -227,9 +251,17 @@ class ShortcutChordEditor(QWidget):
 class MacroSwipeTriggerEditorWidget(QWidget):
     can_save_changed = Signal(bool)
 
-    def __init__(self, *, config_source, initial_trigger: MacroRuleTrigger | None = None, parent=None):
+    def __init__(
+        self,
+        *,
+        config_source,
+        initial_trigger: MacroRuleTrigger | None = None,
+        allowed_ops: list[str] | tuple[str, ...] | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.config_source = config_source
+        self._allowed_ops = list(allowed_ops or CONDITION_DEFINITIONS.keys())
         self._default_start_rule = GestureRuleOverride(
             conditions=[],
             pending_frames=1,
@@ -400,7 +432,7 @@ class MacroSwipeTriggerEditorWidget(QWidget):
         self.timeout_frames_spinbox.setValue(int(swipe_config.timeout_frames))
 
     def _add_condition_editor(self, condition: dict | None = None):
-        editor = RuleConditionEditor(condition=condition, parent=self)
+        editor = RuleConditionEditor(condition=condition, allowed_ops=self._allowed_ops, parent=self)
         editor.changed.connect(self._refresh_status)
         editor.remove_requested.connect(self._remove_condition_editor)
         self._condition_editors.append(editor)
@@ -508,11 +540,13 @@ class MacroRuleTriggerEditorWidget(QWidget):
                 "<b>Rule-Based Pose Trigger</b><br>"
                 "Configure the hand pose that should activate this shortcut."
             ),
+            allowed_ops=_MACRO_ALLOWED_RULE_OPS,
             parent=self,
         )
         self.swipe_editor = MacroSwipeTriggerEditorWidget(
             config_source=config_source,
             initial_trigger=rule_trigger if rule_trigger is not None and rule_trigger.is_swipe_trigger else None,
+            allowed_ops=_MACRO_ALLOWED_RULE_OPS,
             parent=self,
         )
         self.stack = QStackedWidget(self)
