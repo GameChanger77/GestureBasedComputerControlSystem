@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -24,6 +25,16 @@ class _TestableMainWindow(MainWindow):
 class _FakeTracker:
     def isRunning(self):
         return False
+
+
+class _FakeStartTracker(_FakeTracker):
+    def __init__(self, start_result=True):
+        self.start_result = bool(start_result)
+        self.start_calls = []
+
+    def start_tracking(self, **kwargs):
+        self.start_calls.append(dict(kwargs))
+        return self.start_result
 
 
 class _FakeProductionKeyboardWindow:
@@ -223,6 +234,94 @@ class MainWindowTrackerStateTests(unittest.TestCase):
         window.on_tracking_stopped()
 
         self.assertEqual(fake_overlay.hide_calls, 1)
+
+    def test_macos_authorized_preflight_starts_tracking(self):
+        window = _TestableMainWindow(ui_mode="prod")
+        tracker = _FakeStartTracker(start_result=True)
+        window.hand_tracker = tracker
+
+        with patch("frontend.main_window.platform.system", return_value="Darwin"), patch(
+            "frontend.main_window.get_camera_permission_status",
+            return_value="authorized",
+        ):
+            started = window.ensure_tracking_running()
+
+        self.assertTrue(started)
+        self.assertEqual(len(tracker.start_calls), 1)
+        self.assertEqual(window.status_label.text(), "Status: Starting...")
+        self.assertEqual(window.start_button.text(), "Stop Tracking")
+        window.close()
+
+    def test_macos_denied_preflight_blocks_tracking(self):
+        window = _TestableMainWindow(ui_mode="prod")
+        tracker = _FakeStartTracker(start_result=True)
+        window.hand_tracker = tracker
+
+        with patch("frontend.main_window.platform.system", return_value="Darwin"), patch(
+            "frontend.main_window.get_camera_permission_status",
+            return_value="denied",
+        ):
+            started = window.ensure_tracking_running()
+
+        self.assertFalse(started)
+        self.assertEqual(tracker.start_calls, [])
+        self.assertIn("Camera access denied.", window.status_label.text())
+        self.assertEqual(window.start_button.text(), "Start Tracking")
+        window.close()
+
+    def test_macos_restricted_preflight_blocks_tracking(self):
+        window = _TestableMainWindow(ui_mode="prod")
+        tracker = _FakeStartTracker(start_result=True)
+        window.hand_tracker = tracker
+
+        with patch("frontend.main_window.platform.system", return_value="Darwin"), patch(
+            "frontend.main_window.get_camera_permission_status",
+            return_value="restricted",
+        ):
+            started = window.ensure_tracking_running()
+
+        self.assertFalse(started)
+        self.assertEqual(tracker.start_calls, [])
+        self.assertIn("Camera access is restricted", window.status_label.text())
+        self.assertEqual(window.start_button.text(), "Start Tracking")
+        window.close()
+
+    def test_macos_not_determined_requests_permission_then_starts(self):
+        window = _TestableMainWindow(ui_mode="prod")
+        tracker = _FakeStartTracker(start_result=True)
+        window.hand_tracker = tracker
+        callback_holder = {}
+
+        def _request_permission(callback):
+            callback_holder["callback"] = callback
+            return True
+
+        with patch("frontend.main_window.platform.system", return_value="Darwin"), patch(
+            "frontend.main_window.get_camera_permission_status",
+            side_effect=["not_determined", "authorized"],
+        ), patch(
+            "frontend.main_window.request_camera_permission",
+            side_effect=_request_permission,
+        ):
+            started = window.ensure_tracking_running()
+            self.assertFalse(started)
+            self.assertEqual(window.status_label.text(), "Status: Waiting for camera permission...")
+            self.assertEqual(tracker.start_calls, [])
+            callback_holder["callback"](True)
+
+        self.assertEqual(len(tracker.start_calls), 1)
+        self.assertEqual(window.status_label.text(), "Status: Starting...")
+        window.close()
+
+    def test_tracking_error_normalizes_macos_camera_message(self):
+        window = _TestableMainWindow(ui_mode="prod")
+        current_tracker = _FakeTracker()
+        window.hand_tracker = current_tracker
+        window._test_sender = current_tracker
+
+        window.on_tracking_error("Error occurred: Camera access denied by macOS permissions")
+
+        self.assertIn("Camera access denied.", window.status_label.text())
         window.close()
 
 

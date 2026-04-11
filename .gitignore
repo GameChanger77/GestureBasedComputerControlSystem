@@ -1,6 +1,7 @@
 /.idea
 venv/
 .venv/
+.venv-*/
 __pycache__/
 /build/
 /dist/
@@ -11,6 +12,7 @@ __pycache__/
 installers/mac/installer_out/
 # Byte-compiled / optimized / DLL files
 *.spec
+!/installers/mac/gbccs.mac.spec
 *.py[cod]
 *.pyo
 *.pyd

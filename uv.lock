@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'darwin'",
@@ -869,6 +869,7 @@ dependencies = [
     { name = "pycparser" },
     { name = "pynput" },
     { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-avfoundation", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-coredata", marker = "sys_platform == 'darwin'" },
     { name = "pyparsing" },
     { name = "pyside6" },
@@ -912,6 +913,7 @@ requires-dist = [
     { name = "pycparser", specifier = ">=2.23" },
     { name = "pynput", specifier = ">=1.8.1" },
     { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
+    { name = "pyobjc-framework-avfoundation", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
     { name = "pyobjc-framework-coredata", marker = "sys_platform == 'darwin'", specifier = ">=10.0" },
     { name = "pyparsing", specifier = ">=3.2.5" },
     { name = "pyside6", specifier = ">=6.9.0" },
