@@ -299,7 +299,53 @@ def get_hand_openness(hand, include_thumb=True):
     return 0.0
 
 
-def camera_to_screen(camera_pos, screen_width, screen_height):
+def _clamp_unit(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _apply_camera_deadzone(value: float, leading_margin: float, trailing_margin: float) -> float:
+    leading_margin = max(0.0, float(leading_margin))
+    trailing_margin = max(0.0, float(trailing_margin))
+    active_span = max(1e-6, 1.0 - leading_margin - trailing_margin)
+    return _clamp_unit((float(value) - leading_margin) / active_span)
+
+
+def camera_to_normalized_screen(
+    camera_pos,
+    *,
+    flip_x=True,
+    side_deadzone=0.0,
+    top_deadzone=0.0,
+    bottom_deadzone=0.0,
+):
+    """
+    Normalize a camera-space point into the effective on-screen 0-1 range.
+
+    Deadzones shrink the active camera range so reaching the view edges is not
+    required to reach the display edges.
+    """
+    x, y, z = camera_pos
+    x = float(x)
+    y = float(y)
+
+    if flip_x:
+        x = 1.0 - x
+
+    x = _apply_camera_deadzone(x, side_deadzone, side_deadzone)
+    y = _apply_camera_deadzone(y, top_deadzone, bottom_deadzone)
+    return x, y, z
+
+
+def camera_to_screen(
+    camera_pos,
+    screen_width,
+    screen_height,
+    *,
+    side_deadzone=0.0,
+    top_deadzone=0.0,
+    bottom_deadzone=0.0,
+    flip_x=True,
+):
     """
     Convert camera-relative coordinates to screen coordinates.
 
@@ -310,10 +356,13 @@ def camera_to_screen(camera_pos, screen_width, screen_height):
     Returns:
         tuple: (screen_x, screen_y) in pixel coordinates
     """
-    x, y, z = camera_pos
-
-    # Flip x coordinate for mirror effect
-    x = 1.0 - x
+    x, y, _z = camera_to_normalized_screen(
+        camera_pos,
+        flip_x=flip_x,
+        side_deadzone=side_deadzone,
+        top_deadzone=top_deadzone,
+        bottom_deadzone=bottom_deadzone,
+    )
 
     # Convert from 0-1 range to screen pixel coordinates
     screen_x = int(x * screen_width)

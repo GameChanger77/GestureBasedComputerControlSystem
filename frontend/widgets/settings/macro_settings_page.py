@@ -127,7 +127,6 @@ class MacroSettingsPage(QWidget):
         *,
         macro_id: str | None,
         mode: str,
-        hand: str,
         candidate_template,
         matcher_config,
     ):
@@ -135,7 +134,6 @@ class MacroSettingsPage(QWidget):
             BuiltInGestureRegistry,
             macro_id=macro_id,
             mode=mode,
-            hand=hand,
             pose_template=candidate_template,
             matcher_config=matcher_config,
         )

@@ -16,12 +16,23 @@ from backend.platforms.KeyMappings import normalize_shortcut_keys
 
 
 VALID_MACRO_MODES = {"mouse", "keyboard", "hotkey"}
-VALID_TRIGGER_HANDS = {"left", "right", "either"}
+DOMINANT_TRIGGER_HAND = "dominant"
+VALID_TRIGGER_HANDS = {DOMINANT_TRIGGER_HAND}
+LEGACY_TRIGGER_HANDS = {"left", "right", "either"}
 RULE_TRIGGER_TYPE_POSE = "pose"
 RULE_TRIGGER_TYPE_SWIPE = "swipe"
 VALID_RULE_TRIGGER_TYPES = {RULE_TRIGGER_TYPE_POSE, RULE_TRIGGER_TYPE_SWIPE}
 VALID_SWIPE_DIRECTIONS = {"left", "right", "up", "down"}
 VALID_TRACKED_POINTS = {value for value, _label in LANDMARK_OPTIONS}
+
+
+def _normalize_trigger_hand(value) -> str:
+    normalized = str(value or DOMINANT_TRIGGER_HAND).strip().lower()
+    if normalized in VALID_TRIGGER_HANDS:
+        return normalized
+    if normalized in LEGACY_TRIGGER_HANDS:
+        return DOMINANT_TRIGGER_HAND
+    raise ValueError(f"invalid macro trigger hand '{normalized}'")
 
 
 @dataclass(frozen=True)
@@ -30,6 +41,9 @@ class MacroPointTrigger:
     pose_template: HandPoseTemplate
     editor_pose_template: HandPoseTemplate | None
     matcher_config: PoseMatcherConfig
+
+    def __post_init__(self):
+        object.__setattr__(self, "hand", _normalize_trigger_hand(self.hand))
 
     def to_dict(self) -> dict:
         payload = {
@@ -45,9 +59,7 @@ class MacroPointTrigger:
     def from_dict(cls, data: dict) -> "MacroPointTrigger":
         if not isinstance(data, dict):
             raise ValueError("macro point trigger must be an object")
-        hand = str(data.get("hand", "right")).strip()
-        if hand not in VALID_TRIGGER_HANDS:
-            raise ValueError(f"invalid macro trigger hand '{hand}'")
+        hand = _normalize_trigger_hand(data.get("hand", DOMINANT_TRIGGER_HAND))
         if not isinstance(data.get("pose_template"), dict):
             raise ValueError("macro point trigger pose_template is required")
         return cls(
@@ -128,6 +140,9 @@ class MacroRuleTrigger:
     start_rule_override: GestureRuleOverride | None
     swipe_config: MacroSwipeConfig | None
 
+    def __post_init__(self):
+        object.__setattr__(self, "hand", _normalize_trigger_hand(self.hand))
+
     @property
     def is_pose_trigger(self) -> bool:
         return self.trigger_type == RULE_TRIGGER_TYPE_POSE
@@ -153,9 +168,7 @@ class MacroRuleTrigger:
     def from_dict(cls, data: dict) -> "MacroRuleTrigger":
         if not isinstance(data, dict):
             raise ValueError("macro rule trigger must be an object")
-        hand = str(data.get("hand", "right")).strip()
-        if hand not in VALID_TRIGGER_HANDS:
-            raise ValueError(f"invalid macro trigger hand '{hand}'")
+        hand = _normalize_trigger_hand(data.get("hand", DOMINANT_TRIGGER_HAND))
 
         trigger_type = str(data.get("trigger_type", "")).strip()
         if trigger_type not in VALID_RULE_TRIGGER_TYPES:

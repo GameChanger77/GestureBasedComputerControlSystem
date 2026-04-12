@@ -22,7 +22,7 @@ class _TemplatePoseMixin:
         self.matcher_config = matcher_config
 
     def _matches_pose(self, hands_data):
-        hand = getattr(hands_data.wrist, "right", None)
+        hand = hands_data.wrist.dominant
         landmarks = hand_to_landmark_array(hand)
         if landmarks is None:
             return False
@@ -44,12 +44,19 @@ class TemplateMoveMouseGesture(_TemplatePoseMixin, MoveMouseGesture):
     def detect_gesture(self, hands_data):
         if not self._matches_pose(hands_data):
             return False, None
-        if not hands_data.camera.has_right:
+        if not hands_data.camera.has_dominant:
             return False, None
-        index_tip = hands_data.camera.right.index.tip
+        index_tip = hands_data.camera.dominant.index.tip
         if index_tip is None:
             return False, None
-        screen_x, screen_y = camera_to_screen(index_tip, self.screen_width, self.screen_height)
+        screen_x, screen_y = camera_to_screen(
+            index_tip,
+            self.screen_width,
+            self.screen_height,
+            side_deadzone=self.camera_side_deadzone,
+            top_deadzone=self.camera_top_deadzone,
+            bottom_deadzone=self.camera_bottom_deadzone,
+        )
         return True, (screen_x, screen_y)
 
 
@@ -62,11 +69,11 @@ class TemplateScrollGesture(_TemplatePoseMixin, ScrollGesture):
         if not self._matches_pose(hands_data):
             self._last_y_position = None
             return False, None
-        if not hands_data.camera.has_right:
+        if not hands_data.camera.has_dominant:
             self._last_y_position = None
             return False, None
-        index_tip = hands_data.camera.right.index.tip
-        middle_tip = hands_data.camera.right.middle.tip
+        index_tip = hands_data.camera.dominant.index.tip
+        middle_tip = hands_data.camera.dominant.middle.tip
         if index_tip is None or middle_tip is None:
             self._last_y_position = None
             return False, None
@@ -87,12 +94,19 @@ class TemplateLeftClickGesture(_TemplatePoseMixin, LeftClickGesture):
     def detect_gesture(self, hands_data):
         if not self._matches_pose(hands_data):
             return False, None
-        if not hands_data.camera.has_right:
+        if not hands_data.camera.has_dominant:
             return False, None
-        index_tip = hands_data.camera.right.index.tip
+        index_tip = hands_data.camera.dominant.index.tip
         if index_tip is None:
             return False, None
-        screen_x, screen_y = camera_to_screen(index_tip, self.screen_width, self.screen_height)
+        screen_x, screen_y = camera_to_screen(
+            index_tip,
+            self.screen_width,
+            self.screen_height,
+            side_deadzone=self.camera_side_deadzone,
+            top_deadzone=self.camera_top_deadzone,
+            bottom_deadzone=self.camera_bottom_deadzone,
+        )
         return True, (screen_x, screen_y)
 
 
@@ -104,12 +118,19 @@ class TemplateRightClickGesture(_TemplatePoseMixin, RightClickGesture):
     def detect_gesture(self, hands_data):
         if not self._matches_pose(hands_data):
             return False, None
-        if not hands_data.camera.has_right:
+        if not hands_data.camera.has_dominant:
             return False, None
-        index_tip = hands_data.camera.right.index.tip
+        index_tip = hands_data.camera.dominant.index.tip
         if index_tip is None:
             return False, None
-        screen_x, screen_y = camera_to_screen(index_tip, self.screen_width, self.screen_height)
+        screen_x, screen_y = camera_to_screen(
+            index_tip,
+            self.screen_width,
+            self.screen_height,
+            side_deadzone=self.camera_side_deadzone,
+            top_deadzone=self.camera_top_deadzone,
+            bottom_deadzone=self.camera_bottom_deadzone,
+        )
         return True, (screen_x, screen_y)
 
 

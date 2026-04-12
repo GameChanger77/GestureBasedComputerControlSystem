@@ -13,7 +13,7 @@ from backend.gestures.switch_mode.KeyboardModeExitGesture import KeyboardModeExi
 
 
 class _RuleConditionMixin:
-    def _configure_rule_override(self, rule_override: GestureRuleOverride, hand_label: str = "right"):
+    def _configure_rule_override(self, rule_override: GestureRuleOverride, hand_label: str = "dominant"):
         self.rule_override = rule_override
         self.rule_hand_label = hand_label
         self.rule_evaluator = ConditionEvaluator()
@@ -26,13 +26,11 @@ class _RuleConditionMixin:
         )
 
     def _hand_spaces(self, hands_data):
-        if self.rule_hand_label == "left":
-            return hands_data.wrist.left, hands_data.camera.left
-        return hands_data.wrist.right, hands_data.camera.right
+        return hands_data.wrist.get(self.rule_hand_label), hands_data.camera.get(self.rule_hand_label)
 
 
 class RuleMoveMouseGesture(_RuleConditionMixin, MoveMouseGesture):
-    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "right", **kwargs):
+    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "dominant", **kwargs):
         super().__init__(*args, **kwargs)
         self._configure_rule_override(rule_override, hand_label=hand_label)
 
@@ -46,12 +44,19 @@ class RuleMoveMouseGesture(_RuleConditionMixin, MoveMouseGesture):
         index_tip = hand_camera.index.tip
         if index_tip is None:
             return False, None
-        screen_x, screen_y = camera_to_screen(index_tip, self.screen_width, self.screen_height)
+        screen_x, screen_y = camera_to_screen(
+            index_tip,
+            self.screen_width,
+            self.screen_height,
+            side_deadzone=self.camera_side_deadzone,
+            top_deadzone=self.camera_top_deadzone,
+            bottom_deadzone=self.camera_bottom_deadzone,
+        )
         return True, (screen_x, screen_y)
 
 
 class RuleScrollGesture(_RuleConditionMixin, ScrollGesture):
-    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "right", **kwargs):
+    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "dominant", **kwargs):
         super().__init__(*args, **kwargs)
         self._configure_rule_override(rule_override, hand_label=hand_label)
 
@@ -81,7 +86,7 @@ class RuleScrollGesture(_RuleConditionMixin, ScrollGesture):
 
 
 class RuleLeftClickGesture(_RuleConditionMixin, LeftClickGesture):
-    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "right", **kwargs):
+    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "dominant", **kwargs):
         super().__init__(*args, **kwargs)
         self._configure_rule_override(rule_override, hand_label=hand_label)
 
@@ -95,12 +100,19 @@ class RuleLeftClickGesture(_RuleConditionMixin, LeftClickGesture):
         index_tip = hand_camera.index.tip
         if index_tip is None:
             return False, None
-        screen_x, screen_y = camera_to_screen(index_tip, self.screen_width, self.screen_height)
+        screen_x, screen_y = camera_to_screen(
+            index_tip,
+            self.screen_width,
+            self.screen_height,
+            side_deadzone=self.camera_side_deadzone,
+            top_deadzone=self.camera_top_deadzone,
+            bottom_deadzone=self.camera_bottom_deadzone,
+        )
         return True, (screen_x, screen_y)
 
 
 class RuleRightClickGesture(_RuleConditionMixin, RightClickGesture):
-    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "right", **kwargs):
+    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "dominant", **kwargs):
         super().__init__(*args, **kwargs)
         self._configure_rule_override(rule_override, hand_label=hand_label)
 
@@ -114,12 +126,19 @@ class RuleRightClickGesture(_RuleConditionMixin, RightClickGesture):
         index_tip = hand_camera.index.tip
         if index_tip is None:
             return False, None
-        screen_x, screen_y = camera_to_screen(index_tip, self.screen_width, self.screen_height)
+        screen_x, screen_y = camera_to_screen(
+            index_tip,
+            self.screen_width,
+            self.screen_height,
+            side_deadzone=self.camera_side_deadzone,
+            top_deadzone=self.camera_top_deadzone,
+            bottom_deadzone=self.camera_bottom_deadzone,
+        )
         return True, (screen_x, screen_y)
 
 
 class RuleKeyboardModeEntryGesture(_RuleConditionMixin, KeyboardModeEntryGesture):
-    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "right", **kwargs):
+    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "dominant", **kwargs):
         super().__init__(*args, **kwargs)
         self._configure_rule_override(rule_override, hand_label=hand_label)
 
@@ -133,7 +152,7 @@ class RuleKeyboardModeEntryGesture(_RuleConditionMixin, KeyboardModeEntryGesture
 
 
 class RuleHotkeyModeEntryGesture(_RuleConditionMixin, HotkeyModeEntryGesture):
-    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "right", **kwargs):
+    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "dominant", **kwargs):
         super().__init__(*args, **kwargs)
         self._configure_rule_override(rule_override, hand_label=hand_label)
 
@@ -147,7 +166,7 @@ class RuleHotkeyModeEntryGesture(_RuleConditionMixin, HotkeyModeEntryGesture):
 
 
 class RuleKeyboardModeExitGesture(_RuleConditionMixin, KeyboardModeExitGesture):
-    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "right", **kwargs):
+    def __init__(self, *args, rule_override: GestureRuleOverride, hand_label: str = "dominant", **kwargs):
         super().__init__(*args, **kwargs)
         self._configure_rule_override(rule_override, hand_label=hand_label)
 

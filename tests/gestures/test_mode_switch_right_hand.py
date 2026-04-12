@@ -23,7 +23,7 @@ class _StrategizerStub:
         self.mode_set_to = mode
 
 
-def _hands(right: bool, left: bool = False) -> HandsData:
+def _hands(right: bool, left: bool = False, dominant_hand: str = "right") -> HandsData:
     wrist = {}
     camera = {}
     if right:
@@ -32,7 +32,7 @@ def _hands(right: bool, left: bool = False) -> HandsData:
     if left:
         wrist["Left"] = np.zeros((21, 3), dtype=np.float32)
         camera["Left"] = np.zeros((21, 3), dtype=np.float32)
-    return HandsData(wrist, camera)
+    return HandsData(wrist, camera, dominant_hand=dominant_hand)
 
 
 class ModeSwitchRightHandTests(unittest.TestCase):
@@ -52,6 +52,16 @@ class ModeSwitchRightHandTests(unittest.TestCase):
             require_palm_facing_camera=True,
             min_palm_normal_z=gesture.min_palm_normal_z,
         )
+
+    def test_entry_uses_left_hand_when_left_is_dominant(self):
+        strategizer = _StrategizerStub("mouse")
+        gesture = KeyboardModeEntryGesture(_ActionStub(), strategizer=strategizer)
+        with patch(
+            "backend.gestures.switch_mode.KeyboardModeEntryGesture.is_hand_fully_open",
+            return_value=True,
+        ):
+            detected, _ = gesture.detect_gesture(_hands(right=False, left=True, dominant_hand="left"))
+        self.assertTrue(detected)
 
     def test_entry_uses_right_hand_open_from_hotkey_mode(self):
         strategizer = _StrategizerStub("hotkey")
@@ -88,6 +98,13 @@ class ModeSwitchRightHandTests(unittest.TestCase):
         gesture = KeyboardModeExitGesture(_ActionStub(), strategizer=strategizer)
         with patch.object(gesture, "_is_strict_fist", return_value=True):
             detected, _ = gesture.detect_gesture(_hands(right=True, left=False))
+        self.assertTrue(detected)
+
+    def test_exit_uses_left_hand_when_left_is_dominant(self):
+        strategizer = _StrategizerStub("keyboard")
+        gesture = KeyboardModeExitGesture(_ActionStub(), strategizer=strategizer)
+        with patch.object(gesture, "_is_strict_fist", return_value=True):
+            detected, _ = gesture.detect_gesture(_hands(right=False, left=True, dominant_hand="left"))
         self.assertTrue(detected)
 
     def test_exit_uses_right_hand_fist_from_hotkey_mode(self):
@@ -190,6 +207,13 @@ class ModeSwitchRightHandTests(unittest.TestCase):
         gesture = HotkeyModeEntryGesture(_ActionStub(), strategizer=strategizer)
         with patch.object(gesture, "_is_ok_sign", return_value=True):
             detected, _ = gesture.detect_gesture(_hands(right=True, left=False))
+        self.assertTrue(detected)
+
+    def test_hotkey_entry_uses_left_hand_when_left_is_dominant(self):
+        strategizer = _StrategizerStub("mouse")
+        gesture = HotkeyModeEntryGesture(_ActionStub(), strategizer=strategizer)
+        with patch.object(gesture, "_is_ok_sign", return_value=True):
+            detected, _ = gesture.detect_gesture(_hands(right=False, left=True, dominant_hand="left"))
         self.assertTrue(detected)
 
     def test_hotkey_entry_uses_ok_sign_from_keyboard_mode(self):

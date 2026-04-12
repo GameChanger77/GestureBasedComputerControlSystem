@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 from backend.gesture_remap.pose_templates import PoseMatcherConfig, build_pose_template
 from backend.gesture_remap.rule_overrides import GestureRuleOverride, POINT_OVERRIDE_KIND, RULE_OVERRIDE_KIND
 from backend.macros.macro_models import (
+    DOMINANT_TRIGGER_HAND,
     MacroPointTrigger,
     MacroRecord,
     MacroRuleTrigger,
@@ -33,6 +34,7 @@ class MacroEditorDialogTests(unittest.TestCase):
         self.assertEqual(dialog.trigger_editor.selected_kind(), RULE_OVERRIDE_KIND)
         self.assertEqual(dialog.trigger_editor.rule_editor.selected_trigger_type(), RULE_TRIGGER_TYPE_POSE)
         self.assertEqual(dialog.mode_combo.currentData(), "mouse")
+        self.assertFalse(hasattr(dialog.trigger_editor, "hand_combo"))
         self.assertEqual(dialog.shortcut_editor.build_shortcut_keys(), [])
         dialog.close()
 
@@ -47,7 +49,7 @@ class MacroEditorDialogTests(unittest.TestCase):
             mode="mouse",
             trigger_kind=POINT_OVERRIDE_KIND,
             point_trigger=MacroPointTrigger(
-                hand="left",
+                hand=DOMINANT_TRIGGER_HAND,
                 pose_template=template,
                 editor_pose_template=None,
                 matcher_config=PoseMatcherConfig(),
@@ -62,7 +64,7 @@ class MacroEditorDialogTests(unittest.TestCase):
             target_os="Windows",
         )
         self.assertEqual(dialog.trigger_editor.selected_kind(), POINT_OVERRIDE_KIND)
-        self.assertEqual(dialog.trigger_editor.hand_combo.currentData(), "left")
+        self.assertFalse(hasattr(dialog.trigger_editor, "hand_combo"))
         self.assertEqual(dialog.shortcut_editor.build_shortcut_keys(), ["left_ctrl", "v"])
         dialog.close()
 
@@ -73,7 +75,7 @@ class MacroEditorDialogTests(unittest.TestCase):
             trigger_kind=RULE_OVERRIDE_KIND,
             point_trigger=None,
             rule_trigger=MacroRuleTrigger(
-                hand="either",
+                hand=DOMINANT_TRIGGER_HAND,
                 trigger_type=RULE_TRIGGER_TYPE_SWIPE,
                 rule_override=None,
                 start_rule_override=GestureRuleOverride(
@@ -127,7 +129,7 @@ class MacroEditorDialogTests(unittest.TestCase):
             trigger_kind=RULE_OVERRIDE_KIND,
             point_trigger=None,
             rule_trigger=MacroRuleTrigger(
-                hand="right",
+                hand=DOMINANT_TRIGGER_HAND,
                 trigger_type=RULE_TRIGGER_TYPE_POSE,
                 rule_override=GestureRuleOverride(
                     conditions=[{"op": "hand_fully_open"}],

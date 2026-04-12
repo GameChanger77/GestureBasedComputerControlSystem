@@ -19,6 +19,7 @@ class GestureConfig:
     CONFIG_FILENAME = "gesture_config.json"
     FIELD_GROUP_ORDER = [
         "Keyboard",
+        "Handedness",
         "Finger detection",
         "Scroll",
         "Click/pinch",
@@ -38,6 +39,7 @@ class GestureConfig:
     ]
     GROUP_TO_PAGE = {
         "Keyboard": "Keyboard",
+        "Handedness": "Controls",
         "Finger detection": "Controls",
         "Scroll": "Controls",
         "Click/pinch": "Controls",
@@ -51,16 +53,18 @@ class GestureConfig:
     PROD_VISIBLE_KEYS = {
         "keyboard_layout",
         "keyboard_theme",
+        "dominant_hand",
         "finger_extension_angle",
         "scroll_sensitivity",
         "pinch_threshold",
         "target_max_fps",
-        "max_tracked_hands",
         "camera_index",
         "camera_target_fps",
+        "camera_side_deadzone",
+        "camera_top_deadzone",
+        "camera_bottom_deadzone",
         "camera_auto_exposure",
         "camera_dynamic_exposure",
-        "right_hand_only_processing",
     }
 
     # Default configuration values
@@ -94,6 +98,7 @@ class GestureConfig:
         # Keyboard overlay and movement (display-only)
         "keyboard_layout": "qwerty",
         "keyboard_theme": "dark",
+        "dominant_hand": "right",
         "keyboard_flip_x_for_mapping": True,
         "keyboard_fixed_center_x": 0.5,
         "keyboard_fixed_center_y": 0.58,
@@ -137,7 +142,6 @@ class GestureConfig:
         "preview_max_fps": 30,  # Cap UI preview refresh rate (tracking still runs at full speed)
         "camera_buffer_size": 1,  # Camera capture buffer for lower-latency reads
         "pipeline_metrics_window": 120,  # Rolling window size for FPS/latency metrics
-        "max_tracked_hands": 1,  # Only one hand is required so far
 
         # Camera runtime tuning (best-effort; backend/camera dependent)
         "camera_index": 0,
@@ -147,6 +151,9 @@ class GestureConfig:
         "camera_width": 640,
         "camera_height": 480,
         "camera_target_fps": 30,
+        "camera_side_deadzone": 0.08,
+        "camera_top_deadzone": 0.0,
+        "camera_bottom_deadzone": 0.18,
         "camera_auto_exposure": True,
         "camera_dynamic_exposure": True,  # Manual fallback adaptation when auto exposure is disabled
         "camera_dynamic_exposure_target_luma": 112.0,  # Target average brightness (0-255)
@@ -161,7 +168,6 @@ class GestureConfig:
         "camera_warmup_frames": 8,  # Drop first N frames after camera open
         "camera_readback_log": True,
         "capture_latest_frame_only": True,  # Decouple capture/inference and always process newest frame
-        "right_hand_only_processing": True,  # Process only right hand for mouse + keyboard modes
 
         # Hand tracker confidence thresholds (tracking vs re-detection tuning)
         "hand_min_detection_confidence": 0.65,
@@ -185,6 +191,15 @@ class GestureConfig:
             "label": "Keyboard Color Scheme",
             "type": "choice",
             "options": KeyboardThemeRegistry.list_options(),
+        },
+        "dominant_hand": {
+            "group": "Handedness",
+            "label": "Dominant Hand",
+            "type": "choice",
+            "options": [
+                {"label": "Right", "value": "right"},
+                {"label": "Left", "value": "left"},
+            ],
         },
         "finger_extension_angle": {
             "group": "Finger detection",
@@ -309,13 +324,6 @@ class GestureConfig:
             "min": 10,
             "max": 1000,
         },
-        "max_tracked_hands": {
-            "group": "Performance tuning",
-            "label": "Max Tracked Hands",
-            "type": "int",
-            "min": 1,
-            "max": 2,
-        },
         "camera_index": {
             "group": "Camera runtime tuning",
             "label": "Camera",
@@ -348,6 +356,33 @@ class GestureConfig:
             "max": 240.0,
             "step": 1.0,
             "decimals": 1,
+        },
+        "camera_side_deadzone": {
+            "group": "Camera runtime tuning",
+            "label": "Camera Side Deadzone",
+            "type": "float",
+            "min": 0.0,
+            "max": 0.45,
+            "step": 0.01,
+            "decimals": 2,
+        },
+        "camera_top_deadzone": {
+            "group": "Camera runtime tuning",
+            "label": "Camera Top Deadzone",
+            "type": "float",
+            "min": 0.0,
+            "max": 0.45,
+            "step": 0.01,
+            "decimals": 2,
+        },
+        "camera_bottom_deadzone": {
+            "group": "Camera runtime tuning",
+            "label": "Camera Bottom Deadzone",
+            "type": "float",
+            "min": 0.0,
+            "max": 0.45,
+            "step": 0.01,
+            "decimals": 2,
         },
         "camera_auto_exposure": {
             "group": "Camera runtime tuning",
@@ -448,11 +483,6 @@ class GestureConfig:
         "capture_latest_frame_only": {
             "group": "Performance tuning",
             "label": "Capture Latest Frame Only",
-            "type": "bool",
-        },
-        "right_hand_only_processing": {
-            "group": "Performance tuning",
-            "label": "Right Hand Only Processing",
             "type": "bool",
         },
         "hand_min_detection_confidence": {
@@ -646,6 +676,7 @@ class GestureConfig:
                     {key: value for key, value in user_config.items() if key in self.DEFAULT_CONFIG}
                 )
                 self._migrate_legacy_camera_selection()
+                self._normalize_runtime_settings()
                 print(f"Loaded gesture config from {self.config_path}")
 
             except Exception as e:
@@ -677,6 +708,24 @@ class GestureConfig:
         if decoded_backend and (decoded_index != legacy_int):
             self.config["camera_index"] = decoded_index
             self.config["camera_backend"] = decoded_backend
+
+    def _normalize_runtime_settings(self):
+        """Normalize runtime settings after loading user config."""
+        dominant_hand = str(self.config.get("dominant_hand", "right") or "right").strip().lower()
+        self.config["dominant_hand"] = "left" if dominant_hand == "left" else "right"
+        self._normalize_deadzone_fraction("camera_side_deadzone", self.DEFAULT_CONFIG["camera_side_deadzone"], 0.45)
+        top_deadzone = self._normalize_deadzone_fraction("camera_top_deadzone", self.DEFAULT_CONFIG["camera_top_deadzone"], 0.45)
+        bottom_max = min(0.45, max(0.0, 0.95 - top_deadzone))
+        self._normalize_deadzone_fraction("camera_bottom_deadzone", self.DEFAULT_CONFIG["camera_bottom_deadzone"], bottom_max)
+
+    def _normalize_deadzone_fraction(self, key, default_value, max_value):
+        try:
+            value = float(self.config.get(key, default_value))
+        except (TypeError, ValueError):
+            value = float(default_value)
+        value = max(0.0, min(float(max_value), value))
+        self.config[key] = value
+        return value
 
     def save(self):
         """Save current configuration to JSON file."""

@@ -57,10 +57,8 @@ class PointMacroTriggerRecognizer(_BaseSnapshotMacroRecognizer):
         self.trigger = trigger
 
     def _matching_hands(self, hands_data):
-        if self.trigger.hand in {"right", "either"} and hands_data.wrist.has_right:
-            yield hands_data.wrist.right
-        if self.trigger.hand in {"left", "either"} and hands_data.wrist.has_left:
-            yield hands_data.wrist.left
+        if hands_data.wrist.has_dominant:
+            yield hands_data.wrist.dominant
 
     def detect_gesture(self, hands_data):
         for hand in self._matching_hands(hands_data):
@@ -93,8 +91,6 @@ class RuleMacroTriggerRecognizer(_BaseSnapshotMacroRecognizer):
         self.evaluator = ConditionEvaluator()
 
     def _candidate_hands(self):
-        if self.trigger.hand == "either":
-            return ("right", "left")
         return (self.trigger.hand,)
 
     def detect_gesture(self, hands_data):
@@ -121,8 +117,6 @@ class SwipeMacroTriggerRecognizer(_BaseMacroShortcutRecognizer, MotionGestureRec
         self._requires_rearm = False
 
     def _candidate_hands(self):
-        if self.trigger.hand == "either":
-            return ("right", "left")
         return (self.trigger.hand,)
 
     def _current_start_hand(self, hands_data):

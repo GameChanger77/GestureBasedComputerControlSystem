@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QPoint, QSettings
+from PySide6.QtCore import QSettings
 from PySide6.QtGui import QGuiApplication
 
-from backend.gestures.GestureUtils import is_hand_fully_open
+from backend.gestures.GestureUtils import camera_to_normalized_screen, is_hand_fully_open
 from backend.gestures.keyboard_mode.KeyboardSurfaceBase import (
     HandFrame,
     KeyboardSurfaceBase,
@@ -40,6 +40,9 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
         self.follow_alpha = 0.28
         self.open_extension_threshold = float(config.get("finger_extension_angle", 155.0))
         self.open_min_palm_normal_z = 0.35
+        self.camera_side_deadzone = max(0.0, float(config.get("camera_side_deadzone", 0.08)))
+        self.camera_top_deadzone = max(0.0, float(config.get("camera_top_deadzone", 0.0)))
+        self.camera_bottom_deadzone = max(0.0, float(config.get("camera_bottom_deadzone", 0.18)))
         self._window_locked = True
         self._unlock_pending_frames = 0
         self._screen_origin_x_px = 0.0
@@ -52,23 +55,9 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
         self._window_x_px, self._window_y_px = self._load_or_center_position()
         self._last_follow_center_px: Optional[Tuple[float, float]] = None
 
-    def _resolve_screen_for_anchor(self, anchor_px: Optional[Tuple[float, float]] = None):
-        screen = None
-        if anchor_px is not None:
-            screen = QGuiApplication.screenAt(QPoint(int(anchor_px[0]), int(anchor_px[1])))
-
-        if screen is None:
-            center_x = getattr(self, "_window_x_px", self._screen_origin_x_px) + (self.window_width_px / 2.0)
-            center_y = getattr(self, "_window_y_px", self._screen_origin_y_px) + (self.window_height_px / 2.0)
-            screen = QGuiApplication.screenAt(QPoint(int(center_x), int(center_y)))
-
-        if screen is None:
-            screen = QGuiApplication.primaryScreen()
-
-        return screen
-
     def _refresh_active_screen_geometry(self, anchor_px: Optional[Tuple[float, float]] = None):
-        screen = self._resolve_screen_for_anchor(anchor_px)
+        _ = anchor_px
+        screen = QGuiApplication.primaryScreen()
         if screen is None:
             self._screen_origin_x_px = 0.0
             self._screen_origin_y_px = 0.0
@@ -76,11 +65,17 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
             self._screen_height_px = float(self.screen_height)
             return
 
-        geom = screen.availableGeometry()
+        geom = screen.virtualGeometry()
         self._screen_origin_x_px = float(geom.x())
         self._screen_origin_y_px = float(geom.y())
         self._screen_width_px = max(1.0, float(geom.width()))
         self._screen_height_px = max(1.0, float(geom.height()))
+
+    def _primary_screen_available_geometry(self):
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return None
+        return screen.availableGeometry()
 
     def _load_or_center_position(self) -> Tuple[float, float]:
         settings = QSettings("GBCCS", "HandGestureControl")
@@ -101,8 +96,13 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
         return self._clamp_window_position(x_px, y_px)
 
     def _center_position(self) -> Tuple[float, float]:
-        x = self._screen_origin_x_px + ((self._screen_width_px - self.window_width_px) / 2.0)
-        y = self._screen_origin_y_px + ((self._screen_height_px - self.window_height_px) / 2.0)
+        geom = self._primary_screen_available_geometry()
+        if geom is None:
+            x = self._screen_origin_x_px + ((self._screen_width_px - self.window_width_px) / 2.0)
+            y = self._screen_origin_y_px + ((self._screen_height_px - self.window_height_px) / 2.0)
+        else:
+            x = float(geom.x()) + ((float(geom.width()) - self.window_width_px) / 2.0)
+            y = float(geom.y()) + ((float(geom.height()) - self.window_height_px) / 2.0)
         return self._clamp_window_position(x, y)
 
     def _clamp_window_position(self, x_px: float, y_px: float) -> Tuple[float, float]:
@@ -122,37 +122,40 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
         settings.setValue(self._SETTINGS_Y, int(round(self._window_y_px)))
         settings.endGroup()
 
-    def _right_anchor_screen_px(self, hands_data) -> Optional[Tuple[float, float]]:
-        if not hands_data.camera.has_right:
+    def _dominant_anchor_screen_px(self, hands_data) -> Optional[Tuple[float, float]]:
+        if not hands_data.camera.has_dominant:
             return None
-        right = hands_data.camera.right
-        if right is None or not right.exists:
-            return None
-
-        anchor = right.index.tip
-        if anchor is None:
-            anchor = right.wrist
-        if anchor is None:
+        dominant = hands_data.camera.dominant
+        if dominant is None or not dominant.exists:
             return None
 
-        nx = float(anchor[0])
-        ny = float(anchor[1])
-        if self.flip_x_for_mapping:
-            nx = 1.0 - nx
+        anchor = dominant.index.tip
+        if anchor is None:
+            anchor = dominant.wrist
+        if anchor is None:
+            return None
+
+        nx, ny, _nz = camera_to_normalized_screen(
+            anchor,
+            flip_x=self.flip_x_for_mapping,
+            side_deadzone=self.camera_side_deadzone,
+            top_deadzone=self.camera_top_deadzone,
+            bottom_deadzone=self.camera_bottom_deadzone,
+        )
 
         return (
             self._screen_origin_x_px + (nx * self._screen_width_px),
             self._screen_origin_y_px + (ny * self._screen_height_px),
         )
 
-    def _right_open_for_drag(self, hands_data) -> bool:
-        if not hands_data.wrist.has_right:
+    def _dominant_open_for_drag(self, hands_data) -> bool:
+        if not hands_data.wrist.has_dominant:
             return False
-        right = hands_data.wrist.right
-        if right is None or not right.exists:
+        dominant = hands_data.wrist.dominant
+        if dominant is None or not dominant.exists:
             return False
         return is_hand_fully_open(
-            right,
+            dominant,
             extension_threshold=self.open_extension_threshold,
             min_extended_fingers=5,
             openness_threshold=0.08,
@@ -161,10 +164,10 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
         )
 
     def _update_window_follow(self, hands_data):
-        right_open = self._right_open_for_drag(hands_data)
-        anchor = self._right_anchor_screen_px(hands_data)
+        self._refresh_active_screen_geometry()
+        right_open = self._dominant_open_for_drag(hands_data)
+        anchor = self._dominant_anchor_screen_px(hands_data)
         was_locked = self._window_locked
-        self._refresh_active_screen_geometry(anchor)
 
         if right_open and anchor is not None:
             self._unlock_pending_frames = min(
@@ -217,8 +220,7 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
         )
 
     def update_layout(self, hands_data, *, paused: bool, rows: List[List[Dict[str, object]]]) -> SurfaceLayoutState:
-        if not hands_data.camera.has_right:
-            self._refresh_active_screen_geometry()
+        self._refresh_active_screen_geometry()
         self._window_x_px, self._window_y_px = self._clamp_window_position(self._window_x_px, self._window_y_px)
         self._update_window_follow(hands_data)
         window_frame = self._window_frame_normalized()

@@ -14,8 +14,20 @@ class RightClickGesture(SnapshotGestureRecognizer):
     Priority: High (overrides mouse tracking)
     """
 
-    def __init__(self, action, screen_width, screen_height, priority, pinch_threshold,
-                 extension_threshold, pending_frames, ending_frames):
+    def __init__(
+        self,
+        action,
+        screen_width,
+        screen_height,
+        priority,
+        pinch_threshold,
+        extension_threshold,
+        pending_frames,
+        ending_frames,
+        camera_side_deadzone=0.0,
+        camera_top_deadzone=0.0,
+        camera_bottom_deadzone=0.0,
+    ):
         """
         Args:
             action: Action object for executing clicks
@@ -33,6 +45,9 @@ class RightClickGesture(SnapshotGestureRecognizer):
         self.pinch_threshold = pinch_threshold
         self.extension_threshold = extension_threshold
         self.thumb_extension_threshold = max(110.0, float(extension_threshold) - 25.0)
+        self.camera_side_deadzone = max(0.0, float(camera_side_deadzone))
+        self.camera_top_deadzone = max(0.0, float(camera_top_deadzone))
+        self.camera_bottom_deadzone = max(0.0, float(camera_bottom_deadzone))
         self.suppresses_lower_priorities_while_active = True
 
     def detect_gesture(self, hands_data: HandsData):
@@ -42,12 +57,11 @@ class RightClickGesture(SnapshotGestureRecognizer):
         Returns:
             tuple: (detected, (screen_x, screen_y))
         """
-        # Use right hand for mouse control
-        if not hands_data.wrist.has_right or not hands_data.camera.has_right:
+        if not hands_data.wrist.has_dominant or not hands_data.camera.has_dominant:
             return False, None
 
-        hand_wrist = hands_data.wrist.right
-        hand_camera = hands_data.camera.right
+        hand_wrist = hands_data.wrist.dominant
+        hand_camera = hands_data.camera.dominant
 
         # Check if thumb and ring finger are pinched
         thumb_tip = hand_wrist.thumb.tip
@@ -71,7 +85,14 @@ class RightClickGesture(SnapshotGestureRecognizer):
             return False, None
 
         # Convert to screen coordinates
-        screen_x, screen_y = camera_to_screen(index_tip, self.screen_width, self.screen_height)
+        screen_x, screen_y = camera_to_screen(
+            index_tip,
+            self.screen_width,
+            self.screen_height,
+            side_deadzone=self.camera_side_deadzone,
+            top_deadzone=self.camera_top_deadzone,
+            bottom_deadzone=self.camera_bottom_deadzone,
+        )
 
         return True, (screen_x, screen_y)
 

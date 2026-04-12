@@ -116,7 +116,7 @@ class GesturePoseMatchingTests(unittest.TestCase):
             store.set_rule_override(
                 "left_click",
                 GestureRuleOverride(
-                    conditions=[{"op": "hand_exists", "hand": "right"}],
+                    conditions=[{"op": "hand_exists", "hand": "dominant"}],
                     pending_frames=3,
                     ending_frames=2,
                 ),
@@ -153,7 +153,7 @@ class GesturePoseMatchingTests(unittest.TestCase):
             pending_frames=3,
             ending_frames=2,
             rule_override=GestureRuleOverride(
-                conditions=[{"op": "hand_exists", "hand": "right"}],
+                conditions=[{"op": "hand_exists", "hand": "dominant"}],
                 pending_frames=3,
                 ending_frames=2,
             ),
@@ -192,7 +192,7 @@ class GesturePoseMatchingTests(unittest.TestCase):
             min_delta_px=0,
             cadence_ms=1,
             rule_override=GestureRuleOverride(
-                conditions=[{"op": "hand_exists", "hand": "right"}],
+                conditions=[{"op": "hand_exists", "hand": "dominant"}],
                 pending_frames=1,
                 ending_frames=2,
             ),

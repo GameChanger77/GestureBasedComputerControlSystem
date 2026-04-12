@@ -79,17 +79,11 @@ def create_backend_components(
         ui_mode=ui_mode,
     )
 
-    max_tracked_hands = int(config.get('max_tracked_hands', 1))
-    if max_tracked_hands < 1:
-        max_tracked_hands = 1
-    if max_tracked_hands > 2:
-        max_tracked_hands = 2
-
     hand_tracker = HandTracker(
         strategizer=strategizer,
         action=action,
         model_path=str(resource(r"backend/models/hand_landmarker.task")),
-        num_hands=max_tracked_hands,
+        num_hands=1,
         config=config
     )
 

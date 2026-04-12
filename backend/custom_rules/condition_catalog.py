@@ -9,9 +9,7 @@ FINGER_OPTIONS = [
 ]
 
 HAND_OPTIONS = [
-    ("left", "Left"),
-    ("right", "Right"),
-    ("either", "Either"),
+    ("dominant", "Dominant"),
 ]
 
 SPACE_OPTIONS = [
@@ -77,7 +75,7 @@ CONDITION_DEFINITIONS = {
     "hand_exists": {
         "label": "Hand Exists",
         "fields": [
-            {"name": "hand", "label": "Hand", "type": "enum", "options": HAND_OPTIONS, "default": "right"},
+            {"name": "hand", "label": "Hand", "type": "enum", "options": HAND_OPTIONS, "default": "dominant"},
         ],
     },
     "hand_count_eq": {

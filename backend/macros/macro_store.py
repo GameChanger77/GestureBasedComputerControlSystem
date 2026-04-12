@@ -12,6 +12,7 @@ from backend.gesture_remap.pose_templates import (
 )
 from backend.gesture_remap.rule_overrides import RULE_OVERRIDE_KIND, GestureRuleOverride
 from backend.macros.macro_models import (
+    DOMINANT_TRIGGER_HAND,
     MacroRecord,
     MacroRuleTrigger,
     RULE_TRIGGER_TYPE_POSE,
@@ -106,7 +107,7 @@ class MacroStore:
                 trigger_kind=RULE_OVERRIDE_KIND,
                 point_trigger=None,
                 rule_trigger=MacroRuleTrigger(
-                    hand="right",
+                    hand=DOMINANT_TRIGGER_HAND,
                     trigger_type=RULE_TRIGGER_TYPE_POSE,
                     rule_override=GestureRuleOverride(
                         conditions=[
@@ -157,12 +158,6 @@ class MacroStore:
             self.save()
 
     @staticmethod
-    def _hands_overlap(candidate_hand: str, other_hand: str) -> bool:
-        candidate_set = {"left", "right"} if candidate_hand == "either" else {candidate_hand}
-        other_set = {"left", "right"} if other_hand == "either" else {other_hand}
-        return bool(candidate_set & other_set)
-
-    @staticmethod
     def _built_in_active_in_mode(definition, mode: str) -> bool:
         if definition.section == "mouse":
             return mode == "mouse"
@@ -180,14 +175,11 @@ class MacroStore:
         *,
         macro_id: str | None,
         mode: str,
-        hand: str,
         pose_template: HandPoseTemplate,
         matcher_config: PoseMatcherConfig,
     ):
         for definition in registry.all():
             if not self._built_in_active_in_mode(definition, mode):
-                continue
-            if not self._hands_overlap(hand, definition.hand):
                 continue
             comparison = compare_pose_templates(
                 definition.saved_pose_template,
@@ -203,7 +195,7 @@ class MacroStore:
             if record.mode != mode:
                 continue
             other_trigger = record.point_trigger
-            if other_trigger is None or not self._hands_overlap(hand, other_trigger.hand):
+            if other_trigger is None:
                 continue
             other_template = other_trigger.editor_pose_template or other_trigger.pose_template
             comparison = compare_pose_templates(other_template, pose_template, matcher_config)

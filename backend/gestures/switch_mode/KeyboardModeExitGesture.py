@@ -5,7 +5,7 @@ from backend.gestures.GestureUtils import get_finger_angle, get_finger_extension
 
 class KeyboardModeExitGesture(SnapshotGestureRecognizer):
     """
-    Switch from KEYBOARD or HOTKEY mode to MOUSE mode when the right hand is a fist.
+    Switch from KEYBOARD or HOTKEY mode to MOUSE mode when the dominant hand is a fist.
     """
     _MAX_THUMB_EXTENSION_RATIO = 0.98
 
@@ -60,12 +60,12 @@ class KeyboardModeExitGesture(SnapshotGestureRecognizer):
         if self.strategizer.current_mode.value not in ("keyboard", "hotkey"):
             return False, None
 
-        if not hands_data.wrist.has_right:
+        if not hands_data.wrist.has_dominant:
             return False, None
 
-        right = hands_data.wrist.right
-        right_fist = self._is_strict_fist(right)
-        return right_fist, None
+        dominant_hand = hands_data.wrist.dominant
+        dominant_fist = self._is_strict_fist(dominant_hand)
+        return dominant_fist, None
 
     def execute_action(self, data):
         from backend.Strategizer import ControlMode

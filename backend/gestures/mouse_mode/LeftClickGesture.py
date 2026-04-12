@@ -32,6 +32,9 @@ class LeftClickGesture(SnapshotGestureRecognizer):
         ending_frames,
         double_click_hold_time=0.55,
         drag_deadzone_px=32,
+        camera_side_deadzone=0.0,
+        camera_top_deadzone=0.0,
+        camera_bottom_deadzone=0.0,
     ):
         """
         Args:
@@ -55,6 +58,9 @@ class LeftClickGesture(SnapshotGestureRecognizer):
         self.double_click_hold_time = max(0.05, float(double_click_hold_time))
         self.drag_deadzone_px = max(4, int(drag_deadzone_px))
         self.double_click_stationary_threshold_px = max(4.0, float(self.drag_deadzone_px) * 0.5)
+        self.camera_side_deadzone = max(0.0, float(camera_side_deadzone))
+        self.camera_top_deadzone = max(0.0, float(camera_top_deadzone))
+        self.camera_bottom_deadzone = max(0.0, float(camera_bottom_deadzone))
         self.suppresses_lower_priorities_while_active = True
 
         self.gesture_start_time = None
@@ -70,11 +76,11 @@ class LeftClickGesture(SnapshotGestureRecognizer):
         Returns:
             tuple: (detected, (screen_x, screen_y))
         """
-        if not hands_data.wrist.has_right or not hands_data.camera.has_right:
+        if not hands_data.wrist.has_dominant or not hands_data.camera.has_dominant:
             return False, None
 
-        hand_wrist = hands_data.wrist.right
-        hand_camera = hands_data.camera.right
+        hand_wrist = hands_data.wrist.dominant
+        hand_camera = hands_data.camera.dominant
 
         thumb_tip = hand_wrist.thumb.tip
         middle_tip = hand_wrist.middle.tip
@@ -94,7 +100,14 @@ class LeftClickGesture(SnapshotGestureRecognizer):
         if index_tip is None:
             return False, None
 
-        screen_x, screen_y = camera_to_screen(index_tip, self.screen_width, self.screen_height)
+        screen_x, screen_y = camera_to_screen(
+            index_tip,
+            self.screen_width,
+            self.screen_height,
+            side_deadzone=self.camera_side_deadzone,
+            top_deadzone=self.camera_top_deadzone,
+            bottom_deadzone=self.camera_bottom_deadzone,
+        )
         return True, (screen_x, screen_y)
 
     def update(self, hands_data: HandsData, frame_capture_ts_ns=None):

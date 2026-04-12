@@ -26,6 +26,9 @@ class MoveMouseGesture(ContinuousGestureRecognizer):
         ending_frames,
         min_delta_px=1,
         cadence_ms=16,
+        camera_side_deadzone=0.0,
+        camera_top_deadzone=0.0,
+        camera_bottom_deadzone=0.0,
     ):
         """
         Args:
@@ -44,6 +47,9 @@ class MoveMouseGesture(ContinuousGestureRecognizer):
         self.non_index_extension_threshold = min(179.0, float(extension_threshold) + 12.0)
         self.min_delta_px = max(0, int(min_delta_px))
         self.cadence_ns = max(1, int(cadence_ms)) * 1_000_000
+        self.camera_side_deadzone = max(0.0, float(camera_side_deadzone))
+        self.camera_top_deadzone = max(0.0, float(camera_top_deadzone))
+        self.camera_bottom_deadzone = max(0.0, float(camera_bottom_deadzone))
         self._frame_count = 0
         self._last_emitted_pos = None
         self._last_emit_ts_ns = 0
@@ -57,10 +63,10 @@ class MoveMouseGesture(ContinuousGestureRecognizer):
         """
         self._frame_count += 1
 
-        if not hands_data.wrist.has_right or not hands_data.camera.has_right:
+        if not hands_data.wrist.has_dominant or not hands_data.camera.has_dominant:
             return False, None
-        hand_wrist = hands_data.wrist.right
-        hand_camera = hands_data.camera.right
+        hand_wrist = hands_data.wrist.dominant
+        hand_camera = hands_data.camera.dominant
 
         if not is_finger_extended(hand_wrist.index, threshold=self.extension_threshold):
             return False, None
@@ -77,7 +83,14 @@ class MoveMouseGesture(ContinuousGestureRecognizer):
             return False, None
 
         # Convert to screen coordinates
-        screen_x, screen_y = camera_to_screen(index_tip, self.screen_width, self.screen_height)
+        screen_x, screen_y = camera_to_screen(
+            index_tip,
+            self.screen_width,
+            self.screen_height,
+            side_deadzone=self.camera_side_deadzone,
+            top_deadzone=self.camera_top_deadzone,
+            bottom_deadzone=self.camera_bottom_deadzone,
+        )
 
         return True, (screen_x, screen_y)
 

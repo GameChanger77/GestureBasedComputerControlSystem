@@ -47,7 +47,7 @@ class GestureOverrideStoreTests(unittest.TestCase):
             path = Path(tmp_dir) / "gesture_overrides.json"
             store = GestureOverrideStore(path)
             rule_override = GestureRuleOverride(
-                conditions=[{"op": "hand_exists", "hand": "right"}],
+                conditions=[{"op": "hand_exists", "hand": "dominant"}],
                 pending_frames=4,
                 ending_frames=3,
             )

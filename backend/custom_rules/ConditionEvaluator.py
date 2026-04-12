@@ -34,7 +34,7 @@ class ConditionEvaluator:
     - hand_openness_gt / hand_openness_lt:
         { "op": "hand_openness_gt", "value": 0.4, "space": "wrist" }
     - hand_exists:
-        { "op": "hand_exists", "hand": "right" }    # hand optional; defaults to current hand
+        { "op": "hand_exists", "hand": "dominant" }    # hand optional; defaults to current hand
     - hand_count_eq:
         { "op": "hand_count_eq", "value": 1 }
 
@@ -62,7 +62,7 @@ class ConditionEvaluator:
 
         Args:
             hands_data: Current frame hand landmarks (wrist + camera spaces)
-            hand_label: "left" or "right" chosen for this gesture
+            hand_label: "dominant", "left", or "right" chosen for this gesture
             cond: JSON dict for one condition
 
         Returns:
@@ -192,6 +192,8 @@ class ConditionEvaluator:
             return hands_data.wrist.has_left and hands_data.camera.has_left
         if hand_label == "right":
             return hands_data.wrist.has_right and hands_data.camera.has_right
+        if hand_label == "dominant":
+            return hands_data.wrist.has_dominant and hands_data.camera.has_dominant
         # either
         return (hands_data.wrist.has_right and hands_data.camera.has_right) or \
                (hands_data.wrist.has_left and hands_data.camera.has_left)
@@ -202,16 +204,12 @@ class ConditionEvaluator:
 
         Args:
             coord_space: hands_data.wrist or hands_data.camera
-            hand_label: "left" or "right"
+            hand_label: "dominant", "left", or "right"
 
         Returns:
             Hand or None
         """
-        if hand_label == "left":
-            return coord_space.left
-        if hand_label == "right":
-            return coord_space.right
-        return None
+        return coord_space.get(hand_label)
 
     def _resolve_point(
         self, hands_data: HandsData, hand_label: str, space: str, token: Optional[str]
