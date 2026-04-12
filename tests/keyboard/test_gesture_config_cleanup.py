@@ -57,6 +57,24 @@ class GestureConfigCleanupTests(unittest.TestCase):
             self.assertNotIn("max_tracked_hands", saved_payload)
             self.assertNotIn("right_hand_only_processing", saved_payload)
 
+    def test_screen_interaction_sensitivity_is_clamped_to_new_max(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "gesture_config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "screen_interaction_sensitivity": 3.0,
+                        "cursor_move_smoothing": 1.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            config = GestureConfig(config_path=config_path)
+
+            self.assertEqual(config.get("screen_interaction_sensitivity"), 2.0)
+            self.assertEqual(config.get("cursor_move_smoothing"), 0.85)
+
     def test_camera_to_screen_reaches_full_screen_bounds(self):
         self.assertEqual(camera_to_screen((0.0, 0.0, 0.0), 1920, 1080), (1919, 0))
         self.assertEqual(camera_to_screen((1.0, 1.0, 0.0), 1920, 1080), (0, 1079))
@@ -85,6 +103,43 @@ class GestureConfigCleanupTests(unittest.TestCase):
                 bottom_deadzone=0.20,
             ),
             (50, 62),
+        )
+
+    def test_camera_to_screen_sensitivity_defaults_to_current_mapping(self):
+        self.assertEqual(
+            camera_to_screen(
+                (0.60, 0.60, 0.0),
+                100,
+                100,
+                flip_x=False,
+                sensitivity=1.0,
+            ),
+            (60, 60),
+        )
+        self.assertEqual(
+            camera_to_screen(
+                (0.60, 0.60, 0.0),
+                100,
+                100,
+                flip_x=False,
+                sensitivity=2.0,
+            ),
+            (70, 70),
+        )
+
+    def test_camera_to_screen_applies_sensitivity_after_deadzones(self):
+        self.assertEqual(
+            camera_to_screen(
+                (0.50, 0.50, 0.0),
+                100,
+                100,
+                side_deadzone=0.10,
+                top_deadzone=0.0,
+                bottom_deadzone=0.20,
+                flip_x=False,
+                sensitivity=2.0,
+            ),
+            (50, 75),
         )
 
 

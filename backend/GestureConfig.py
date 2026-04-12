@@ -57,6 +57,8 @@ class GestureConfig:
         "finger_extension_angle",
         "scroll_sensitivity",
         "pinch_threshold",
+        "screen_interaction_sensitivity",
+        "cursor_move_smoothing",
         "target_max_fps",
         "camera_index",
         "camera_target_fps",
@@ -133,6 +135,8 @@ class GestureConfig:
         "keyboard_flick_dominance_ratio": 1.2,
 
         # Mouse move action throttling (reduces system-call churn)
+        "screen_interaction_sensitivity": 1.0,  # Centered gain for screen-relative camera interactions
+        "cursor_move_smoothing": 0.0,  # Output-only cursor smoothing amount for mouse mode
         "mouse_move_min_delta_px": 1,  # Minimum pixel delta before sending cursor update
         "mouse_move_cadence_ms": 16,  # Force update cadence even for tiny motion
 
@@ -283,6 +287,27 @@ class GestureConfig:
             "type": "int",
             "min": 0,
             "max": 100,
+        },
+        "screen_interaction_sensitivity": {
+            "group": "Mouse movement",
+            "label": "Mouse Sensitivity",
+            "type": "float",
+            "min": 1.0,
+            "max": 2.0,
+            "step": 0.05,
+            "decimals": 2,
+            "ui": "slider",
+            "suffix": "x",
+        },
+        "cursor_move_smoothing": {
+            "group": "Mouse movement",
+            "label": "Mouse Smoothing",
+            "type": "float",
+            "min": 0.0,
+            "max": 0.85,
+            "step": 0.05,
+            "decimals": 2,
+            "ui": "slider",
         },
         "mouse_move_cadence_ms": {
             "group": "Mouse movement",
@@ -713,19 +738,34 @@ class GestureConfig:
         """Normalize runtime settings after loading user config."""
         dominant_hand = str(self.config.get("dominant_hand", "right") or "right").strip().lower()
         self.config["dominant_hand"] = "left" if dominant_hand == "left" else "right"
+        self._normalize_bounded_float(
+            "screen_interaction_sensitivity",
+            self.DEFAULT_CONFIG["screen_interaction_sensitivity"],
+            1.0,
+            2.0,
+        )
+        self._normalize_bounded_float(
+            "cursor_move_smoothing",
+            self.DEFAULT_CONFIG["cursor_move_smoothing"],
+            0.0,
+            0.85,
+        )
         self._normalize_deadzone_fraction("camera_side_deadzone", self.DEFAULT_CONFIG["camera_side_deadzone"], 0.45)
         top_deadzone = self._normalize_deadzone_fraction("camera_top_deadzone", self.DEFAULT_CONFIG["camera_top_deadzone"], 0.45)
         bottom_max = min(0.45, max(0.0, 0.95 - top_deadzone))
         self._normalize_deadzone_fraction("camera_bottom_deadzone", self.DEFAULT_CONFIG["camera_bottom_deadzone"], bottom_max)
 
-    def _normalize_deadzone_fraction(self, key, default_value, max_value):
+    def _normalize_bounded_float(self, key, default_value, min_value, max_value):
         try:
             value = float(self.config.get(key, default_value))
         except (TypeError, ValueError):
             value = float(default_value)
-        value = max(0.0, min(float(max_value), value))
+        value = max(float(min_value), min(float(max_value), value))
         self.config[key] = value
         return value
+
+    def _normalize_deadzone_fraction(self, key, default_value, max_value):
+        return self._normalize_bounded_float(key, default_value, 0.0, max_value)
 
     def save(self):
         """Save current configuration to JSON file."""

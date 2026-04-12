@@ -39,6 +39,13 @@ class Strategizer:
         self.screen_height = screen_height
         self.config = config
         self.ui_mode = str(ui_mode)
+        if hasattr(self.action, "configure_cursor_move_smoothing"):
+            try:
+                self.action.configure_cursor_move_smoothing(
+                    self.config.get("cursor_move_smoothing", 0.0)
+                )
+            except Exception:
+                pass
 
         # Default mode is mouse mode (Can be changed for easier manual testing)
         self.current_mode = ControlMode.MOUSE

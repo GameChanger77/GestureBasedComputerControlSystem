@@ -40,6 +40,10 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
         self.follow_alpha = 0.28
         self.open_extension_threshold = float(config.get("finger_extension_angle", 155.0))
         self.open_min_palm_normal_z = 0.35
+        self.screen_interaction_sensitivity = max(
+            1.0,
+            float(config.get("screen_interaction_sensitivity", 1.0)),
+        )
         self.camera_side_deadzone = max(0.0, float(config.get("camera_side_deadzone", 0.08)))
         self.camera_top_deadzone = max(0.0, float(config.get("camera_top_deadzone", 0.0)))
         self.camera_bottom_deadzone = max(0.0, float(config.get("camera_bottom_deadzone", 0.18)))
@@ -141,6 +145,7 @@ class ProdWindowKeyboardSurface(KeyboardSurfaceBase):
             side_deadzone=self.camera_side_deadzone,
             top_deadzone=self.camera_top_deadzone,
             bottom_deadzone=self.camera_bottom_deadzone,
+            sensitivity=self.screen_interaction_sensitivity,
         )
 
         return (

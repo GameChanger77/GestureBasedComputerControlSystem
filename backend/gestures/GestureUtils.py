@@ -310,6 +310,23 @@ def _apply_camera_deadzone(value: float, leading_margin: float, trailing_margin:
     return _clamp_unit((float(value) - leading_margin) / active_span)
 
 
+def apply_screen_interaction_sensitivity(value: float, sensitivity: float = 1.0) -> float:
+    sensitivity = max(1.0, float(sensitivity))
+    scaled = ((float(value) - 0.5) * sensitivity) + 0.5
+    return _clamp_unit(scaled)
+
+
+def apply_screen_interaction_sensitivity_to_point(point, sensitivity: float = 1.0):
+    if point is None:
+        return None
+    x, y, z = point
+    return (
+        apply_screen_interaction_sensitivity(x, sensitivity=sensitivity),
+        apply_screen_interaction_sensitivity(y, sensitivity=sensitivity),
+        z,
+    )
+
+
 def camera_to_normalized_screen(
     camera_pos,
     *,
@@ -317,6 +334,7 @@ def camera_to_normalized_screen(
     side_deadzone=0.0,
     top_deadzone=0.0,
     bottom_deadzone=0.0,
+    sensitivity=1.0,
 ):
     """
     Normalize a camera-space point into the effective on-screen 0-1 range.
@@ -333,6 +351,8 @@ def camera_to_normalized_screen(
 
     x = _apply_camera_deadzone(x, side_deadzone, side_deadzone)
     y = _apply_camera_deadzone(y, top_deadzone, bottom_deadzone)
+    x = apply_screen_interaction_sensitivity(x, sensitivity=sensitivity)
+    y = apply_screen_interaction_sensitivity(y, sensitivity=sensitivity)
     return x, y, z
 
 
@@ -345,6 +365,7 @@ def camera_to_screen(
     top_deadzone=0.0,
     bottom_deadzone=0.0,
     flip_x=True,
+    sensitivity=1.0,
 ):
     """
     Convert camera-relative coordinates to screen coordinates.
@@ -362,6 +383,7 @@ def camera_to_screen(
         side_deadzone=side_deadzone,
         top_deadzone=top_deadzone,
         bottom_deadzone=bottom_deadzone,
+        sensitivity=sensitivity,
     )
 
     # Convert from 0-1 range to screen pixel coordinates

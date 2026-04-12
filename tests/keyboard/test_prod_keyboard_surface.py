@@ -206,6 +206,37 @@ class ProdWindowKeyboardSurfaceTests(unittest.TestCase):
         self.assertAlmostEqual(anchor_x, 0.0, places=3)
         self.assertAlmostEqual(anchor_y, 500.0, places=3)
 
+    def test_anchor_mapping_applies_screen_interaction_sensitivity(self):
+        screen = _FakeScreen(
+            available_geometry=_FakeGeometry(0, 0, 1000, 500),
+            virtual_geometry=_FakeGeometry(0, 0, 1000, 500),
+        )
+
+        with patch(
+            "backend.gestures.keyboard_mode.ProdWindowKeyboardSurface.QGuiApplication.primaryScreen",
+            return_value=screen,
+        ):
+            surface = ProdWindowKeyboardSurface(
+                config={
+                    "finger_extension_angle": 155.0,
+                    "camera_side_deadzone": 0.0,
+                    "camera_top_deadzone": 0.0,
+                    "camera_bottom_deadzone": 0.0,
+                    "screen_interaction_sensitivity": 2.0,
+                },
+                flip_x_for_mapping=False,
+                screen_width=1000,
+                screen_height=500,
+            )
+
+        camera = np.zeros((21, 3), dtype=np.float32)
+        camera[8] = np.array([0.60, 0.60, 0.0], dtype=np.float32)
+        hands = HandsData({}, {"Right": camera})
+
+        anchor_x, anchor_y = surface._dominant_anchor_screen_px(hands)
+        self.assertAlmostEqual(anchor_x, 700.0, places=3)
+        self.assertAlmostEqual(anchor_y, 350.0, places=3)
+
     def test_uses_virtual_desktop_geometry_from_primary_screen(self):
         multi_monitor_screen = _FakeScreen(
             available_geometry=_FakeGeometry(0, 0, 1920, 1080),

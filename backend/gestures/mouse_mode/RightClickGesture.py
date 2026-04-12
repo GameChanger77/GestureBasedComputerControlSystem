@@ -27,6 +27,7 @@ class RightClickGesture(SnapshotGestureRecognizer):
         camera_side_deadzone=0.0,
         camera_top_deadzone=0.0,
         camera_bottom_deadzone=0.0,
+        screen_interaction_sensitivity=1.0,
     ):
         """
         Args:
@@ -48,6 +49,7 @@ class RightClickGesture(SnapshotGestureRecognizer):
         self.camera_side_deadzone = max(0.0, float(camera_side_deadzone))
         self.camera_top_deadzone = max(0.0, float(camera_top_deadzone))
         self.camera_bottom_deadzone = max(0.0, float(camera_bottom_deadzone))
+        self.screen_interaction_sensitivity = max(1.0, float(screen_interaction_sensitivity))
         self.suppresses_lower_priorities_while_active = True
 
     def detect_gesture(self, hands_data: HandsData):
@@ -92,6 +94,7 @@ class RightClickGesture(SnapshotGestureRecognizer):
             side_deadzone=self.camera_side_deadzone,
             top_deadzone=self.camera_top_deadzone,
             bottom_deadzone=self.camera_bottom_deadzone,
+            sensitivity=self.screen_interaction_sensitivity,
         )
 
         return True, (screen_x, screen_y)
@@ -105,4 +108,14 @@ class RightClickGesture(SnapshotGestureRecognizer):
         """
         if data is not None:
             screen_x, screen_y = data
-            self.action.right_click(screen_x, screen_y)
+            smoothing_probe = getattr(self.action, "cursor_move_smoothing_enabled", None)
+            smoothing_enabled = False
+            if callable(smoothing_probe):
+                try:
+                    smoothing_enabled = bool(smoothing_probe())
+                except Exception:
+                    smoothing_enabled = False
+            if smoothing_enabled:
+                self.action.right_click()
+            else:
+                self.action.right_click(screen_x, screen_y)

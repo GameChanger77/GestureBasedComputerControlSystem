@@ -51,6 +51,7 @@ class RuleMoveMouseGesture(_RuleConditionMixin, MoveMouseGesture):
             side_deadzone=self.camera_side_deadzone,
             top_deadzone=self.camera_top_deadzone,
             bottom_deadzone=self.camera_bottom_deadzone,
+            sensitivity=self.screen_interaction_sensitivity,
         )
         return True, (screen_x, screen_y)
 
@@ -107,6 +108,7 @@ class RuleLeftClickGesture(_RuleConditionMixin, LeftClickGesture):
             side_deadzone=self.camera_side_deadzone,
             top_deadzone=self.camera_top_deadzone,
             bottom_deadzone=self.camera_bottom_deadzone,
+            sensitivity=self.screen_interaction_sensitivity,
         )
         return True, (screen_x, screen_y)
 
@@ -133,6 +135,7 @@ class RuleRightClickGesture(_RuleConditionMixin, RightClickGesture):
             side_deadzone=self.camera_side_deadzone,
             top_deadzone=self.camera_top_deadzone,
             bottom_deadzone=self.camera_bottom_deadzone,
+            sensitivity=self.screen_interaction_sensitivity,
         )
         return True, (screen_x, screen_y)
 

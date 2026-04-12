@@ -8,6 +8,7 @@ from backend.HandsData import HandsData
 from backend.gestures.FlickDetector import FlickDetector
 from backend.gestures.GestureRecognizer import GestureRecognizer
 from backend.gestures.GestureUtils import (
+    apply_screen_interaction_sensitivity_to_point,
     are_fingers_pinched,
     get_finger_angle,
     get_finger_extension,
@@ -89,6 +90,10 @@ class AirTypingGesture(GestureRecognizer):
                 "keyboard_flip_x_for_mapping",
                 self.config.get("preview_flip_horizontal", True),
             )
+        )
+        self.screen_interaction_sensitivity = max(
+            1.0,
+            float(self.config.get("screen_interaction_sensitivity", 1.0)),
         )
         self.pinch_threshold = float(self.config.get("pinch_threshold", 0.15))
 
@@ -264,6 +269,15 @@ class AirTypingGesture(GestureRecognizer):
             return None
         return self._normalized_point(finger.tip)
 
+    def _get_interaction_tip(self, hand, finger_name: str) -> Optional[Tuple[float, float, float]]:
+        tip = self._get_tip(hand, finger_name)
+        if tip is None:
+            return None
+        return apply_screen_interaction_sensitivity_to_point(
+            tip,
+            sensitivity=self.screen_interaction_sensitivity,
+        )
+
     def _slot_from_uv(self, side: str, u: float, v: float) -> Optional[Dict[str, object]]:
         if u < 0.0 or u > 1.0 or v < 0.0 or v > 1.0:
             return None
@@ -358,7 +372,7 @@ class AirTypingGesture(GestureRecognizer):
         dominant_hand = hands_data.camera.dominant if hands_data.camera.has_dominant else None
         if dominant_hand is None or not dominant_hand.exists:
             return None
-        return self._get_tip(dominant_hand, "index")
+        return self._get_interaction_tip(dominant_hand, "index")
 
     def _current_dominant_suggestion_index(self, hands_data: HandsData) -> Optional[int]:
         tip = self._current_dominant_tip(hands_data)
@@ -699,7 +713,7 @@ class AirTypingGesture(GestureRecognizer):
         if dominant_hand is None or not dominant_hand.exists or frame is None:
             return
 
-        tip = self._get_tip(dominant_hand, "index")
+        tip = self._get_interaction_tip(dominant_hand, "index")
         if tip is None:
             return
 
@@ -779,7 +793,7 @@ class AirTypingGesture(GestureRecognizer):
         if dominant_hand is None or not dominant_hand.exists or frame is None:
             return None
 
-        tip = self._get_tip(dominant_hand, "index")
+        tip = self._get_interaction_tip(dominant_hand, "index")
         if tip is None:
             return None
 
@@ -1151,7 +1165,7 @@ class AirTypingGesture(GestureRecognizer):
                 continue
 
             for finger_name in self._finger_names():
-                tip = self._get_tip(camera_hand, finger_name)
+                tip = self._get_interaction_tip(camera_hand, finger_name)
                 if tip is None:
                     continue
                 if side == hands_data.dominant_hand and finger_name == "index":

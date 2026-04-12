@@ -87,6 +87,21 @@ class ActionMouseRuntimeTests(unittest.TestCase):
         finally:
             action.close()
 
+    def test_cursor_move_smoothing_blends_only_cursor_motion(self):
+        mouse = _FakeMouse()
+        action = Action(mouse=mouse, keyboard_test=_FakeKeyboard(), osType="Test")
+        try:
+            action.configure_cursor_move_smoothing(0.5)
+            action.move_cursor(100, 100)
+            action._action_queue.join()
+            self.assertEqual(mouse.position, (50, 50))
+
+            action.move_cursor(100, 100)
+            action._action_queue.join()
+            self.assertEqual(mouse.position, (75, 75))
+        finally:
+            action.close()
+
 
 if __name__ == "__main__":
     unittest.main()

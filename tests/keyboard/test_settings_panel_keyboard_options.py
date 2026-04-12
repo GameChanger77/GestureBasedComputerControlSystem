@@ -91,6 +91,56 @@ class SettingsPanelKeyboardOptionsTests(unittest.TestCase):
             }
             self.assertTrue(expected_keys.issubset(camera_keys))
 
+    def test_screen_interaction_sensitivity_slider_is_visible_on_controls_page(self):
+        for ui_mode in ("dev", "prod"):
+            panel = SettingsPanel(ui_mode=ui_mode)
+            self.assertIn("screen_interaction_sensitivity", panel._field_controls)
+
+            control = panel._field_controls["screen_interaction_sensitivity"]
+            self.assertEqual(control["type"], "slider")
+            self.assertEqual(control["slider"].minimum(), 100)
+            self.assertEqual(control["slider"].maximum(), 200)
+            self.assertEqual(control["slider"].singleStep(), 5)
+            self.assertEqual(control["value_label"].text(), "1.00x")
+
+            page_definitions = GestureConfig.get_page_definitions(ui_mode=ui_mode)
+            controls_keys = {
+                key
+                for keys in page_definitions.get("Controls", {}).values()
+                for key in keys
+            }
+            self.assertIn("screen_interaction_sensitivity", controls_keys)
+
+    def test_screen_interaction_sensitivity_slider_round_trips_float_values(self):
+        panel = SettingsPanel(ui_mode="prod")
+        panel.load_values({"screen_interaction_sensitivity": 1.85})
+
+        control = panel._field_controls["screen_interaction_sensitivity"]
+        self.assertEqual(control["slider"].value(), 185)
+        self.assertEqual(control["value_label"].text(), "1.85x")
+
+        values = panel.get_values()
+        self.assertAlmostEqual(values["screen_interaction_sensitivity"], 1.85, places=2)
+
+    def test_cursor_move_smoothing_slider_is_visible_and_round_trips(self):
+        for ui_mode in ("dev", "prod"):
+            panel = SettingsPanel(ui_mode=ui_mode)
+            self.assertIn("cursor_move_smoothing", panel._field_controls)
+
+            control = panel._field_controls["cursor_move_smoothing"]
+            self.assertEqual(control["type"], "slider")
+            self.assertEqual(control["slider"].minimum(), 0)
+            self.assertEqual(control["slider"].maximum(), 85)
+            self.assertEqual(control["slider"].singleStep(), 5)
+            self.assertEqual(control["value_label"].text(), "0.00")
+
+            panel.load_values({"cursor_move_smoothing": 0.55})
+            self.assertEqual(control["slider"].value(), 55)
+            self.assertEqual(control["value_label"].text(), "0.55")
+
+            values = panel.get_values()
+            self.assertAlmostEqual(values["cursor_move_smoothing"], 0.55, places=2)
+
     def test_removed_screen_safe_margin_setting_is_not_exposed(self):
         self.assertNotIn("screen_safe_margin", GestureConfig.DEFAULT_CONFIG)
         self.assertNotIn("max_tracked_hands", GestureConfig.DEFAULT_CONFIG)
