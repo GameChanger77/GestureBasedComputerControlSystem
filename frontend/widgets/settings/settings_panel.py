@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QSpinBox,
     QStackedWidget,
     QVBoxLayout,
@@ -214,6 +215,8 @@ class SettingsPanel(QWidget):
             }
 
         if control_type == "int":
+            if metadata.get("ui") == "slider" and not nullable:
+                return self._create_numeric_slider_control(key, metadata, "int")
             if nullable:
                 spinbox = self._create_int_spinbox(metadata)
                 return self._wrap_nullable_numeric(spinbox, key, "int")
@@ -225,6 +228,8 @@ class SettingsPanel(QWidget):
             }
 
         if control_type == "float":
+            if metadata.get("ui") == "slider" and not nullable:
+                return self._create_numeric_slider_control(key, metadata, "float")
             if nullable:
                 spinbox = self._create_float_spinbox(metadata)
                 return self._wrap_nullable_numeric(spinbox, key, "float")
@@ -251,6 +256,85 @@ class SettingsPanel(QWidget):
         spinbox.setDecimals(int(metadata.get("decimals", 3)))
         spinbox.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return spinbox
+
+    def _slider_scale_for_metadata(self, metadata, value_type):
+        if value_type == "float":
+            decimals = int(metadata.get("decimals", 2))
+            return float(10 ** max(0, decimals))
+        return 1.0
+
+    def _quantize_slider_value(self, raw_value, slider_min, slider_max, slider_step):
+        raw_value = int(round(raw_value))
+        if slider_step > 1:
+            offset = raw_value - slider_min
+            raw_value = slider_min + (round(offset / slider_step) * slider_step)
+        return max(slider_min, min(slider_max, raw_value))
+
+    def _format_slider_label(self, value, metadata, value_type):
+        suffix = str(metadata.get("suffix", "") or "")
+        if value_type == "float":
+            decimals = int(metadata.get("decimals", 2))
+            return f"{float(value):.{decimals}f}{suffix}"
+        return f"{int(value)}{suffix}"
+
+    def _create_numeric_slider_control(self, key, metadata, value_type):
+        slider_scale = self._slider_scale_for_metadata(metadata, value_type)
+        slider_step = max(1, int(round(float(metadata.get("step", 1)) * slider_scale)))
+        slider_min = int(round(float(metadata.get("min", 0)) * slider_scale))
+        slider_max = int(round(float(metadata.get("max", 100)) * slider_scale))
+        default_value = GestureConfig.DEFAULT_CONFIG.get(key, metadata.get("min", 0))
+        initial_raw = self._quantize_slider_value(
+            float(default_value) * slider_scale,
+            slider_min,
+            slider_max,
+            slider_step,
+        )
+
+        wrapper = QWidget()
+        wrapper.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(slider_min, slider_max)
+        slider.setSingleStep(slider_step)
+        slider.setPageStep(slider_step)
+        slider.setValue(initial_raw)
+        slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        value_label = QLabel()
+        value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        value_label.setMinimumWidth(56)
+        set_label_tone(value_label, "muted")
+
+        def _sync_value_label(raw_value):
+            if value_type == "float":
+                display_value = raw_value / slider_scale
+            else:
+                display_value = raw_value
+            value_label.setText(self._format_slider_label(display_value, metadata, value_type))
+
+        slider.valueChanged.connect(_sync_value_label)
+        _sync_value_label(initial_raw)
+
+        layout.addWidget(slider, 1)
+        layout.addWidget(value_label, 0)
+        wrapper.setLayout(layout)
+
+        return {
+            "widget": wrapper,
+            "type": "slider",
+            "key": key,
+            "value_type": value_type,
+            "slider": slider,
+            "value_label": value_label,
+            "slider_scale": slider_scale,
+            "slider_step": slider_step,
+            "slider_min": slider_min,
+            "slider_max": slider_max,
+            "metadata": metadata,
+        }
 
     def _wrap_nullable_numeric(self, spinbox, key, value_type):
         wrapper = QWidget()
@@ -379,6 +463,20 @@ class SettingsPanel(QWidget):
                 self._populate_choice_options(control, values)
                 continue
 
+            if control_type == "slider":
+                slider_scale = float(control.get("slider_scale", 1.0))
+                slider_step = int(control.get("slider_step", 1))
+                slider_min = int(control.get("slider_min", 0))
+                slider_max = int(control.get("slider_max", 100))
+                slider_value = self._quantize_slider_value(
+                    float(value) * slider_scale,
+                    slider_min,
+                    slider_max,
+                    slider_step,
+                )
+                control["slider"].setValue(slider_value)
+                continue
+
             is_nullable = bool(control.get("nullable", False))
             if is_nullable:
                 is_enabled = value is not None
@@ -412,6 +510,16 @@ class SettingsPanel(QWidget):
                     values["camera_backend"] = int(selected_option.get("backend", 0) or 0)
                     values["camera_device_path"] = str(selected_option.get("path", "") or "")
                     values["camera_device_name"] = str(selected_option.get("name", "") or "")
+                continue
+
+            if control_type == "slider":
+                slider_scale = float(control.get("slider_scale", 1.0))
+                raw_value = control["slider"].value()
+                if control.get("value_type") == "float":
+                    decimals = int(control["metadata"].get("decimals", 2))
+                    values[key] = round(raw_value / slider_scale, decimals)
+                else:
+                    values[key] = int(round(raw_value / slider_scale))
                 continue
 
             is_nullable = bool(control.get("nullable", False))

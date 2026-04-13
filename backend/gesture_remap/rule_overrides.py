@@ -16,6 +16,12 @@ class GestureRuleOverride:
     pending_frames: int
     ending_frames: int
 
+    def __post_init__(self):
+        normalized_conditions = [type(self)._normalize_condition(condition) for condition in self.conditions]
+        object.__setattr__(self, "conditions", normalized_conditions)
+        object.__setattr__(self, "pending_frames", int(self.pending_frames))
+        object.__setattr__(self, "ending_frames", int(self.ending_frames))
+
     def to_dict(self) -> dict:
         return {
             "conditions": copy.deepcopy(self.conditions),
@@ -76,6 +82,8 @@ class GestureRuleOverride:
         if field_type == "enum":
             valid_values = {option[0] for option in field.get("options", [])}
             normalized_value = str(value)
+            if field.get("name") == "hand" and normalized_value in {"left", "right", "either"}:
+                normalized_value = "dominant"
             if normalized_value not in valid_values:
                 raise ValueError(f"invalid value '{normalized_value}' for {field['name']}")
             return normalized_value

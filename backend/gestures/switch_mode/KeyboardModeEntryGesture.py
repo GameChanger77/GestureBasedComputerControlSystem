@@ -5,7 +5,7 @@ from backend.gestures.GestureUtils import is_hand_fully_open
 
 class KeyboardModeEntryGesture(SnapshotGestureRecognizer):
     """
-    Switch from MOUSE or HOTKEY mode to KEYBOARD mode when the right hand
+    Switch from MOUSE or HOTKEY mode to KEYBOARD mode when the dominant hand
     shows an open palm toward the camera with all fingers extended.
     """
 
@@ -28,17 +28,17 @@ class KeyboardModeEntryGesture(SnapshotGestureRecognizer):
         if self.strategizer.current_mode.value not in ("mouse", "hotkey"):
             return False, None
 
-        if not hands_data.wrist.has_right:
+        if not hands_data.wrist.has_dominant:
             return False, None
 
-        right_open = is_hand_fully_open(
-            hands_data.wrist.right,
+        dominant_open = is_hand_fully_open(
+            hands_data.wrist.dominant,
             extension_threshold=self.extension_threshold,
             min_extended_fingers=5,
             require_palm_facing_camera=True,
             min_palm_normal_z=self.min_palm_normal_z,
         )
-        if not right_open:
+        if not dominant_open:
             return False, None
 
         return True, None

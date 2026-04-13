@@ -8,6 +8,7 @@ from backend.HandsData import HandsData
 from backend.gestures.FlickDetector import FlickDetector
 from backend.gestures.GestureRecognizer import GestureRecognizer
 from backend.gestures.GestureUtils import (
+    apply_screen_interaction_sensitivity_to_point,
     are_fingers_pinched,
     get_finger_angle,
     get_finger_extension,
@@ -38,7 +39,7 @@ class AirTypingGesture(GestureRecognizer):
     This gesture:
     - draws and moves keyboard overlays
     - highlights hovered keys
-    - supports right-hand swipe typing with click-style pinch clutch
+    - supports dominant-hand swipe typing with click-style pinch clutch
     """
     _MODIFIER_SLOT_TO_FAMILY = KeyboardLayoutHelper.MODIFIER_SLOT_TO_FAMILY
     _MODIFIER_FAMILY_TO_KEY = KeyboardLayoutHelper.MODIFIER_FAMILY_TO_KEY
@@ -90,6 +91,10 @@ class AirTypingGesture(GestureRecognizer):
                 self.config.get("preview_flip_horizontal", True),
             )
         )
+        self.screen_interaction_sensitivity = max(
+            1.0,
+            float(self.config.get("screen_interaction_sensitivity", 1.0)),
+        )
         self.pinch_threshold = float(self.config.get("pinch_threshold", 0.15))
 
         # Swipe typing configuration
@@ -140,8 +145,8 @@ class AirTypingGesture(GestureRecognizer):
         self._size_avg: Dict[str, Optional[Tuple[float, float]]] = {"left": None, "right": None}
         self._surface_extra_overlay: Dict[str, object] = {}
         self._hovered_slots = set()
-        self._right_index_hover_point: Optional[Tuple[float, float]] = None
-        self._right_frame_for_swipe: Optional[HandFrame] = None
+        self._dominant_index_hover_point: Optional[Tuple[float, float]] = None
+        self._dominant_frame_for_swipe: Optional[HandFrame] = None
 
         self._swipe_active = False
         self._swipe_points: List[Tuple[float, float]] = []
@@ -195,7 +200,7 @@ class AirTypingGesture(GestureRecognizer):
         lexicon_path = Path(__file__).resolve().parent / "data" / "swipe-words.txt"
         self._swipe_decoder = SwipeDecoder(lexicon_path, max_words=None)
         self._flick_window_active = False
-        self._flick_right_missing = False
+        self._flick_hand_missing = False
         self._flick_rearm_pending = False
         self._flick_rearm_escape_direction: Optional[str] = None
         self._flick_rearm_origin_point: Optional[Tuple[float, float]] = None
@@ -263,6 +268,15 @@ class AirTypingGesture(GestureRecognizer):
         if finger is None or finger.tip is None:
             return None
         return self._normalized_point(finger.tip)
+
+    def _get_interaction_tip(self, hand, finger_name: str) -> Optional[Tuple[float, float, float]]:
+        tip = self._get_tip(hand, finger_name)
+        if tip is None:
+            return None
+        return apply_screen_interaction_sensitivity_to_point(
+            tip,
+            sensitivity=self.screen_interaction_sensitivity,
+        )
 
     def _slot_from_uv(self, side: str, u: float, v: float) -> Optional[Dict[str, object]]:
         if u < 0.0 or u > 1.0 or v < 0.0 or v > 1.0:
@@ -354,14 +368,14 @@ class AirTypingGesture(GestureRecognizer):
                 return int(chip["index"])
         return None
 
-    def _current_right_tip(self, hands_data: HandsData) -> Optional[Tuple[float, float, float]]:
-        right_hand = hands_data.camera.right if hands_data.camera.has_right else None
-        if right_hand is None or not right_hand.exists:
+    def _current_dominant_tip(self, hands_data: HandsData) -> Optional[Tuple[float, float, float]]:
+        dominant_hand = hands_data.camera.dominant if hands_data.camera.has_dominant else None
+        if dominant_hand is None or not dominant_hand.exists:
             return None
-        return self._get_tip(right_hand, "index")
+        return self._get_interaction_tip(dominant_hand, "index")
 
-    def _current_right_suggestion_index(self, hands_data: HandsData) -> Optional[int]:
-        tip = self._current_right_tip(hands_data)
+    def _current_dominant_suggestion_index(self, hands_data: HandsData) -> Optional[int]:
+        tip = self._current_dominant_tip(hands_data)
         if tip is None:
             return None
         return self._suggestion_index_at_point((tip[0], tip[1]))
@@ -660,16 +674,16 @@ class AirTypingGesture(GestureRecognizer):
         self._last_confidence = 1.0
         self._active_modifiers.clear()
 
-    def _is_right_click_style_pinch(self, hands_data: HandsData) -> bool:
-        if not hands_data.wrist.has_right:
+    def _is_dominant_click_style_pinch(self, hands_data: HandsData) -> bool:
+        if not hands_data.wrist.has_dominant:
             return False
-        hand = hands_data.wrist.right
+        hand = hands_data.wrist.dominant
         return are_fingers_pinched(hand.thumb.tip, hand.middle.tip, self.pinch_threshold)
 
-    def _right_pinch_distance(self, hands_data: HandsData) -> Optional[float]:
-        if not hands_data.wrist.has_right:
+    def _dominant_pinch_distance(self, hands_data: HandsData) -> Optional[float]:
+        if not hands_data.wrist.has_dominant:
             return None
-        hand = hands_data.wrist.right
+        hand = hands_data.wrist.dominant
         return get_pinch_distance(hand.thumb.tip, hand.middle.tip)
 
     def _start_swipe(self):
@@ -694,12 +708,12 @@ class AirTypingGesture(GestureRecognizer):
         self._swipe_trace = []
 
     def _capture_swipe_sample(self, hands_data: HandsData):
-        right_hand = hands_data.camera.right if hands_data.camera.has_right else None
-        frame = self._right_frame_for_swipe
-        if right_hand is None or not right_hand.exists or frame is None:
+        dominant_hand = hands_data.camera.dominant if hands_data.camera.has_dominant else None
+        frame = self._dominant_frame_for_swipe
+        if dominant_hand is None or not dominant_hand.exists or frame is None:
             return
 
-        tip = self._get_tip(right_hand, "index")
+        tip = self._get_interaction_tip(dominant_hand, "index")
         if tip is None:
             return
 
@@ -712,7 +726,7 @@ class AirTypingGesture(GestureRecognizer):
             if (dx * dx + dy * dy) >= self._swipe_point_min_distance_sq:
                 self._swipe_points.append(point)
 
-        slot = self._map_tip_to_slot("right", tip, frame)
+        slot = self._map_tip_to_slot(hands_data.dominant_hand, tip, frame)
         if slot is None:
             return
         slot_id = str(slot["id"])
@@ -737,53 +751,53 @@ class AirTypingGesture(GestureRecognizer):
             return "Key selection pinch is still latched"
         return ""
 
-    def _right_hand_matches_keyboard_exit_pose(self, hands_data: HandsData) -> bool:
-        if not hands_data.wrist.has_right:
+    def _dominant_hand_matches_keyboard_exit_pose(self, hands_data: HandsData) -> bool:
+        if not hands_data.wrist.has_dominant:
             return False
 
-        right_hand = hands_data.wrist.right
-        if right_hand is None or not right_hand.exists:
+        dominant_hand = hands_data.wrist.dominant
+        if dominant_hand is None or not dominant_hand.exists:
             return False
 
         max_openness = float(self.config.get("keyboard_mode_exit_max_openness", 0.16))
         max_extension_ratio = float(self.config.get("keyboard_mode_exit_max_extension_ratio", 0.90))
         max_avg_finger_angle = float(self.config.get("keyboard_mode_exit_max_avg_finger_angle", 145.0))
 
-        openness = get_hand_openness(right_hand, include_thumb=False)
+        openness = get_hand_openness(dominant_hand, include_thumb=False)
         if openness > max_openness:
             return False
 
         finger_extensions = [
-            get_finger_extension(right_hand.index),
-            get_finger_extension(right_hand.middle),
-            get_finger_extension(right_hand.ring),
-            get_finger_extension(right_hand.pinky),
+            get_finger_extension(dominant_hand.index),
+            get_finger_extension(dominant_hand.middle),
+            get_finger_extension(dominant_hand.ring),
+            get_finger_extension(dominant_hand.pinky),
         ]
         if max(finger_extensions) > max_extension_ratio:
             return False
-        if get_finger_extension(right_hand.thumb) > self._EXIT_FIST_MAX_THUMB_EXTENSION_RATIO:
+        if get_finger_extension(dominant_hand.thumb) > self._EXIT_FIST_MAX_THUMB_EXTENSION_RATIO:
             return False
 
         finger_angles = [
-            get_finger_angle(right_hand.index),
-            get_finger_angle(right_hand.middle),
-            get_finger_angle(right_hand.ring),
-            get_finger_angle(right_hand.pinky),
+            get_finger_angle(dominant_hand.index),
+            get_finger_angle(dominant_hand.middle),
+            get_finger_angle(dominant_hand.ring),
+            get_finger_angle(dominant_hand.pinky),
         ]
         avg_angle = sum(finger_angles) / len(finger_angles)
         return avg_angle <= max_avg_finger_angle
 
-    def _current_right_slot_id(self, hands_data: HandsData) -> Optional[str]:
-        right_hand = hands_data.camera.right if hands_data.camera.has_right else None
-        frame = self._right_frame_for_swipe
-        if right_hand is None or not right_hand.exists or frame is None:
+    def _current_dominant_slot_id(self, hands_data: HandsData) -> Optional[str]:
+        dominant_hand = hands_data.camera.dominant if hands_data.camera.has_dominant else None
+        frame = self._dominant_frame_for_swipe
+        if dominant_hand is None or not dominant_hand.exists or frame is None:
             return None
 
-        tip = self._get_tip(right_hand, "index")
+        tip = self._get_interaction_tip(dominant_hand, "index")
         if tip is None:
             return None
 
-        slot = self._map_tip_to_slot("right", tip, frame)
+        slot = self._map_tip_to_slot(hands_data.dominant_hand, tip, frame)
         if slot is None:
             return None
         return str(slot["id"])
@@ -881,14 +895,14 @@ class AirTypingGesture(GestureRecognizer):
             self._cancel_flick_window()
             return
         self._flick_window_active = True
-        self._flick_right_missing = False
+        self._flick_hand_missing = False
         self._replace_flick_cooldown_until = 0.0
         self._clear_flick_rearm()
         self._reset_flick_detectors()
 
     def _cancel_flick_window(self):
         self._flick_window_active = False
-        self._flick_right_missing = False
+        self._flick_hand_missing = False
         self._clear_flick_rearm()
         self._reset_flick_detectors()
 
@@ -923,7 +937,7 @@ class AirTypingGesture(GestureRecognizer):
             return False
         return self._replace_last_swipe_word(suggestion_idx)
 
-    def _update_flick_window(self, hands_data: HandsData, *, start_pinch_active: bool, right_camera_present: bool) -> bool:
+    def _update_flick_window(self, hands_data: HandsData, *, start_pinch_active: bool, dominant_camera_present: bool) -> bool:
         if not self._flick_window_active:
             return False
 
@@ -931,18 +945,18 @@ class AirTypingGesture(GestureRecognizer):
             self._cancel_flick_window()
             return False
 
-        if not right_camera_present:
-            self._flick_right_missing = True
+        if not dominant_camera_present:
+            self._flick_hand_missing = True
             return True
 
-        tip = self._current_right_tip(hands_data)
+        tip = self._current_dominant_tip(hands_data)
         if tip is None:
-            self._flick_right_missing = True
+            self._flick_hand_missing = True
             return True
 
-        if self._flick_right_missing:
+        if self._flick_hand_missing:
             self._reset_flick_detectors()
-            self._flick_right_missing = False
+            self._flick_hand_missing = False
 
         point = (tip[0], tip[1])
         now = self._now_seconds()
@@ -987,10 +1001,10 @@ class AirTypingGesture(GestureRecognizer):
             self._special_key_pinch_latched = False
             return
 
-        right_camera_present = hands_data.camera.has_right and hands_data.camera.right.exists
-        right_wrist_present = hands_data.wrist.has_right and hands_data.wrist.right.exists
-        right_present = right_camera_present and right_wrist_present
-        pinch_distance = self._right_pinch_distance(hands_data) if right_present else None
+        dominant_camera_present = hands_data.camera.has_dominant and hands_data.camera.dominant.exists
+        dominant_wrist_present = hands_data.wrist.has_dominant and hands_data.wrist.dominant.exists
+        dominant_present = dominant_camera_present and dominant_wrist_present
+        pinch_distance = self._dominant_pinch_distance(hands_data) if dominant_present else None
         self._last_pinch_value = pinch_distance
         start_pinch_active = (
             pinch_distance is not None and pinch_distance < self.pinch_threshold
@@ -999,7 +1013,7 @@ class AirTypingGesture(GestureRecognizer):
             pinch_distance is None or pinch_distance >= self.keyboard_swipe_release_pinch_threshold
         )
 
-        if not right_camera_present:
+        if not dominant_camera_present:
             self._special_key_pinch_latched = False
 
         if self._special_key_pinch_latched:
@@ -1012,12 +1026,12 @@ class AirTypingGesture(GestureRecognizer):
         if self._update_flick_window(
             hands_data,
             start_pinch_active=start_pinch_active,
-            right_camera_present=right_camera_present,
+            dominant_camera_present=dominant_camera_present,
         ):
             return
 
         if self._swipe_active:
-            if not right_camera_present:
+            if not dominant_camera_present:
                 self._swipe_lost_frames += 1
                 if self._swipe_lost_frames > self.keyboard_swipe_tracking_grace_frames:
                     self._cancel_swipe()
@@ -1028,13 +1042,13 @@ class AirTypingGesture(GestureRecognizer):
                 self._swipe_lost_frames = 0
 
             # Keep swipe alive until wrist landmarks return; do not force release.
-            if not right_wrist_present:
+            if not dominant_wrist_present:
                 return
 
             if release_reached:
                 self._swipe_release_counter += 1
                 if self._swipe_release_counter >= self.keyboard_swipe_release_pending_frames:
-                    release_slot_id = self._current_right_slot_id(hands_data)
+                    release_slot_id = self._current_dominant_slot_id(hands_data)
                     self._commit_swipe(release_slot_id)
                 return
             self._swipe_release_counter = 0
@@ -1042,13 +1056,13 @@ class AirTypingGesture(GestureRecognizer):
             return
 
         if start_pinch_active:
-            suggestion_idx = self._current_right_suggestion_index(hands_data)
+            suggestion_idx = self._current_dominant_suggestion_index(hands_data)
             if suggestion_idx is not None:
                 if self._replace_last_swipe_word(suggestion_idx):
                     self._special_key_pinch_latched = True
                 return
 
-            slot_id = self._current_right_slot_id(hands_data)
+            slot_id = self._current_dominant_slot_id(hands_data)
             if slot_id == "caps_lock":
                 self._toggle_caps_lock()
                 self._special_key_pinch_latched = True
@@ -1108,7 +1122,7 @@ class AirTypingGesture(GestureRecognizer):
         return True
 
     def _update_overlay_only(self, hands_data: HandsData):
-        self._exit_fist_ready = self._right_hand_matches_keyboard_exit_pose(hands_data)
+        self._exit_fist_ready = self._dominant_hand_matches_keyboard_exit_pose(hands_data)
         camera_hands = self._get_camera_hands(hands_data.camera)
         layout = self._surface.update_layout(
             hands_data,
@@ -1119,11 +1133,11 @@ class AirTypingGesture(GestureRecognizer):
             "left": layout.active_frames.get("left"),
             "right": layout.active_frames.get("right"),
         }
-        self._right_frame_for_swipe = layout.unified_frame
+        self._dominant_frame_for_swipe = layout.unified_frame
         self._drag_bounds_by_side = dict(layout.drag_bounds_by_side)
         self._surface_extra_overlay = dict(layout.extra_overlay)
         self._set_overlay_keys(layout.overlay_keys)
-        unified_frame = self._right_frame_for_swipe
+        unified_frame = self._dominant_frame_for_swipe
         active_frames = self._active_frames
 
         if self.require_both_hands and not self._both_hands_present(hands_data):
@@ -1143,7 +1157,7 @@ class AirTypingGesture(GestureRecognizer):
 
         hovered_slots = set()
         self._hovered_suggestion_idx = None
-        self._right_index_hover_point = None
+        self._dominant_index_hover_point = None
         for side in ("left", "right"):
             frame = unified_frame if unified_frame is not None else active_frames.get(side)
             camera_hand = camera_hands.get(side)
@@ -1151,16 +1165,16 @@ class AirTypingGesture(GestureRecognizer):
                 continue
 
             for finger_name in self._finger_names():
-                tip = self._get_tip(camera_hand, finger_name)
+                tip = self._get_interaction_tip(camera_hand, finger_name)
                 if tip is None:
                     continue
-                if side == "right" and finger_name == "index":
-                    self._right_index_hover_point = (tip[0], tip[1])
+                if side == hands_data.dominant_hand and finger_name == "index":
+                    self._dominant_index_hover_point = (tip[0], tip[1])
                 slot = self._map_tip_to_slot(side, tip, frame)
                 if slot is not None:
                     hovered_slots.add(str(slot["id"]))
 
-                if side == "right":
+                if side == hands_data.dominant_hand:
                     suggestion_idx = self._suggestion_index_at_point((tip[0], tip[1]))
                     if suggestion_idx is not None:
                         self._hovered_suggestion_idx = suggestion_idx
@@ -1190,8 +1204,8 @@ class AirTypingGesture(GestureRecognizer):
         self._anchor_avg = {"left": None, "right": None}
         self._size_avg = {"left": None, "right": None}
         self._surface_extra_overlay = {}
-        self._right_index_hover_point = None
-        self._right_frame_for_swipe = None
+        self._dominant_index_hover_point = None
+        self._dominant_frame_for_swipe = None
         self._swipe_active = False
         self._swipe_points = []
         self._swipe_trace_slots = []
@@ -1306,9 +1320,9 @@ class AirTypingGesture(GestureRecognizer):
         }
         if self._surface_extra_overlay:
             overlay.update(self._surface_extra_overlay)
-        if self._right_index_hover_point is not None:
+        if self._dominant_index_hover_point is not None:
             overlay["hover_point"] = {
-                "x": self._right_index_hover_point[0],
-                "y": self._right_index_hover_point[1],
+                "x": self._dominant_index_hover_point[0],
+                "y": self._dominant_index_hover_point[1],
             }
         return overlay

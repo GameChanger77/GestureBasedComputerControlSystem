@@ -435,6 +435,34 @@ def _stylesheet() -> str:
     QWidget[settingsThemeRoot="true"] QCheckBox::indicator:unchecked:hover {
         background: #0d1c30;
     }
+    QWidget[settingsThemeRoot="true"] QSlider {
+        min-height: 36px;
+    }
+    QWidget[settingsThemeRoot="true"] QSlider::groove:horizontal {
+        height: 8px;
+        border-radius: 4px;
+        background: #102132;
+        border: 1px solid #21344c;
+    }
+    QWidget[settingsThemeRoot="true"] QSlider::sub-page:horizontal {
+        background: #0ea5c6;
+        border-radius: 4px;
+    }
+    QWidget[settingsThemeRoot="true"] QSlider::add-page:horizontal {
+        background: #0b1727;
+        border-radius: 4px;
+    }
+    QWidget[settingsThemeRoot="true"] QSlider::handle:horizontal {
+        width: 18px;
+        margin: -6px 0;
+        border-radius: 9px;
+        background: #f4f8ff;
+        border: 1px solid #74ddef;
+    }
+    QWidget[settingsThemeRoot="true"] QSlider::handle:horizontal:hover {
+        background: #ffffff;
+        border-color: #9be7f5;
+    }
     QWidget[settingsThemeRoot="true"] QGroupBox {
         margin-top: 14px;
         padding: 12px 14px 14px 14px;

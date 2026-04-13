@@ -86,6 +86,10 @@ class BuiltInGestureRegistry:
                 "ending": config["ending_frames"],
                 "mouse_min_delta_px": config.get("mouse_move_min_delta_px", 2),
                 "mouse_cadence_ms": config.get("mouse_move_cadence_ms", 75),
+                "screen_interaction_sensitivity": config.get("screen_interaction_sensitivity", 1.0),
+                "camera_side_deadzone": config.get("camera_side_deadzone", 0.08),
+                "camera_top_deadzone": config.get("camera_top_deadzone", 0.0),
+                "camera_bottom_deadzone": config.get("camera_bottom_deadzone", 0.18),
             }
 
         def mouse_move_default(action, strategizer):
@@ -100,6 +104,10 @@ class BuiltInGestureRegistry:
                 ending_frames=p["ending"],
                 min_delta_px=p["mouse_min_delta_px"],
                 cadence_ms=p["mouse_cadence_ms"],
+                screen_interaction_sensitivity=p["screen_interaction_sensitivity"],
+                camera_side_deadzone=p["camera_side_deadzone"],
+                camera_top_deadzone=p["camera_top_deadzone"],
+                camera_bottom_deadzone=p["camera_bottom_deadzone"],
             )
 
         def mouse_move_override(action, strategizer, record):
@@ -114,6 +122,10 @@ class BuiltInGestureRegistry:
                 ending_frames=p["ending"],
                 min_delta_px=p["mouse_min_delta_px"],
                 cadence_ms=p["mouse_cadence_ms"],
+                screen_interaction_sensitivity=p["screen_interaction_sensitivity"],
+                camera_side_deadzone=p["camera_side_deadzone"],
+                camera_top_deadzone=p["camera_top_deadzone"],
+                camera_bottom_deadzone=p["camera_bottom_deadzone"],
                 pose_template=record.pose_template,
                 matcher_config=record.matcher_config,
             )
@@ -130,6 +142,10 @@ class BuiltInGestureRegistry:
                 ending_frames=record.rule_override.ending_frames,
                 min_delta_px=p["mouse_min_delta_px"],
                 cadence_ms=p["mouse_cadence_ms"],
+                screen_interaction_sensitivity=p["screen_interaction_sensitivity"],
+                camera_side_deadzone=p["camera_side_deadzone"],
+                camera_top_deadzone=p["camera_top_deadzone"],
+                camera_bottom_deadzone=p["camera_bottom_deadzone"],
                 rule_override=record.rule_override,
             )
 
@@ -146,6 +162,10 @@ class BuiltInGestureRegistry:
                 ending_frames=p["ending"],
                 double_click_hold_time=p["left_click_hold_time_sec"],
                 drag_deadzone_px=p["left_click_drag_deadzone_px"],
+                screen_interaction_sensitivity=p["screen_interaction_sensitivity"],
+                camera_side_deadzone=p["camera_side_deadzone"],
+                camera_top_deadzone=p["camera_top_deadzone"],
+                camera_bottom_deadzone=p["camera_bottom_deadzone"],
             )
 
         def left_click_override(action, strategizer, record):
@@ -161,6 +181,10 @@ class BuiltInGestureRegistry:
                 ending_frames=p["ending"],
                 double_click_hold_time=p["left_click_hold_time_sec"],
                 drag_deadzone_px=p["left_click_drag_deadzone_px"],
+                screen_interaction_sensitivity=p["screen_interaction_sensitivity"],
+                camera_side_deadzone=p["camera_side_deadzone"],
+                camera_top_deadzone=p["camera_top_deadzone"],
+                camera_bottom_deadzone=p["camera_bottom_deadzone"],
                 pose_template=record.pose_template,
                 matcher_config=record.matcher_config,
             )
@@ -178,6 +202,10 @@ class BuiltInGestureRegistry:
                 ending_frames=record.rule_override.ending_frames,
                 double_click_hold_time=p["left_click_hold_time_sec"],
                 drag_deadzone_px=p["left_click_drag_deadzone_px"],
+                screen_interaction_sensitivity=p["screen_interaction_sensitivity"],
+                camera_side_deadzone=p["camera_side_deadzone"],
+                camera_top_deadzone=p["camera_top_deadzone"],
+                camera_bottom_deadzone=p["camera_bottom_deadzone"],
                 rule_override=record.rule_override,
             )
 
@@ -192,6 +220,10 @@ class BuiltInGestureRegistry:
                 extension_threshold=p["finger_angle"],
                 pending_frames=p["click_pending"],
                 ending_frames=p["ending"],
+                screen_interaction_sensitivity=p["screen_interaction_sensitivity"],
+                camera_side_deadzone=p["camera_side_deadzone"],
+                camera_top_deadzone=p["camera_top_deadzone"],
+                camera_bottom_deadzone=p["camera_bottom_deadzone"],
             )
 
         def right_click_override(action, strategizer, record):
@@ -205,6 +237,10 @@ class BuiltInGestureRegistry:
                 extension_threshold=p["finger_angle"],
                 pending_frames=p["click_pending"],
                 ending_frames=p["ending"],
+                screen_interaction_sensitivity=p["screen_interaction_sensitivity"],
+                camera_side_deadzone=p["camera_side_deadzone"],
+                camera_top_deadzone=p["camera_top_deadzone"],
+                camera_bottom_deadzone=p["camera_bottom_deadzone"],
                 pose_template=record.pose_template,
                 matcher_config=record.matcher_config,
             )
@@ -220,6 +256,10 @@ class BuiltInGestureRegistry:
                 extension_threshold=p["finger_angle"],
                 pending_frames=record.rule_override.pending_frames,
                 ending_frames=record.rule_override.ending_frames,
+                screen_interaction_sensitivity=p["screen_interaction_sensitivity"],
+                camera_side_deadzone=p["camera_side_deadzone"],
+                camera_top_deadzone=p["camera_top_deadzone"],
+                camera_bottom_deadzone=p["camera_bottom_deadzone"],
                 rule_override=record.rule_override,
             )
 
@@ -525,8 +565,8 @@ class BuiltInGestureRegistry:
                 display_name="Mouse Move",
                 mode_label="Mouse",
                 conflict_group="mouse",
-                hand="right",
-                default_description="Move the cursor while holding the mouse-move pose.",
+                hand="dominant",
+                default_description="Move the cursor while holding the mouse-move pose with your dominant hand.",
                 preview_pose_template=preview_templates["mouse_move"],
                 saved_pose_template=templates["mouse_move"],
                 default_rule_factory=mouse_move_rule_defaults,
@@ -540,8 +580,8 @@ class BuiltInGestureRegistry:
                 display_name="Left Click",
                 mode_label="Mouse",
                 conflict_group="mouse",
-                hand="right",
-                default_description="Single click on pose enter, hold to trigger one additional click.",
+                hand="dominant",
+                default_description="Single click on pose enter, hold to trigger one additional click with your dominant hand.",
                 preview_pose_template=preview_templates["left_click"],
                 saved_pose_template=templates["left_click"],
                 default_rule_factory=left_click_rule_defaults,
@@ -555,8 +595,8 @@ class BuiltInGestureRegistry:
                 display_name="Right Click",
                 mode_label="Mouse",
                 conflict_group="mouse",
-                hand="right",
-                default_description="Right click once per pose enter.",
+                hand="dominant",
+                default_description="Right click once per pose enter with your dominant hand.",
                 preview_pose_template=preview_templates["right_click"],
                 saved_pose_template=templates["right_click"],
                 default_rule_factory=right_click_rule_defaults,
@@ -570,8 +610,8 @@ class BuiltInGestureRegistry:
                 display_name="Scroll",
                 mode_label="Mouse",
                 conflict_group="mouse",
-                hand="right",
-                default_description="Scroll while holding the scroll pose and moving the hand vertically; mouse move is suppressed while active.",
+                hand="dominant",
+                default_description="Scroll while holding the scroll pose and moving your dominant hand vertically; mouse move is suppressed while active.",
                 preview_pose_template=preview_templates["scroll"],
                 saved_pose_template=templates["scroll"],
                 default_rule_factory=scroll_rule_defaults,
@@ -585,8 +625,8 @@ class BuiltInGestureRegistry:
                 display_name="Switch To Keyboard Mode",
                 mode_label="Mode Switching",
                 conflict_group="switch",
-                hand="right",
-                default_description="Enter keyboard mode from mouse mode, or exit hotkey mode with an open right hand.",
+                hand="dominant",
+                default_description="Enter keyboard mode from mouse mode, or exit hotkey mode with an open dominant hand.",
                 preview_pose_template=preview_templates["switch_to_keyboard"],
                 saved_pose_template=templates["switch_to_keyboard"],
                 default_rule_factory=switch_to_keyboard_rule_defaults,
@@ -600,8 +640,8 @@ class BuiltInGestureRegistry:
                 display_name="Switch To Hotkey Mode",
                 mode_label="Mode Switching",
                 conflict_group="switch",
-                hand="right",
-                default_description="Enter hotkey mode from mouse or keyboard mode with a right-hand OK sign.",
+                hand="dominant",
+                default_description="Enter hotkey mode from mouse or keyboard mode with a dominant-hand OK sign.",
                 preview_pose_template=preview_templates["switch_to_hotkey"],
                 saved_pose_template=templates["switch_to_hotkey"],
                 default_rule_factory=switch_to_hotkey_rule_defaults,
@@ -615,8 +655,8 @@ class BuiltInGestureRegistry:
                 display_name="Switch To Mouse Mode",
                 mode_label="Mode Switching",
                 conflict_group="switch",
-                hand="right",
-                default_description="Exit keyboard or hotkey mode back to mouse mode with a right-hand fist.",
+                hand="dominant",
+                default_description="Exit keyboard or hotkey mode back to mouse mode with a dominant-hand fist.",
                 preview_pose_template=preview_templates["switch_to_mouse"],
                 saved_pose_template=templates["switch_to_mouse"],
                 default_rule_factory=switch_to_mouse_rule_defaults,

@@ -32,6 +32,10 @@ class LeftClickGesture(SnapshotGestureRecognizer):
         ending_frames,
         double_click_hold_time=0.55,
         drag_deadzone_px=32,
+        camera_side_deadzone=0.0,
+        camera_top_deadzone=0.0,
+        camera_bottom_deadzone=0.0,
+        screen_interaction_sensitivity=1.0,
     ):
         """
         Args:
@@ -55,6 +59,10 @@ class LeftClickGesture(SnapshotGestureRecognizer):
         self.double_click_hold_time = max(0.05, float(double_click_hold_time))
         self.drag_deadzone_px = max(4, int(drag_deadzone_px))
         self.double_click_stationary_threshold_px = max(4.0, float(self.drag_deadzone_px) * 0.5)
+        self.camera_side_deadzone = max(0.0, float(camera_side_deadzone))
+        self.camera_top_deadzone = max(0.0, float(camera_top_deadzone))
+        self.camera_bottom_deadzone = max(0.0, float(camera_bottom_deadzone))
+        self.screen_interaction_sensitivity = max(1.0, float(screen_interaction_sensitivity))
         self.suppresses_lower_priorities_while_active = True
 
         self.gesture_start_time = None
@@ -63,6 +71,15 @@ class LeftClickGesture(SnapshotGestureRecognizer):
         self.drag_active = False
         self.gesture_completed = False
 
+    def _clicks_follow_cursor(self):
+        probe = getattr(self.action, "cursor_move_smoothing_enabled", None)
+        if not callable(probe):
+            return False
+        try:
+            return bool(probe())
+        except Exception:
+            return False
+
     def detect_gesture(self, hands_data: HandsData):
         """
         Detect if thumb and middle finger are pinched.
@@ -70,11 +87,11 @@ class LeftClickGesture(SnapshotGestureRecognizer):
         Returns:
             tuple: (detected, (screen_x, screen_y))
         """
-        if not hands_data.wrist.has_right or not hands_data.camera.has_right:
+        if not hands_data.wrist.has_dominant or not hands_data.camera.has_dominant:
             return False, None
 
-        hand_wrist = hands_data.wrist.right
-        hand_camera = hands_data.camera.right
+        hand_wrist = hands_data.wrist.dominant
+        hand_camera = hands_data.camera.dominant
 
         thumb_tip = hand_wrist.thumb.tip
         middle_tip = hand_wrist.middle.tip
@@ -94,7 +111,15 @@ class LeftClickGesture(SnapshotGestureRecognizer):
         if index_tip is None:
             return False, None
 
-        screen_x, screen_y = camera_to_screen(index_tip, self.screen_width, self.screen_height)
+        screen_x, screen_y = camera_to_screen(
+            index_tip,
+            self.screen_width,
+            self.screen_height,
+            side_deadzone=self.camera_side_deadzone,
+            top_deadzone=self.camera_top_deadzone,
+            bottom_deadzone=self.camera_bottom_deadzone,
+            sensitivity=self.screen_interaction_sensitivity,
+        )
         return True, (screen_x, screen_y)
 
     def update(self, hands_data: HandsData, frame_capture_ts_ns=None):
@@ -156,7 +181,10 @@ class LeftClickGesture(SnapshotGestureRecognizer):
                 and hold_duration >= self.double_click_hold_time
                 and displacement <= self.double_click_stationary_threshold_px
             ):
-                self.action.double_click(*current_position)
+                if self._clicks_follow_cursor():
+                    self.action.double_click()
+                else:
+                    self.action.double_click(*current_position)
                 self.gesture_completed = True
                 action_executed = True
                 note = "Double click triggered"
@@ -199,13 +227,16 @@ class LeftClickGesture(SnapshotGestureRecognizer):
         """Perform single click."""
         if data is not None:
             screen_x, screen_y = data
-            self.action.left_click(screen_x, screen_y)
+            if self._clicks_follow_cursor():
+                self.action.left_click()
+            else:
+                self.action.left_click(screen_x, screen_y)
 
     def _begin_drag(self, current_position):
         self.drag_active = True
         self.gesture_completed = True
         self.action.hold_left_click()
-        if self.click_position is not None:
+        if self.click_position is not None and not self._clicks_follow_cursor():
             self.action.move_cursor(*self.click_position)
         if current_position is not None and current_position != self.click_position:
             self.action.move_cursor(*current_position)

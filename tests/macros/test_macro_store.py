@@ -6,6 +6,7 @@ from backend.gesture_remap.builtins import BuiltInGestureRegistry
 from backend.gesture_remap.pose_templates import PoseMatcherConfig, build_pose_template
 from backend.gesture_remap.rule_overrides import GestureRuleOverride, POINT_OVERRIDE_KIND, RULE_OVERRIDE_KIND
 from backend.macros.macro_models import (
+    DOMINANT_TRIGGER_HAND,
     MacroPointTrigger,
     MacroRecord,
     MacroRuleTrigger,
@@ -88,7 +89,7 @@ class MacroStoreTests(unittest.TestCase):
             self.assertIsNotNone(loaded)
             self.assertTrue(loaded.is_rule_trigger)
             self.assertTrue(loaded.rule_trigger.is_pose_trigger)
-            self.assertEqual(loaded.rule_trigger.hand, "right")
+            self.assertEqual(loaded.rule_trigger.hand, DOMINANT_TRIGGER_HAND)
             self.assertEqual(loaded.shortcut_keys, ["left_ctrl", "c"])
 
     def test_point_macro_round_trip_and_delete(self):
@@ -156,6 +157,7 @@ class MacroStoreTests(unittest.TestCase):
             loaded = reloaded.get(record.id)
             self.assertIsNotNone(loaded)
             self.assertTrue(loaded.rule_trigger.is_swipe_trigger)
+            self.assertEqual(loaded.rule_trigger.hand, DOMINANT_TRIGGER_HAND)
             self.assertEqual(loaded.rule_trigger.swipe_config.direction, "left")
             self.assertEqual(loaded.shortcut_keys, ["left_cmd", "left_shift", "4"])
 
@@ -187,7 +189,6 @@ class MacroStoreTests(unittest.TestCase):
                 BuiltInGestureRegistry,
                 macro_id=None,
                 mode="mouse",
-                hand="right",
                 pose_template=built_in.saved_pose_template,
                 matcher_config=PoseMatcherConfig(),
             )
@@ -204,7 +205,7 @@ class MacroStoreTests(unittest.TestCase):
             )
             existing = MacroRecord.build_new(
                 name="Existing Macro",
-                mode="hotkey",
+                mode="keyboard",
                 trigger_kind=POINT_OVERRIDE_KIND,
                 point_trigger=MacroPointTrigger(
                     hand="left",
@@ -221,8 +222,7 @@ class MacroStoreTests(unittest.TestCase):
             other_record, comparison = store.validate_point_trigger(
                 BuiltInGestureRegistry,
                 macro_id=None,
-                mode="hotkey",
-                hand="left",
+                mode="keyboard",
                 pose_template=template,
                 matcher_config=PoseMatcherConfig(),
             )

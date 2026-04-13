@@ -55,13 +55,12 @@ class ScrollGesture(ContinuousGestureRecognizer):
         """
         self._frame_count += 1
 
-        # Use right hand for mouse control
-        if not hands_data.wrist.has_right or not hands_data.camera.has_right:
+        if not hands_data.wrist.has_dominant or not hands_data.camera.has_dominant:
             self._last_y_position = None
             return False, None
 
-        hand_wrist = hands_data.wrist.right
-        hand_camera = hands_data.camera.right
+        hand_wrist = hands_data.wrist.dominant
+        hand_camera = hands_data.camera.dominant
 
         if not is_finger_extended(hand_wrist.index, threshold=self.extension_threshold):
             self._last_y_position = None

@@ -31,7 +31,7 @@ class HandTracker(QThread):
         strategizer,
         action,
         model_path=resource(r"backend/models/hand_landmarker.task"),
-        num_hands=2,
+        num_hands=1,
         config=None,
     ):
         """
@@ -48,7 +48,7 @@ class HandTracker(QThread):
         self.strategizer = strategizer
         self.action = action
         self.model_path = model_path
-        self.num_hands = num_hands
+        self.num_hands = max(1, int(num_hands))
         self.config = config
 
         # Camera configuration (set when tracking starts)
@@ -92,7 +92,8 @@ class HandTracker(QThread):
         self.camera_warmup_frames = int(config.get('camera_warmup_frames', 8)) if config else 8
         self.camera_readback_log = bool(config.get('camera_readback_log', True)) if config else True
         self.capture_latest_frame_only = bool(config.get('capture_latest_frame_only', True)) if config else True
-        self.right_hand_only_processing = bool(config.get('right_hand_only_processing', False)) if config else False
+        raw_dominant_hand = str(config.get('dominant_hand', 'right')) if config else 'right'
+        self.dominant_hand = 'left' if raw_dominant_hand.strip().lower() == 'left' else 'right'
 
         # Runtime state
         self.landmarker = None
@@ -109,7 +110,7 @@ class HandTracker(QThread):
         self._processed_frame_seq = 0
         self._capture_error_count = 0
         self._dynamic_exposure_frame_counter = 0
-        self._empty_hands_data = HandsData({}, {})
+        self._empty_hands_data = HandsData({}, {}, dominant_hand=self.dominant_hand)
 
         # Timestamp monotonicity for detect_for_video
         self._last_video_timestamp_ms = 0
@@ -661,13 +662,13 @@ class HandTracker(QThread):
                     hands_data_start_ns = time.perf_counter_ns()
                     hands_data = HandsData.from_detection_result(
                         detection_result,
-                        right_hand_only=self.right_hand_only_processing,
+                        dominant_hand=self.dominant_hand,
                     )
                     hands_data_end_ns = time.perf_counter_ns()
                     hands_data_ms = (hands_data_end_ns - hands_data_start_ns) / 1_000_000.0
 
                     should_strategize = True
-                    if self.right_hand_only_processing and not hands_data.wrist.has_right:
+                    if not hands_data.wrist.has_dominant:
                         hands_data = self._empty_hands_data
                         should_strategize = False
 

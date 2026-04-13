@@ -123,6 +123,7 @@ class Action:
             int(initial_global[0] - self.screen_origin_x),
             int(initial_global[1] - self.screen_origin_y),
         )
+        self._cursor_move_smoothing = 0.0
         self._move_generation_lock = threading.Lock()
         self._move_generation = 0
 
@@ -248,6 +249,18 @@ class Action:
             self._last_cursor_local = (int(local_x), int(local_y))
             self._last_cursor_global = (int(global_x), int(global_y))
 
+    def configure_cursor_move_smoothing(self, smoothing: float = 0.0):
+        with self._cursor_lock:
+            try:
+                smoothing_value = float(smoothing)
+            except (TypeError, ValueError):
+                smoothing_value = 0.0
+            self._cursor_move_smoothing = max(0.0, min(0.85, smoothing_value))
+
+    def cursor_move_smoothing_enabled(self):
+        with self._cursor_lock:
+            return self._cursor_move_smoothing > 1e-6
+
     def _current_cursor_snapshot(self):
         with self._cursor_lock:
             return {
@@ -310,6 +323,18 @@ class Action:
         clamped_x = max(bx, min(int(x), bx + bw - 1))
         clamped_y = max(by, min(int(y), by + bh - 1))
         return clamped_x, clamped_y
+
+    def _smoothed_cursor_coordinates(self, x: int, y: int):
+        target_x, target_y = self._clamp_mouse_coordinates(int(x), int(y))
+        snapshot = self._current_cursor_snapshot()
+        with self._cursor_lock:
+            smoothing = float(getattr(self, "_cursor_move_smoothing", 0.0))
+        if smoothing <= 1e-6:
+            return target_x, target_y
+        response = max(0.0, min(1.0, 1.0 - smoothing))
+        smooth_x = float(snapshot["local_x"]) + ((float(target_x) - float(snapshot["local_x"])) * response)
+        smooth_y = float(snapshot["local_y"]) + ((float(target_y) - float(snapshot["local_y"])) * response)
+        return int(round(smooth_x)), int(round(smooth_y))
 
     def takeAction(self, action, data):
         """
@@ -488,10 +513,11 @@ class Action:
         """
         origin_ns = self._capture_latency_origin_for_action()
         generation = self._current_move_generation()
+        move_x, move_y = self._smoothed_cursor_coordinates(x, y)
         # Movement can be high-frequency; dropping stale updates avoids queue backpressure.
         self._enqueue_action(
             self._move_cursor_if_current,
-            (int(x), int(y), generation),
+            (int(move_x), int(move_y), generation),
             origin_ns=origin_ns,
             drop_if_full=True,
         )

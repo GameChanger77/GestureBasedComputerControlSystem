@@ -43,7 +43,7 @@ class GestureCustomEditorDialogTests(unittest.TestCase):
             store.set_rule_override(
                 "left_click",
                 GestureRuleOverride(
-                    conditions=[{"op": "hand_exists", "hand": "right"}],
+                    conditions=[{"op": "hand_exists", "hand": "dominant"}],
                     pending_frames=3,
                     ending_frames=2,
                 ),

@@ -32,6 +32,17 @@ class _ActionStub:
         self.pending_latency.append(ts)
 
 
+class _CursorSmoothingActionStub(_ActionStub):
+    def left_click(self, x=None, y=None):
+        self.left_clicks.append((x, y))
+
+    def double_click(self, x=None, y=None):
+        self.double_clicks.append((x, y))
+
+    def cursor_move_smoothing_enabled(self):
+        return True
+
+
 class _ScriptedLeftClickGesture(LeftClickGesture):
     def __init__(self, action, responses, **kwargs):
         super().__init__(action, **kwargs)
@@ -146,6 +157,46 @@ class LeftClickRuntimeTests(unittest.TestCase):
         self.assertEqual(action.left_button_down, 1)
         self.assertEqual(action.left_button_up, 1)
         self.assertEqual(action.moves, [(100, 200), (150, 240), (180, 260)])
+
+    def test_click_and_double_click_follow_current_cursor_when_pointer_smoothing_is_enabled(self):
+        action = _CursorSmoothingActionStub()
+        gesture = _ScriptedLeftClickGesture(
+            action,
+            responses=[
+                (True, (100, 200)),
+                (True, (100, 200)),
+                (False, None),
+                (False, None),
+                (True, (300, 400)),
+                (True, (300, 400)),
+                (True, (300, 400)),
+                (False, None),
+                (False, None),
+            ],
+            screen_width=1920,
+            screen_height=1080,
+            priority=10,
+            pinch_threshold=0.3,
+            extension_threshold=155.0,
+            pending_frames=1,
+            ending_frames=1,
+            double_click_hold_time=0.5,
+            drag_deadzone_px=24,
+        )
+
+        with patch("backend.gestures.mouse_mode.LeftClickGesture.time.time", side_effect=[100.0, 100.1, 200.0, 200.7]):
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=1))
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=2))
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=3))
+            self.assertTrue(gesture.update(object(), frame_capture_ts_ns=4))
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=5))
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=6))
+            self.assertTrue(gesture.update(object(), frame_capture_ts_ns=7))
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=8))
+            self.assertFalse(gesture.update(object(), frame_capture_ts_ns=9))
+
+        self.assertEqual(action.left_clicks, [(None, None)])
+        self.assertEqual(action.double_clicks, [(None, None)])
 
 
 if __name__ == "__main__":

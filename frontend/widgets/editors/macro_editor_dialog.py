@@ -30,6 +30,7 @@ from backend.gesture_remap.rule_overrides import (
     RULE_OVERRIDE_KIND,
 )
 from backend.macros.macro_models import (
+    DOMINANT_TRIGGER_HAND,
     MacroPointTrigger,
     MacroRecord,
     MacroRuleTrigger,
@@ -451,7 +452,7 @@ class MacroSwipeTriggerEditorWidget(QWidget):
         validation_error = None
         if can_save:
             try:
-                self.build_trigger("right")
+                self.build_trigger(DOMINANT_TRIGGER_HAND)
             except Exception as exc:
                 can_save = False
                 validation_error = str(exc)
@@ -604,12 +605,6 @@ class MacroTriggerEditorWidget(QWidget):
             else self._context.preview_pose_template
         )
         self._create_ui(config_source, initial_point_template, rule_trigger)
-        initial_hand = (
-            point_trigger.hand
-            if point_trigger is not None
-            else (rule_trigger.hand if rule_trigger is not None else "right")
-        )
-        self.hand_combo.setCurrentIndex(max(0, self.hand_combo.findData(initial_hand)))
         initial_kind = RULE_OVERRIDE_KIND if rule_trigger is not None else POINT_OVERRIDE_KIND if point_trigger is not None else RULE_OVERRIDE_KIND
         self._set_selected_kind(initial_kind)
 
@@ -621,7 +616,7 @@ class MacroTriggerEditorWidget(QWidget):
         return RULE_OVERRIDE_KIND if self.rule_button.isChecked() else POINT_OVERRIDE_KIND
 
     def build_trigger(self):
-        hand = str(self.hand_combo.currentData())
+        hand = DOMINANT_TRIGGER_HAND
         if self.selected_kind() == RULE_OVERRIDE_KIND:
             return self.rule_editor.build_trigger(hand)
         result_template = self.point_editor.build_result_template()
@@ -642,7 +637,7 @@ class MacroTriggerEditorWidget(QWidget):
         root.setSpacing(10)
 
         summary = QLabel(
-            "Choose one standalone trigger for this shortcut. Rule-based and 3D hand model triggers are mutually exclusive."
+            "Choose one standalone trigger for this shortcut. Rule-based and 3D hand model triggers are mutually exclusive, and the trigger always uses the configured dominant hand."
         )
         summary.setWordWrap(True)
         set_label_tone(summary, "muted")
@@ -651,14 +646,6 @@ class MacroTriggerEditorWidget(QWidget):
         trigger_row = QHBoxLayout()
         trigger_row.setContentsMargins(0, 0, 0, 0)
         trigger_row.setSpacing(10)
-        trigger_row.addWidget(QLabel("Trigger Hand"))
-        self.hand_combo = QComboBox()
-        self.hand_combo.addItem("Right", "right")
-        self.hand_combo.addItem("Left", "left")
-        self.hand_combo.addItem("Either", "either")
-        self.hand_combo.currentIndexChanged.connect(self._refresh_can_save)
-        self.hand_combo.currentIndexChanged.connect(lambda *_args: self.refresh_validation())
-        trigger_row.addWidget(self.hand_combo)
 
         self.rule_button = QPushButton("Rule-Based")
         self.rule_button.setCheckable(True)
@@ -794,7 +781,6 @@ class MacroEditorDialog(QDialog):
                 lambda candidate, matcher_config: validate_point_trigger_callback(
                     macro_id=self.existing_record.id if self.existing_record else None,
                     mode=str(self.mode_combo.currentData()),
-                    hand=str(self.trigger_editor.hand_combo.currentData()),
                     candidate_template=candidate,
                     matcher_config=matcher_config,
                 )

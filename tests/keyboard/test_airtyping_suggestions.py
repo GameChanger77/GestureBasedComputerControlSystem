@@ -192,7 +192,7 @@ class AirTypingSuggestionTests(unittest.TestCase):
 
         with patch.object(
             self.gesture,
-            "_right_hand_matches_keyboard_exit_pose",
+            "_dominant_hand_matches_keyboard_exit_pose",
             return_value=True,
         ):
             self.gesture.update(

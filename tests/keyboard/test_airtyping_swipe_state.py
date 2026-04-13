@@ -4,6 +4,7 @@ import numpy as np
 
 from backend.HandsData import HandsData
 from backend.gestures.keyboard_mode.AirTypingGesture import AirTypingGesture
+from backend.gestures.keyboard_mode.KeyboardSurfaceBase import HandFrame
 
 
 class _FakeAction:
@@ -745,6 +746,56 @@ class AirTypingSwipeStateTests(unittest.TestCase):
         self.gesture.update(_make_hands_data(right_present=True, right_pinch=True, right_index_x=0.5))
         self.gesture.update(_make_hands_data(right_present=True, right_pinch=False, right_index_x=0.5))
         self.assertEqual(self.gesture._active_modifiers, {"ctrl", "alt"})
+
+    def test_screen_interaction_sensitivity_affects_hover_point_and_suggestion_targeting(self):
+        self.gesture.flip_x_for_mapping = False
+        self.gesture.screen_interaction_sensitivity = 2.0
+        hands_data = _make_hands_data(
+            right_present=True,
+            right_pinch=False,
+            right_index_x=0.60,
+            right_index_y=0.60,
+        )
+
+        self.gesture._suggestion_chips = [
+            {
+                "index": 0,
+                "x": 0.66,
+                "y": 0.66,
+                "w": 0.10,
+                "h": 0.10,
+                "text": "help",
+            }
+        ]
+
+        self.assertEqual(self.gesture._current_dominant_suggestion_index(hands_data), 0)
+
+        self.gesture.update(hands_data)
+        overlay = self.gesture.get_overlay_data()
+        self.assertAlmostEqual(overlay["hover_point"]["x"], 0.70, places=3)
+        self.assertAlmostEqual(overlay["hover_point"]["y"], 0.70, places=3)
+
+    def test_screen_interaction_sensitivity_affects_swipe_samples_and_slot_tracing(self):
+        self.gesture.flip_x_for_mapping = False
+        self.gesture.screen_interaction_sensitivity = 2.0
+        self.gesture._dominant_frame_for_swipe = HandFrame(0.0, 0.0, 1.0, 1.0)
+        self.gesture._map_tip_to_slot = lambda side, tip, frame: (
+            {"id": "right"} if tip[0] > 0.65 else {"id": "left"}
+        )
+
+        self.gesture._capture_swipe_sample(
+            _make_hands_data(
+                right_present=True,
+                right_pinch=True,
+                right_index_x=0.60,
+                right_index_y=0.60,
+            )
+        )
+
+        self.assertEqual(len(self.gesture._swipe_points), 1)
+        self.assertAlmostEqual(self.gesture._swipe_points[0][0], 0.70, places=5)
+        self.assertAlmostEqual(self.gesture._swipe_points[0][1], 0.70, places=5)
+        self.assertEqual(self.gesture._swipe_trace_slots, ["right"])
 
     def test_swipe_points_continue_when_right_hand_crosses_center(self):
         start = _make_hands_data(

@@ -5,7 +5,7 @@ from backend.gestures.GestureUtils import are_fingers_pinched, is_finger_extende
 
 class HotkeyModeEntryGesture(SnapshotGestureRecognizer):
     """
-    Switch from MOUSE or KEYBOARD mode to HOTKEY mode when the right hand forms an OK sign.
+    Switch from MOUSE or KEYBOARD mode to HOTKEY mode when the dominant hand forms an OK sign.
     """
 
     def __init__(
@@ -44,10 +44,10 @@ class HotkeyModeEntryGesture(SnapshotGestureRecognizer):
         if self.strategizer.current_mode.value not in ("mouse", "keyboard"):
             return False, None
 
-        if not hands_data.wrist.has_right:
+        if not hands_data.wrist.has_dominant:
             return False, None
 
-        return self._is_ok_sign(hands_data.wrist.right), None
+        return self._is_ok_sign(hands_data.wrist.dominant), None
 
     def execute_action(self, data):
         from backend.Strategizer import ControlMode

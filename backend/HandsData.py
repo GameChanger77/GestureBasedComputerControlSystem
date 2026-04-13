@@ -20,6 +20,11 @@ class HandsData:
             cls._smoother = LandmarkSmoother()
         return cls._smoother
 
+    @staticmethod
+    def _normalize_dominant_hand(dominant_hand):
+        normalized = str(dominant_hand or "right").strip().lower()
+        return "left" if normalized == "left" else "right"
+
     class FingerTips:
         """Container for fingertip positions with dot notation access"""
 
@@ -112,11 +117,12 @@ class HandsData:
             return finger.tip if finger else None
 
     class CoordinateSpace:
-        def __init__(self, hands_dict):
+        def __init__(self, hands_dict, dominant_hand="right"):
             """
             Args:
                 hands_dict: Dict like {'Left': np.ndarray(21,3), 'Right': np.ndarray(21,3)}
             """
+            self._dominant_attr = HandsData._normalize_dominant_hand(dominant_hand)
             self.left = HandsData.Hand(hands_dict.get('Left'))
             self.right = HandsData.Hand(hands_dict.get('Right'))
 
@@ -130,17 +136,39 @@ class HandsData:
             """Check if right hand is detected"""
             return self.right.exists
 
-    def __init__(self, wrist_dict, camera_dict):
+        @property
+        def dominant(self):
+            """Return the configured dominant hand for this coordinate space."""
+            return getattr(self, self._dominant_attr)
+
+        @property
+        def has_dominant(self):
+            """Check if the configured dominant hand is detected."""
+            return self.dominant.exists
+
+        def get(self, hand_label):
+            """Resolve a hand by logical label."""
+            normalized = str(hand_label or "").strip().lower()
+            if normalized == "left":
+                return self.left
+            if normalized == "right":
+                return self.right
+            if normalized == "dominant":
+                return self.dominant
+            return None
+
+    def __init__(self, wrist_dict, camera_dict, dominant_hand="right"):
         """
         Args:
             wrist_dict: Wrist-relative normalized hand data
             camera_dict: Camera-relative hand data
         """
-        self.wrist = self.CoordinateSpace(wrist_dict)
-        self.camera = self.CoordinateSpace(camera_dict)
+        self.dominant_hand = self._normalize_dominant_hand(dominant_hand)
+        self.wrist = self.CoordinateSpace(wrist_dict, dominant_hand=self.dominant_hand)
+        self.camera = self.CoordinateSpace(camera_dict, dominant_hand=self.dominant_hand)
 
     @classmethod
-    def from_detection_result(cls, detection_result, right_hand_only=False):
+    def from_detection_result(cls, detection_result, dominant_hand="right"):
         """
         Factory method to create HandsData from MediaPipe detection result.
 
@@ -152,6 +180,7 @@ class HandsData:
 
         Args:
             detection_result: MediaPipe hand detection result
+            dominant_hand: Configured dominant hand ("left" or "right")
 
         Returns:
             HandsData: Fully processed hand data with smoothed coordinates
@@ -159,18 +188,18 @@ class HandsData:
         smoother = cls._get_smoother()
         camera_data = {}
         wrist_data = {}
+        dominant_hand = cls._normalize_dominant_hand(dominant_hand)
+        dominant_label = "Left" if dominant_hand == "left" else "Right"
 
         # Process each detected hand
         if detection_result.hand_landmarks and detection_result.handedness:
             for hand_landmarks, handedness in zip(detection_result.hand_landmarks, detection_result.handedness):
                 hand_label = handedness[0].category_name
 
-                if right_hand_only:
-                    if hand_label != 'Right':
-                        continue
-                    # One right hand is enough for control path.
-                    if 'Right' in camera_data:
-                        continue
+                if hand_label != dominant_label:
+                    continue
+                if dominant_label in camera_data:
+                    continue
 
                 # Extract to a contiguous (21, 3) array with minimal intermediate allocations.
                 raw_array = np.fromiter(
@@ -198,8 +227,8 @@ class HandsData:
                 camera_data[hand_label] = smoothed_array
                 wrist_data[hand_label] = normalized_array
 
-                if right_hand_only and hand_label == 'Right':
+                if hand_label == dominant_label:
                     break
 
         # Return final HandsData
-        return cls(wrist_data, camera_data)
+        return cls(wrist_data, camera_data, dominant_hand=dominant_hand)
