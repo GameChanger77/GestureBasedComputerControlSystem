@@ -12,6 +12,9 @@ def get_screen_geometry():
 
     screen = QGuiApplication.primaryScreen()
     if screen:
+        # Use Qt's virtual desktop geometry as the app-wide cursor space.
+        # This keeps cursor movement, tutorial hit-testing, and overlays in the
+        # same logical coordinate system across scaled multi-monitor setups.
         geometry = screen.virtualGeometry()
         return geometry.x(), geometry.y(), geometry.width(), geometry.height()
 

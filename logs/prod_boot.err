@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "C:\Users\ItzBluecool\Documents\School\ISU\Classes\Fall 2025\SE 4910\gesture-control\sdmay26-10\main.py", line 155, in <module>
+    main()
+  File "C:\Users\ItzBluecool\Documents\School\ISU\Classes\Fall 2025\SE 4910\gesture-control\sdmay26-10\main.py", line 120, in main
+    components = component_factory()
+                 ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ItzBluecool\Documents\School\ISU\Classes\Fall 2025\SE 4910\gesture-control\sdmay26-10\main.py", line 114, in <lambda>
+    component_factory = lambda: create_backend_components(
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ItzBluecool\Documents\School\ISU\Classes\Fall 2025\SE 4910\gesture-control\sdmay26-10\main.py", line 54, in create_backend_components
+    from backend.HandTracker import HandTracker
+  File "C:\Users\ItzBluecool\Documents\School\ISU\Classes\Fall 2025\SE 4910\gesture-control\sdmay26-10\backend\HandTracker.py", line 2, in <module>
+    import mediapipe as mp
+ModuleNotFoundError: No module named 'mediapipe'

@@ -142,6 +142,33 @@ class TutorialDialogTests(unittest.TestCase):
         self.assertEqual(dialog.continue_button.cursor().shape(), Qt.PointingHandCursor)
         dialog.close()
 
+    def test_global_event_hits_widget_uses_qt_global_coordinates(self):
+        dialog = TutorialDialog(
+            QWidget(),
+            main_window=_FakeMainWindow(),
+            action=_FakeAction(),
+            strategizer=_FakeStrategizer(),
+            ui_mode="prod",
+        )
+        dialog.show()
+        self._app.processEvents()
+
+        target = dialog._target_frame
+        target_global = target.mapToGlobal(target.rect().center())
+        self.assertTrue(
+            dialog._global_event_hits_widget(
+                {"global_x": target_global.x(), "global_y": target_global.y()},
+                target,
+            )
+        )
+        self.assertFalse(
+            dialog._global_event_hits_widget(
+                {"global_x": target_global.x() + 500, "global_y": target_global.y() + 500},
+                target,
+            )
+        )
+        dialog.close()
+
     def test_continue_button_uses_lock_then_unlock_icon(self):
         dialog = TutorialDialog(
             QWidget(),
