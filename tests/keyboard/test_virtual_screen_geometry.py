@@ -57,6 +57,30 @@ class _FakeKeyboard:
     pass
 
 
+class _FakeQtPoint:
+    def __init__(self, x, y):
+        self._x = int(x)
+        self._y = int(y)
+
+    def x(self):
+        return self._x
+
+    def y(self):
+        return self._y
+
+
+class _FakeQtCursor:
+    position = (0, 0)
+
+    @classmethod
+    def pos(cls):
+        return _FakeQtPoint(*cls.position)
+
+    @classmethod
+    def setPos(cls, x, y):
+        cls.position = (int(x), int(y))
+
+
 class VirtualScreenGeometryTests(unittest.TestCase):
     def test_get_screen_geometry_uses_virtual_desktop_bounds(self):
         fake_screen = _FakeScreen(_FakeGeometry(-1920, 0, 3840, 1080))
@@ -73,8 +97,54 @@ class VirtualScreenGeometryTests(unittest.TestCase):
             screen_origin_y=120,
         )
         try:
-            action._set_mouse_position(3839, 0)
-            self.assertEqual(mouse.position, (1919, 120))
+            _FakeQtCursor.position = (0, 0)
+            with patch.object(Action, "_qt_cursor_api", return_value=_FakeQtCursor):
+                action._set_mouse_position(3839, 0)
+            self.assertIsNone(mouse.position)
+            self.assertEqual(_FakeQtCursor.position, (1919, 120))
+        finally:
+            action.close()
+
+    def test_live_cursor_snapshot_prefers_qt_global_coordinates(self):
+        mouse = _FakeMouse()
+        action = Action(
+            mouse=mouse,
+            keyboard_test=_FakeKeyboard(),
+            screen_origin_x=10,
+            screen_origin_y=20,
+        )
+        try:
+            mouse.position = (900, 1200)
+            _FakeQtCursor.position = (150, 260)
+            with patch.object(Action, "_qt_cursor_api", return_value=_FakeQtCursor):
+                snapshot = action._live_cursor_snapshot()
+
+            self.assertEqual(snapshot["global_x"], 150)
+            self.assertEqual(snapshot["global_y"], 260)
+            self.assertEqual(snapshot["local_x"], 140)
+            self.assertEqual(snapshot["local_y"], 240)
+        finally:
+            action.close()
+
+    def test_cursor_position_falls_back_to_mouse_when_qt_cursor_unavailable(self):
+        mouse = _FakeMouse()
+        action = Action(
+            mouse=mouse,
+            keyboard_test=_FakeKeyboard(),
+            screen_origin_x=-100,
+            screen_origin_y=75,
+        )
+        try:
+            mouse.position = (300, 400)
+            with patch.object(Action, "_qt_cursor_api", return_value=None):
+                snapshot = action._live_cursor_snapshot()
+                action._set_mouse_position(450, 250)
+
+            self.assertEqual(snapshot["global_x"], 300)
+            self.assertEqual(snapshot["global_y"], 400)
+            self.assertEqual(snapshot["local_x"], 400)
+            self.assertEqual(snapshot["local_y"], 325)
+            self.assertEqual(mouse.position, (350, 325))
         finally:
             action.close()
 

@@ -223,6 +223,31 @@ class MainWindowTrackerStateTests(unittest.TestCase):
         self.assertEqual(fake_overlay.show_calls, [("Hotkey", 512, 288)])
         window.close()
 
+    def test_shortcut_feedback_overlay_preserves_action_qt_global_coordinates(self):
+        window = _TestableMainWindow(ui_mode="prod")
+        fake_overlay = _FakeShortcutFeedbackOverlay()
+        window.shortcut_feedback_overlay = fake_overlay
+        window.action = SimpleNamespace(
+            get_action_events=lambda after_sequence=0: (
+                []
+                if after_sequence >= 12
+                else [
+                    {
+                        "sequence": 12,
+                        "type": "tap_hotkey",
+                        "shortcut_label": "Ctrl + K",
+                        "global_x": 1536,
+                        "global_y": 864,
+                    }
+                ]
+            )
+        )
+
+        window._refresh_shortcut_feedback_overlay()
+
+        self.assertEqual(fake_overlay.show_calls, [("Ctrl + K", 1536, 864)])
+        window.close()
+
     def test_tracking_stopped_hides_shortcut_feedback_overlay(self):
         window = _TestableMainWindow(ui_mode="prod")
         current_tracker = _FakeTracker()

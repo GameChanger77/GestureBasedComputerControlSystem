@@ -23,6 +23,7 @@ installers/mac/installer_out/
 plans/
 /videos
 /tools
+/logs/
 gesture_config.json
 gesture_overrides.json
 gesture_macros.json

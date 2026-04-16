@@ -68,6 +68,9 @@ class KeyboardTest(ABC):
 
 
 class Action:
+    _qt_cursor_cls = None
+    _qt_gui_app_cls = None
+    _qt_cursor_import_failed = False
 
     def __init__(
             self,
@@ -235,7 +238,54 @@ class Action:
             event.update(payload)
             self._recent_action_events.append(event)
 
+    @classmethod
+    def _qt_cursor_api(cls):
+        if not cls._qt_cursor_import_failed and (cls._qt_cursor_cls is None or cls._qt_gui_app_cls is None):
+            try:
+                from PySide6.QtGui import QCursor, QGuiApplication
+            except Exception:
+                cls._qt_cursor_import_failed = True
+                return None
+            cls._qt_cursor_cls = QCursor
+            cls._qt_gui_app_cls = QGuiApplication
+
+        if cls._qt_gui_app_cls is None or cls._qt_gui_app_cls.instance() is None:
+            return None
+
+        return cls._qt_cursor_cls
+
+    def _qt_cursor_position(self):
+        cursor_cls = self._qt_cursor_api()
+        if cursor_cls is None:
+            return None
+
+        try:
+            point = cursor_cls.pos()
+            return int(point.x()), int(point.y())
+        except Exception:
+            return None
+
+    def _set_qt_cursor_position(self, global_x: int, global_y: int) -> bool:
+        cursor_cls = self._qt_cursor_api()
+        if cursor_cls is None:
+            return False
+
+        try:
+            cursor_cls.setPos(int(global_x), int(global_y))
+            return True
+        except Exception:
+            return False
+
+    def _set_global_cursor_position(self, global_x: int, global_y: int):
+        if self._set_qt_cursor_position(global_x, global_y):
+            return
+        self.mouse.position = (int(global_x), int(global_y))
+
     def _safe_mouse_position(self):
+        qt_position = self._qt_cursor_position()
+        if qt_position is not None:
+            return qt_position
+
         try:
             position = tuple(self.mouse.position)
             if len(position) == 2:
@@ -271,12 +321,22 @@ class Action:
             }
 
     def _live_cursor_snapshot(self):
+        qt_position = self._qt_cursor_position()
+        if qt_position is not None:
+            global_x, global_y = qt_position
+        else:
+            try:
+                position = tuple(self.mouse.position)
+                if len(position) != 2:
+                    raise ValueError("Mouse position must contain x and y")
+                global_x = int(position[0])
+                global_y = int(position[1])
+            except Exception:
+                return self._current_cursor_snapshot()
+
         try:
-            position = tuple(self.mouse.position)
-            if len(position) != 2:
-                raise ValueError("Mouse position must contain x and y")
-            global_x = int(position[0])
-            global_y = int(position[1])
+            global_x = int(global_x)
+            global_y = int(global_y)
         except Exception:
             return self._current_cursor_snapshot()
 
@@ -436,7 +496,7 @@ class Action:
         local_x, local_y = self._clamp_mouse_coordinates(int(x), int(y))
         global_x = self.screen_origin_x + local_x
         global_y = self.screen_origin_y + local_y
-        self.mouse.position = (global_x, global_y)
+        self._set_global_cursor_position(global_x, global_y)
         self._update_committed_cursor_position(local_x, local_y, global_x, global_y)
         self._record_action_event(
             "cursor_move",
@@ -495,8 +555,8 @@ class Action:
         )
 
     def _scroll_impl(self, delta_x, delta_y):
-        position = self._current_cursor_snapshot()
-        self.mouse.position = (int(position["global_x"]), int(position["global_y"]))
+        position = self._live_cursor_snapshot()
+        self._set_global_cursor_position(int(position["global_x"]), int(position["global_y"]))
         self.mouse.scroll(int(delta_x), int(delta_y))
         self._record_action_event(
             "scroll",
