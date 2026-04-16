@@ -1,4 +1,0 @@
-INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
-WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-W0000 00:00:1775147442.265711   49132 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
-W0000 00:00:1775147442.290144   53204 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
