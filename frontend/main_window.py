@@ -136,6 +136,7 @@ class MainWindow(QMainWindow):
         self.preview_hint_card = None
         self.prod_header_card = None
         self.tutorial_dialog = None
+        self._tutorial_session_state = None
 
         # Start/Stop tracking button
         self.start_button = QPushButton("Start Tracking")
@@ -312,6 +313,13 @@ class MainWindow(QMainWindow):
         set_button_role(self.back_button, "toolbar")
         set_button_icon(self.back_button, "back")
         header.addWidget(self.back_button, 0)
+
+        self.settings_tutorial_button = QPushButton("Tutorial")
+        self.settings_tutorial_button.setMinimumHeight(40)
+        self.settings_tutorial_button.clicked.connect(self.open_tutorial)
+        set_button_role(self.settings_tutorial_button, "toolbar")
+        set_button_icon(self.settings_tutorial_button, "tutorial")
+        header.addWidget(self.settings_tutorial_button, 0)
 
         copy = QVBoxLayout()
         copy.setContentsMargins(0, 0, 0, 0)
@@ -630,6 +638,7 @@ class MainWindow(QMainWindow):
             strategizer=self.strategizer,
             ui_mode=self.ui_mode,
             production_keyboard_window=self.production_keyboard_window,
+            session_state=self._tutorial_session_state,
         )
         try:
             self.tutorial_dialog.finished.connect(self._on_tutorial_closed)
@@ -637,7 +646,12 @@ class MainWindow(QMainWindow):
             pass
         self.tutorial_dialog.exec()
 
-    def _on_tutorial_closed(self, _result):
+    def _on_tutorial_closed(self, result):
+        if self.tutorial_dialog is not None:
+            if result:
+                self._tutorial_session_state = None
+            else:
+                self._tutorial_session_state = self.tutorial_dialog.session_state()
         self.tutorial_dialog = None
 
     @Slot()

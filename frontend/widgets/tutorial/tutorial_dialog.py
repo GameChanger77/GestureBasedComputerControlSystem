@@ -50,6 +50,7 @@ class TutorialDialog(QDialog):
         strategizer,
         ui_mode: str,
         production_keyboard_window=None,
+        session_state: dict | None = None,
     ):
         super().__init__(parent)
         self.main_window = main_window
@@ -57,7 +58,13 @@ class TutorialDialog(QDialog):
         self.strategizer = strategizer
         self.ui_mode = str(ui_mode)
         self.production_keyboard_window = production_keyboard_window
-        self._controller = TutorialSessionController(build_tutorial_steps(), self.ui_mode)
+        restored_state = session_state or {}
+        self._controller = TutorialSessionController(
+            build_tutorial_steps(),
+            self.ui_mode,
+            current_index=restored_state.get("current_index", 0),
+            completed_step_ids=set(restored_state.get("completed_step_ids", [])),
+        )
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(100)
         self._poll_timer.timeout.connect(self._poll_runtime_state)
@@ -198,6 +205,12 @@ class TutorialDialog(QDialog):
     def _begin_session(self):
         self._poll_timer.start()
         self._ensure_tracking_ready()
+
+    def session_state(self) -> dict:
+        return {
+            "current_index": self._controller.current_index,
+            "completed_step_ids": sorted(self._controller.completed_step_ids),
+        }
 
     def _ensure_tracking_ready(self):
         if self._tracking_start_attempted:
