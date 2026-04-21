@@ -380,6 +380,14 @@ class TutorialDialog(QDialog):
         if self._controller.go_back():
             self._configure_current_step(reset_events=True)
 
+    def _open_settings(self):
+        if self.main_window is not None and hasattr(self.main_window, "show_settings_page"):
+            try:
+                self.main_window.show_settings_page()
+            except Exception:
+                pass
+        self.reject()
+
     def _go_next(self):
         self._stop_completion_feedback(reset_confetti=True)
         if self._controller.current_index == self._controller.total_steps - 1 and self._controller.can_continue():
