@@ -176,6 +176,12 @@ class TutorialDialog(QDialog):
         set_label_role(self.footer_status_label, "status-detail")
         footer.addWidget(self.footer_status_label, 1)
 
+         self.settings_button = QPushButton("Settings")
+        set_button_role(self.settings_button, "secondary")
+        set_button_icon(self.settings_button, "settings")
+        self.settings_button.clicked.connect(self._open_settings)
+        footer.addWidget(self.settings_button, 0)
+
         self.back_button = QPushButton("Back")
         set_button_role(self.back_button, "secondary")
         set_button_icon(self.back_button, "back")
