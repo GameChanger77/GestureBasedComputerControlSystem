@@ -4,20 +4,11 @@ from frontend.widgets.tutorial.tutorial_steps import TutorialStepDefinition
 
 
 class TutorialSessionController:
-    def __init__(
-        self,
-        steps: list[TutorialStepDefinition],
-        ui_mode: str,
-        *,
-        current_index: int = 0,
-        completed_step_ids: set[str] | None = None,
-    ):
+    def __init__(self, steps: list[TutorialStepDefinition], ui_mode: str):
         self._steps = list(steps)
         self.ui_mode = str(ui_mode)
-        max_index = max(0, len(self._steps) - 1)
-        self._current_index = max(0, min(int(current_index), max_index))
-        valid_step_ids = {step.step_id for step in self._steps}
-        self._completed_step_ids: set[str] = set(completed_step_ids or set()) & valid_step_ids
+        self._current_index = 0
+        self._completed_step_ids: set[str] = set()
 
     @property
     def total_steps(self) -> int:
@@ -30,10 +21,6 @@ class TutorialSessionController:
     @property
     def current_index(self) -> int:
         return self._current_index
-
-    @property
-    def completed_step_ids(self) -> set[str]:
-        return set(self._completed_step_ids)
 
     def reset(self):
         self._current_index = 0

@@ -50,7 +50,6 @@ class TutorialDialog(QDialog):
         strategizer,
         ui_mode: str,
         production_keyboard_window=None,
-        session_state: dict | None = None,
     ):
         super().__init__(parent)
         self.main_window = main_window
@@ -58,13 +57,7 @@ class TutorialDialog(QDialog):
         self.strategizer = strategizer
         self.ui_mode = str(ui_mode)
         self.production_keyboard_window = production_keyboard_window
-        restored_state = session_state or {}
-        self._controller = TutorialSessionController(
-            build_tutorial_steps(),
-            self.ui_mode,
-            current_index=restored_state.get("current_index", 0),
-            completed_step_ids=set(restored_state.get("completed_step_ids", [])),
-        )
+        self._controller = TutorialSessionController(build_tutorial_steps(), self.ui_mode)
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(100)
         self._poll_timer.timeout.connect(self._poll_runtime_state)
@@ -183,12 +176,6 @@ class TutorialDialog(QDialog):
         set_label_role(self.footer_status_label, "status-detail")
         footer.addWidget(self.footer_status_label, 1)
 
-        self.settings_button = QPushButton("Settings")
-        set_button_role(self.settings_button, "secondary")
-        set_button_icon(self.settings_button, "settings")
-        self.settings_button.clicked.connect(self._open_settings)
-        footer.addWidget(self.settings_button, 0)
-
         self.back_button = QPushButton("Back")
         set_button_role(self.back_button, "secondary")
         set_button_icon(self.back_button, "back")
@@ -205,12 +192,6 @@ class TutorialDialog(QDialog):
     def _begin_session(self):
         self._poll_timer.start()
         self._ensure_tracking_ready()
-
-    def session_state(self) -> dict:
-        return {
-            "current_index": self._controller.current_index,
-            "completed_step_ids": sorted(self._controller.completed_step_ids),
-        }
 
     def _ensure_tracking_ready(self):
         if self._tracking_start_attempted:
@@ -392,14 +373,6 @@ class TutorialDialog(QDialog):
         self._stop_completion_feedback(reset_confetti=True)
         if self._controller.go_back():
             self._configure_current_step(reset_events=True)
-
-    def _open_settings(self):
-        if self.main_window is not None and hasattr(self.main_window, "show_settings_page"):
-            try:
-                self.main_window.show_settings_page()
-            except Exception:
-                pass
-        self.reject()
 
     def _go_next(self):
         self._stop_completion_feedback(reset_confetti=True)
