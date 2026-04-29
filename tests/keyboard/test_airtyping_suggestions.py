@@ -127,6 +127,25 @@ class AirTypingSuggestionTests(unittest.TestCase):
         self.assertEqual(len(texts), 3)
         self.assertEqual(texts, ["help", "held", "helm"])
 
+    def test_suggestion_chips_stay_even_within_narrow_normalized_keyboard_bounds(self):
+        self.gesture._overlay_bounds = (0.10, 0.40, 0.225, 0.55)
+        self.gesture._suggestion_words = ["uh", "utterly", "ugly"]
+
+        self.gesture._layout_suggestion_chips()
+
+        chips = self.gesture._suggestion_chips
+        self.assertEqual(len(chips), 3)
+        widths = [float(chip["w"]) for chip in chips]
+        gaps = [
+            float(chips[idx + 1]["x"]) - (float(chips[idx]["x"]) + float(chips[idx]["w"]))
+            for idx in range(2)
+        ]
+        self.assertAlmostEqual(float(chips[0]["x"]), 0.10)
+        self.assertLessEqual(float(chips[-1]["x"]) + float(chips[-1]["w"]), 0.225)
+        self.assertAlmostEqual(widths[0], widths[1])
+        self.assertAlmostEqual(widths[1], widths[2])
+        self.assertAlmostEqual(gaps[0], gaps[1])
+
     def test_suggestion_tap_replaces_last_swipe_word(self):
         self._commit_swipe_word()
         overlay = self.gesture.get_overlay_data()

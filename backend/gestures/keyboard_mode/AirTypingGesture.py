@@ -327,14 +327,14 @@ class AirTypingGesture(GestureRecognizer):
             return
 
         min_x, min_y, max_x, max_y = self._overlay_bounds
-        keyboard_w = max(0.05, max_x - min_x)
-        keyboard_h = max(0.05, max_y - min_y)
+        keyboard_w = max(1e-6, max_x - min_x)
+        keyboard_h = max(1e-6, max_y - min_y)
         chip_gap = keyboard_w * 0.012
         chip_count = self._SUGGESTION_CHIP_COUNT
         chip_h = self._clamp(keyboard_h * 0.16, keyboard_h * 0.10, keyboard_h * 0.22)
         chip_y = max(0.004, min_y - chip_h - (keyboard_h * 0.03))
         total_gap = chip_gap * (chip_count - 1)
-        chip_w = max(0.05, (keyboard_w - total_gap) / chip_count)
+        chip_w = max(1e-6, (keyboard_w - total_gap) / chip_count)
 
         for idx in range(chip_count):
             label = self._suggestion_words[idx] if idx < len(self._suggestion_words) else ""
