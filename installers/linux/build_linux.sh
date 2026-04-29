@@ -48,6 +48,9 @@ fi
 echo "== pyinstaller -> dist/${APP_NAME} =="
 # NOTE: Linux uses SRC:DEST for --add-data (colon)
 uv run pyinstaller --noconfirm --name "${APP_NAME}" "${ENTRY}" \
+  --collect-submodules pynput \
+  --collect-submodules evdev \
+  --collect-submodules Xlib \
   --add-data "backend:backend" \
   --add-data "frontend:frontend"
 
@@ -122,8 +125,10 @@ chmod +x "${APPIMAGETOOL_PATH}"
 
 echo "== ensure FUSE is installed for AppImage =="
 if ! ldconfig -p 2>/dev/null | grep -q "libfuse.so.2"; then
-  echo "Must instal libfuse2. Run:"
+  echo "Must install FUSE 2. Run one of:"
   echo "apt-get update"
+  echo "apt-get install -y libfuse2t64"
+  echo "# or, on distributions that still use the old package name:"
   echo "apt-get install -y libfuse2"
   exit 1
 else
